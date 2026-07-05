@@ -207,7 +207,6 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
     invariant_violations = []
     action_counts = {}
     episode_resets = 0
-    unexpected_delta_steps = 0
     ended_early = None
     # Shared mutable context for stateful invariants (exploit-hunter semantics:
     # one ctx per episode — cleared whenever the game resets mid-run).
@@ -355,7 +354,6 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         surprises = _unexpected_delta_fields(delta, f"{expected} {reasoning}")
         if surprises:
             log_entry["unexpected_deltas"] = surprises
-            unexpected_delta_steps += 1
         if is_novel:
             log_entry["is_novel"] = True
             novel_behaviors.append(log_entry)
@@ -388,6 +386,20 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
 
     # ── Per-run summary: deltas from the post-reset baseline (plus banked segments) ──
     real_actions = [e for e in action_log if e.get("action_type") != "episode_reset"]
+
+    # Surprise metric noise floor: a key that changes on nearly every step (harness step
+    # counters, per-action fuel ticks) carries no signal — only count steps whose
+    # surprises include a NON-ubiquitous key. Per-step raw records stay in the log.
+    key_freq = {}
+    for e in real_actions:
+        for k in (e.get("state_delta") or {}):
+            key_freq[k] = key_freq.get(k, 0) + 1
+    ubiquitous = {k for k, n in key_freq.items() if n >= 0.8 * max(1, len(real_actions))}
+    unexpected_delta_steps = sum(
+        1 for e in real_actions
+        if any(k not in ubiquitous for k in (e.get("unexpected_deltas") or {}))
+    )
+
     summary = {
         "actions_taken": len(real_actions),
         "duration_seconds": duration,
