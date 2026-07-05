@@ -1,0 +1,119 @@
+project:
+  name: "SpacerQuest"
+  version: "4.0.0"
+
+engine:
+  type: "simulation"
+  entry: "node --import tsx sim_bridge.ts"
+
+# 20-element observation vector mapping the full game state
+observation_space:
+  type: "box"
+  shape: 20
+  mappings:
+    # Character state
+    - path: "character.credits"
+      min: 0
+      max: 1000000
+    - path: "character.score"
+      min: 0
+      max: 10000
+    - path: "character.rank_index"
+      min: 0
+      max: 8
+    - path: "character.current_system"
+      min: 1
+      max: 28
+    - path: "character.trip_count"
+      min: 0
+      max: 10
+    - path: "character.battles_won"
+      min: 0
+      max: 10000
+    - path: "character.cargo_pods"
+      min: 0
+      max: 200
+    - path: "character.destination"
+      min: 0
+      max: 28
+    # Ship state
+    - path: "ship.fuel"
+      min: 0
+      max: 20000
+    - path: "ship.hull_strength"
+      min: 0
+      max: 199
+    - path: "ship.hull_condition"
+      min: 0
+      max: 9
+    - path: "ship.drive_strength"
+      min: 0
+      max: 199
+    - path: "ship.weapon_strength"
+      min: 0
+      max: 199
+    - path: "ship.shield_strength"
+      min: 0
+      max: 199
+    - path: "ship.has_cloaker"
+      min: 0
+      max: 1
+    - path: "ship.has_auto_repair"
+      min: 0
+      max: 1
+    # Flags
+    - path: "character.is_lost"
+      min: 0
+      max: 1
+    - path: "character.in_combat"
+      min: 0
+      max: 1
+    - path: "character.bank_balance"
+      min: 0
+      max: 1000000
+    # Episode tracking
+    - path: "turn_number"
+      min: 0
+      max: 100
+
+# 15 discrete actions covering all major game loops
+action_space:
+  type: "discrete"
+  size: 15
+  actions:
+    0: { name: "wait" }
+    1: { name: "navigate_cheap_fuel" }
+    2: { name: "navigate_cargo_dest" }
+    3: { name: "navigate_neighbor" }
+    4: { name: "buy_fuel" }
+    5: { name: "sell_fuel" }
+    6: { name: "accept_cargo" }
+    7: { name: "deliver_cargo" }
+    8: { name: "upgrade_cheapest" }
+    9: { name: "repair_ship" }
+    10: { name: "combat_attack" }
+    11: { name: "combat_retreat" }
+    12: { name: "pub_gamble_wheel" }
+    13: { name: "bank_deposit" }
+    14: { name: "end_turn" }
+
+# Reward profiles — declarative formulas evaluated against state
+reward_profiles:
+  explorer:
+    formula: "(state.character.score * 0.1) + (state.character.credits * 0.001) + (state.character.battles_won * 2) - (state.turn_number * 0.5)"
+    win_bonus: 1000
+    loss_penalty: 200
+  trader:
+    formula: "(state.character.credits * 0.005) + (state.character.cargo_pods * 10) - (state.turn_number * 0.3)"
+    win_bonus: 500
+    loss_penalty: 100
+
+evaluation:
+  victory_key: "player_won"
+
+training:
+  seed: 42  # Reproducibility seed (change per experiment)
+  algorithm: "PPO"
+  total_timesteps: 200000
+  parallel_envs: 1
+  checkpoint_freq: 20000

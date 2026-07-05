@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UGT Browser Example — Credit Clicker</title>
+    <style>
+        body { font-family: monospace; background: #1a1a2e; color: #e0e0e0; padding: 2rem; }
+        h1 { color: #16e0bd; }
+        .state { background: #16213e; padding: 1rem; border-radius: 8px; margin: 1rem 0; }
+        .label { color: #888; }
+    </style>
+</head>
+<body>
+    <h1>🎮 UGT Browser Example — Credit Clicker</h1>
+    <div class="state">
+        <p><span class="label">Credits:</span> <span id="credits">100</span></p>
+        <p><span class="label">AP:</span> <span id="ap">10</span></p>
+        <p><span class="label">Turns:</span> <span id="turns">0</span></p>
+        <p><span class="label">Status:</span> <span id="status">Playing</span></p>
+    </div>
+
+    <script>
+    // === Game State ===
+    let gameState = { credits: 100, ap: 10, turns_elapsed: 0, victory: false, defeat: false };
+
+    function updateUI() {
+        document.getElementById('credits').textContent = gameState.credits;
+        document.getElementById('ap').textContent = gameState.ap;
+        document.getElementById('turns').textContent = gameState.turns_elapsed;
+        document.getElementById('status').textContent =
+            gameState.victory ? '🏆 Victory!' : gameState.defeat ? '💀 Defeat' : 'Playing';
+    }
+
+    // === UGT Interface Hooks ===
+
+    // Returns current game state as a flat JSON object
+    window.__GET_STATE__ = function() {
+        return {
+            player: { credits: gameState.credits, ap: gameState.ap },
+            enemy: { credits: 0 },
+            turns_elapsed: gameState.turns_elapsed
+        };
+    };
+
+    // Executes an action and returns structured response (matching subprocess protocol)
+    window.__SEND_ACTION__ = function(actionId) {
+        // Action space: 0=wait, 1=invest_credits, 2=end_turn
+        if (actionId === 0) {
+            // wait — do nothing
+        } else if (actionId === 1) {
+            // invest credits
+            if (gameState.ap >= 2) {
+                gameState.credits += 50;
+                gameState.ap -= 2;
+            }
+        } else if (actionId === 2) {
+            // end turn
+            gameState.turns_elapsed += 1;
+            gameState.ap = 10;
+        }
+
+        // Check endgame
+        if (gameState.credits >= 500) {
+            gameState.victory = true;
+        } else if (gameState.turns_elapsed >= 20) {
+            gameState.defeat = true;
+        }
+
+        const terminated = gameState.victory || gameState.defeat;
+
+        updateUI();
+
+        // Return structured response (preferred UGT protocol)
+        return {
+            state: window.__GET_STATE__(),
+            terminated: terminated,
+            truncated: false,
+            info: {}
+        };
+    };
+
+    // Soft reset — avoids full page reload (~15s → ~20ms)
+    window.__RESET_GAME__ = function() {
+        gameState = { credits: 100, ap: 10, turns_elapsed: 0, victory: false, defeat: false };
+        updateUI();
+    };
+
+    updateUI();
+    </script>
+</body>
+</html>

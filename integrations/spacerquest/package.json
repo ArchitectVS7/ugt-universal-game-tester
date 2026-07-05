@@ -1,0 +1,29 @@
+{
+  "name": "spacerquest-ugt-integration",
+  "version": "1.0.0",
+  "description": "UGT integration harness for SpacerQuest — bridge, config, and feature map",
+  "type": "module",
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "dotenv": "^17.3.1"
+  },
+  "devDependencies": {
+    "prisma": "^5.22.0",
+    "tsx": "^4.11.0",
+    "typescript": "^5.4.5"
+  },
+  "prisma": {
+    "schema": "../../../SpacerQuest/spacerquest-web/prisma/schema.prisma"
+  },
+  "scripts": {
+    "setup": "prisma generate && node -e \"const fs=require('fs');try{fs.unlinkSync('node_modules/.prisma')}catch(e){};fs.symlinkSync('../../../SpacerQuest/spacerquest-web/node_modules/.prisma','node_modules/.prisma');console.log('Prisma symlink OK')\"",
+    "smoke-test": "ugt smoke-test --config ugt.config.yaml --profile trader",
+    "verify": "ugt verify --config ugt.config.yaml --feature-map feature-map.yaml",
+    "train:trader": "ugt train --config ugt.config.yaml --profile trader",
+    "train:explorer": "ugt train --config ugt.config.yaml --profile explorer",
+    "train:warrior": "ugt train --config ugt.config.yaml --profile warrior",
+    "train:balanced": "ugt train --config ugt.config.yaml --profile balanced",
+    "train:speedrun": "ugt train --config ugt.config.yaml --profile speedrun",
+    "eval:all": "bash run-eval.sh"
+  }
+}

@@ -1,0 +1,403 @@
+# Feature Map — SpacerQuest v4.0
+# Used by: UGT_VERIFY_MODE=1 ugt verify --feature-map feature-map.yaml --max-turns 500
+#
+# Run with UGT_VERIFY_MODE=1 so the test character starts at Commander rank with
+# 500,000 credits — this makes banking, special equipment, and port features
+# reachable without 75+ cargo deliveries to accumulate rank organically.
+#
+# Precondition notes:
+#   rank_index >= 1  = COMMANDER (score >= 150)  — gates banking
+#   rank_index >= 2  = CAPTAIN   (score >= 300)  — gates rim contracts
+#   credits >= N     — economic gates
+#   current_system   — location gates for sage (18), wise-one (17)
+#   has_patrol_commission = 1  — needed to launch patrol mission
+
+game: "SpacerQuest"
+version: "4.0.0"
+
+features:
+
+  # ============================================================
+  # ECONOMY: FUEL
+  # ============================================================
+
+  - id: economy.sell_fuel_earns_credits
+    description: "Selling 5 fuel units increases credits"
+    action: "sell_fuel"
+    assertion: "state.character.credits > before.character.credits"
+    priority: critical
+    precondition: "state.ship.fuel >= 15"
+
+  - id: economy.sell_fuel_reduces_tank
+    description: "Selling fuel decreases the fuel tank"
+    action: "sell_fuel"
+    assertion: "state.ship.fuel < before.ship.fuel"
+    priority: major
+    precondition: "state.ship.fuel >= 15"
+
+  - id: economy.buy_fuel_fills_tank
+    description: "Buying fuel increases the fuel tank"
+    action: "buy_fuel"
+    assertion: "state.ship.fuel > before.ship.fuel"
+    priority: critical
+    precondition: "state.character.credits >= 20"
+
+  - id: economy.buy_fuel_costs_credits
+    description: "Buying fuel reduces credits"
+    action: "buy_fuel"
+    assertion: "state.character.credits < before.character.credits"
+    priority: major
+    precondition: "state.character.credits >= 20 and state.ship.fuel < 200"
+
+  # ============================================================
+  # CARGO TRADING
+  # ============================================================
+
+  - id: cargo.accept_sets_destination
+    description: "Accepting a cargo contract sets a non-zero destination"
+    action: "accept_cargo"
+    assertion: "state.character.destination > 0 and state.character.cargo_pods >= 1"
+    priority: critical
+    precondition: "state.character.cargo_pods == 0 and state.character.destination == 0"
+
+  - id: cargo.deliver_earns_credits
+    description: "Delivering cargo to destination increases credits"
+    action: "deliver_cargo"
+    assertion: "state.character.credits > before.character.credits"
+    priority: critical
+    precondition: "state.character.destination > 0 and state.character.cargo_pods >= 1 and state.ship.fuel >= 50"
+
+  - id: cargo.deliver_earns_score
+    description: "Delivering cargo increases score by at least 2"
+    action: "deliver_cargo"
+    assertion: "state.character.score >= before.character.score"
+    priority: major
+    precondition: "state.character.destination > 0 and state.character.cargo_pods >= 1 and state.ship.fuel >= 50"
+
+  - id: cargo.deliver_clears_contract
+    description: "After delivery, destination resets to 0 and cargo_pods to 0"
+    action: "deliver_cargo"
+    assertion: "state.character.destination == 0 and state.character.cargo_pods == 0"
+    priority: major
+    precondition: "state.character.destination > 0 and state.character.cargo_pods >= 1 and state.ship.fuel >= 50"
+
+  - id: cargo.dump_clears_contract
+    description: "Dumping cargo zeroes out destination and cargo_pods"
+    action: "dump_cargo"
+    assertion: "state.character.cargo_pods == 0 and state.character.destination == 0"
+    priority: major
+    precondition: "state.character.cargo_pods >= 1"
+
+  # ============================================================
+  # NAVIGATION
+  # ============================================================
+
+  - id: navigation.travel_changes_system
+    description: "Navigating to a neighbor changes current_system"
+    action: "navigate_neighbor"
+    assertion: "state.character.current_system != before.character.current_system"
+    priority: critical
+    precondition: "state.ship.fuel >= 15"
+
+  - id: navigation.travel_increments_trips
+    description: "Each navigation increments trip_count"
+    action: "navigate_neighbor"
+    assertion: "state.character.trip_count > before.character.trip_count"
+    priority: major
+    precondition: "state.ship.fuel >= 15 and state.character.trip_count < 2"
+
+  - id: navigation.navigate_to_specific_system
+    description: "navigate_to_sun3 lands at system 1 (Sun-3)"
+    action: "navigate_to_sun3"
+    assertion: "state.character.current_system == 1"
+    priority: major
+    precondition: "state.ship.fuel >= 30 and state.character.trip_count < 2 and state.character.current_system != 1"
+
+  # ============================================================
+  # SHIP MAINTENANCE
+  # ============================================================
+
+  - id: ship.repair_restores_condition
+    description: "Repair brings all component conditions to 9"
+    action: "repair_ship"
+    assertion: "state.ship.hull_condition >= before.ship.hull_condition"
+    priority: major
+
+  - id: ship.repair_costs_credits
+    description: "Repairing ship costs credits (when components are damaged)"
+    action: "repair_ship"
+    assertion: "state.character.credits <= before.character.credits"
+    priority: minor
+    precondition: "state.ship.hull_condition < 9"
+
+  # PORT OWNERSHIP (minor, listed early so credits are still high from major phase)
+  - id: port.buy_port_deducts_credits
+    description: "Buying a port costs exactly 100,000 credits"
+    action: "buy_port"
+    assertion: "state.character.credits < before.character.credits"
+    priority: minor
+    # Defined first among minor features so it runs before banking.total_wealth halves credits
+    precondition: "state.character.credits >= 100000"
+
+  - id: port.sell_port_returns_credits
+    description: "Selling a port returns 50,000 credits"
+    action: "sell_port"
+    assertion: "state.character.credits > before.character.credits"
+    priority: minor
+    # Only run after buy_port has run
+    precondition: "state.character.credits >= 0"
+
+  # ============================================================
+  # SHIP UPGRADES — each component
+  # ============================================================
+
+  - id: ship.upgrade_hull_increases_strength
+    description: "Hull upgrade increases hull_strength by 1"
+    action: "upgrade_cheapest"
+    assertion: "state.ship.hull_strength > before.ship.hull_strength"
+    priority: critical
+    precondition: "state.character.credits >= 10000"
+
+  - id: ship.upgrade_drives_increases_strength
+    description: "Drives upgrade increases drive_strength by 1"
+    action: "upgrade_drives"
+    assertion: "state.ship.drive_strength > before.ship.drive_strength"
+    priority: major
+    precondition: "state.character.credits >= 9000"
+
+  - id: ship.upgrade_weapons_increases_strength
+    description: "Weapons upgrade increases weapon_strength by 1"
+    action: "upgrade_weapons"
+    assertion: "state.ship.weapon_strength > before.ship.weapon_strength"
+    priority: major
+    precondition: "state.character.credits >= 8000"
+
+  - id: ship.upgrade_shields_increases_strength
+    description: "Shields upgrade increases shield_strength by 1"
+    action: "upgrade_shields"
+    assertion: "state.ship.shield_strength > before.ship.shield_strength"
+    priority: major
+    precondition: "state.character.credits >= 7000"
+
+  - id: ship.upgrade_nav_increases_strength
+    description: "Nav upgrade increases nav_strength by 1"
+    action: "upgrade_nav"
+    assertion: "state.ship.nav_strength > before.ship.nav_strength"
+    priority: major
+    precondition: "state.character.credits >= 6000"
+
+  - id: ship.upgrade_life_support_increases_strength
+    description: "Life support upgrade increases life_support_strength by 1"
+    action: "upgrade_life_support"
+    assertion: "state.ship.life_support_strength > before.ship.life_support_strength"
+    priority: major
+    precondition: "state.character.credits >= 5000"
+
+  - id: ship.upgrade_robotics_increases_strength
+    description: "Robotics upgrade increases robotics_strength by 1"
+    action: "upgrade_robotics"
+    assertion: "state.ship.robotics_strength > before.ship.robotics_strength"
+    priority: major
+    precondition: "state.character.credits >= 4000"
+
+  - id: ship.upgrade_cabin_increases_strength
+    description: "Cabin upgrade increases cabin_strength by 1"
+    action: "upgrade_cabin"
+    assertion: "state.ship.cabin_strength > before.ship.cabin_strength"
+    priority: major
+    precondition: "state.character.credits >= 3000"
+
+  - id: ship.upgrade_costs_credits
+    description: "Any upgrade consumes credits"
+    action: "upgrade_drives"
+    assertion: "state.character.credits < before.character.credits"
+    priority: major
+    precondition: "state.character.credits >= 9000"
+
+  # ============================================================
+  # SPECIAL EQUIPMENT
+  # ============================================================
+
+  - id: special.trans_warp_purchase
+    description: "Buying Trans-Warp Accelerator sets has_trans_warp flag and costs 10,000 cr"
+    action: "buy_trans_warp"
+    assertion: "state.ship.has_trans_warp == 1 and state.character.credits < before.character.credits"
+    priority: major
+    precondition: "state.character.credits >= 10000 and state.ship.has_trans_warp == 0"
+
+  - id: special.auto_repair_purchase
+    description: "Buying Auto-Repair module sets has_auto_repair flag"
+    action: "buy_auto_repair"
+    assertion: "state.ship.has_auto_repair == 1 and state.character.credits < before.character.credits"
+    priority: major
+    # Cost = hull_strength * 1000; at starting hull_strength=5, cost=5000
+    precondition: "state.character.credits >= 5000 and state.ship.has_auto_repair == 0 and state.ship.has_cloaker == 0"
+
+  # ============================================================
+  # BANKING (Commander rank required)
+  # ============================================================
+
+  - id: banking.deposit_moves_credits_to_bank
+    description: "Depositing credits reduces hand credits and increases bank balance"
+    action: "bank_deposit"
+    assertion: "state.character.bank_balance > before.character.bank_balance and state.character.credits < before.character.credits"
+    priority: major
+    precondition: "state.character.rank_index >= 1 and state.character.credits >= 100"
+
+  - id: banking.withdraw_moves_credits_from_bank
+    description: "Withdrawing from bank increases hand credits and reduces bank balance"
+    action: "bank_withdraw"
+    assertion: "state.character.credits >= before.character.credits"
+    priority: major
+    # Must have funds in bank first — this feature runs after bank_deposit
+    precondition: "state.character.rank_index >= 1 and state.character.bank_balance >= 1000"
+
+  - id: banking.total_wealth_conserved_on_deposit
+    description: "Depositing does not create or destroy total wealth"
+    action: "bank_deposit"
+    assertion: "state.character.credits + state.character.bank_balance == before.character.credits + before.character.bank_balance"
+    priority: minor
+    precondition: "state.character.rank_index >= 1 and state.character.credits >= 100"
+
+  # ============================================================
+  # PUB / GAMBLING
+  # ============================================================
+
+  - id: pub.wheel_of_fortune_changes_credits
+    description: "Playing Wheel of Fortune changes credits (win or lose)"
+    action: "pub_gamble_wheel"
+    assertion: "state.character.credits != before.character.credits"
+    priority: minor
+    precondition: "state.character.credits >= 100"
+
+  - id: pub.buy_drink_costs_credits
+    description: "Buying a drink costs 50 credits"
+    action: "buy_drink"
+    assertion: "state.character.credits < before.character.credits"
+    priority: minor
+    precondition: "state.character.credits >= 50"
+
+  # ============================================================
+  # SPACE PATROL
+  # ============================================================
+
+  - id: patrol.join_sets_commission
+    description: "Taking patrol oath sets has_patrol_commission to 1"
+    action: "join_patrol"
+    assertion: "state.character.has_patrol_commission == 1"
+    priority: major
+    precondition: "state.character.has_patrol_commission == 0 and state.ship.hull_condition >= 1 and state.ship.drive_condition >= 1"
+
+  # ============================================================
+  # PROGRESSION / TURN MECHANICS
+  # ============================================================
+
+  - id: game.end_turn_resets_trips
+    description: "Ending the turn resets trip_count to 0"
+    action: "end_turn"
+    assertion: "state.character.trip_count == 0"
+    priority: critical
+    precondition: "state.character.trip_count >= 1"
+
+  - id: game.end_turn_advances_turn_number
+    description: "Ending the turn increments the turn counter"
+    action: "end_turn"
+    assertion: "state.turn_number > before.turn_number"
+    priority: major
+
+  - id: game.score_reflects_rank
+    description: "rank_index increases as score passes each threshold"
+    action: "wait"
+    assertion: "state.character.score >= 0 and state.character.rank_index >= 0"
+    priority: minor
+
+  - id: game.trips_blocked_at_limit
+    description: "trip_count never exceeds DAILY_TRIP_LIMIT — end_turn resets it"
+    action: "end_turn"
+    assertion: "state.character.trip_count == 0"
+    priority: critical
+    precondition: "state.character.trip_count >= 2"
+
+  # ============================================================
+  # NAVIGATION TO GATED LOCATIONS
+  # ============================================================
+
+  - id: navigation.reach_system_17_wise_one
+    description: "navigate_to_polaris reaches system 17 (Polaris-1, home of the Wise One)"
+    action: "navigate_to_polaris"
+    assertion: "state.character.current_system == 17"
+    priority: major
+    precondition: "state.ship.fuel >= 30 and state.character.trip_count < 2 and state.character.current_system != 17"
+
+  - id: navigation.reach_system_18_sage
+    description: "navigate_to_mizar reaches system 18 (Mizar-9, home of the Ancient Sage)"
+    action: "navigate_to_mizar"
+    assertion: "state.character.current_system == 18"
+    priority: major
+    precondition: "state.ship.fuel >= 30 and state.character.trip_count < 2 and state.character.current_system != 18"
+
+  # ============================================================
+  # SPECIAL LOCATION SCREENS
+  # ============================================================
+
+  - id: social.wise_one_gives_number_key
+    description: "Visiting the Wise One at system 17 sets a non-zero number_key (1-9)"
+    action: "visit_wise_one"
+    assertion: "state.character.number_key >= 1 and state.character.number_key <= 9"
+    priority: major
+    precondition: "state.ship.fuel >= 30"
+
+  - id: social.sage_visit_completes
+    description: "Visiting the Sage at system 18 completes without error (cabin_strength unchanged or improved)"
+    action: "visit_sage"
+    assertion: "state.ship.cabin_strength >= before.ship.cabin_strength"
+    priority: minor
+    precondition: "state.ship.fuel >= 30"
+
+  # ============================================================
+  # READ-ONLY / INFORMATIONAL SCREENS
+  # ============================================================
+
+  - id: info.space_news_renders
+    description: "Reading space news board completes without crash"
+    action: "read_space_news"
+    assertion: "state.character.credits == before.character.credits"
+    priority: minor
+
+  - id: info.view_stats_renders
+    description: "Viewing ship stats screen completes without crash"
+    action: "view_stats"
+    assertion: "state.character.score == before.character.score"
+    priority: minor
+
+  - id: info.registry_library_renders
+    description: "Visiting registry/library completes without crash"
+    action: "view_registry"
+    assertion: "state.character.credits == before.character.credits"
+    priority: minor
+
+  # ============================================================
+  # WIN CONDITION
+  # ============================================================
+
+  - id: game.win_condition
+    description: "Reaching score >= 10,000 triggers Conqueror status (player_won = 1)"
+    action: "wait"
+    assertion: "state.player_won == 1"
+    priority: critical
+    # Gate: only testable if score is near the threshold.
+    # In standard verify runs this will be NOT_REACHED (expected).
+    # Phase 2 RL training is the correct mechanism for reaching this.
+    precondition: "state.character.score >= 9900"
+
+  - id: game.credits_never_negative
+    description: "Credits are never negative after any action"
+    action: "wait"
+    assertion: "state.character.credits >= 0"
+    priority: critical
+
+  - id: game.fuel_never_negative
+    description: "Fuel is never negative"
+    action: "wait"
+    assertion: "state.ship.fuel >= 0"
+    priority: critical

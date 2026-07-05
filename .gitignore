@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# UGT generated output
+models/
+logs/
+results/
+
+# Node (integration harnesses shell out to node). No trailing slash so this also
+# catches node_modules symlinks (e.g. examples/spacerquest/node_modules).
+node_modules
+
+# Virtual environments
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

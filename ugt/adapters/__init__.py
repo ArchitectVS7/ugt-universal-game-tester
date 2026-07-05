@@ -1,0 +1,1 @@
+# UGT Game Adapters Package

@@ -1,0 +1,113 @@
+[*] Loading PPO model from: ./models/ppo_trader_final.zip
+[*] Loaded VecNormalize obs stats from: ./models/ppo_trader_vecnormalize.pkl
+[*] Initializing environment for 50 evaluation episodes (seed=42)...
+[Episode 1/50] Win | Steps: 100 | Reward: 11472.00
+[Episode 2/50] Win | Steps: 118 | Reward: 15794.00
+[Episode 3/50] Win | Steps: 108 | Reward: 14124.00
+[Episode 4/50] Win | Steps: 113 | Reward: 13341.00
+[Episode 5/50] Win | Steps: 100 | Reward: 12707.00
+[Episode 6/50] Win | Steps: 100 | Reward: 13562.00
+[Episode 7/50] Win | Steps: 102 | Reward: 12825.00
+[Episode 8/50] Win | Steps: 103 | Reward: 13851.00
+[Episode 9/50] Win | Steps: 109 | Reward: 13684.00
+[Episode 10/50] Win | Steps: 100 | Reward: 10696.00
+[Episode 11/50] Win | Steps: 100 | Reward: 11995.00
+[Episode 12/50] Win | Steps: 101 | Reward: 12114.00
+[Episode 13/50] Win | Steps: 100 | Reward: 11977.00
+[Episode 14/50] Win | Steps: 100 | Reward: 12999.00
+[Episode 15/50] Win | Steps: 100 | Reward: 11847.00
+[Episode 16/50] Win | Steps: 115 | Reward: 14659.00
+[Episode 17/50] Win | Steps: 100 | Reward: 12450.00
+[Episode 18/50] Win | Steps: 100 | Reward: 11590.00
+[Episode 19/50] Win | Steps: 100 | Reward: 14102.00
+[Episode 20/50] Win | Steps: 100 | Reward: 12404.00
+[Episode 21/50] Win | Steps: 100 | Reward: 10361.00
+[Episode 22/50] Win | Steps: 121 | Reward: 16065.00
+[Episode 23/50] Win | Steps: 100 | Reward: 13109.00
+[Episode 24/50] Win | Steps: 103 | Reward: 13700.00
+[Episode 25/50] Win | Steps: 110 | Reward: 14564.00
+[Episode 26/50] Win | Steps: 101 | Reward: 13011.00
+[Episode 27/50] Win | Steps: 100 | Reward: 12055.00
+[Episode 28/50] Win | Steps: 107 | Reward: 13017.00
+[Episode 29/50] Win | Steps: 100 | Reward: 12807.00
+[Episode 30/50] Win | Steps: 100 | Reward: 10844.00
+[Episode 31/50] Win | Steps: 113 | Reward: 15018.00
+[Episode 32/50] Win | Steps: 100 | Reward: 11516.00
+[Episode 33/50] Win | Steps: 113 | Reward: 14804.00
+[Episode 34/50] Win | Steps: 100 | Reward: 11647.00
+[Episode 35/50] Win | Steps: 100 | Reward: 11876.00
+[Episode 36/50] Win | Steps: 113 | Reward: 14006.00
+[Episode 37/50] Win | Steps: 100 | Reward: 10363.00
+[Episode 38/50] Win | Steps: 100 | Reward: 10899.00
+[Episode 39/50] Win | Steps: 100 | Reward: 11847.00
+[Episode 40/50] Win | Steps: 100 | Reward: 11830.00
+[Episode 41/50] Win | Steps: 100 | Reward: 13559.00
+[Episode 42/50] Win | Steps: 100 | Reward: 12325.00
+[Episode 43/50] Win | Steps: 104 | Reward: 14002.00
+[Episode 44/50] Win | Steps: 100 | Reward: 11997.00
+[Episode 45/50] Win | Steps: 113 | Reward: 14989.00
+[Episode 46/50] Win | Steps: 100 | Reward: 11398.00
+[Episode 47/50] Win | Steps: 103 | Reward: 14204.00
+[Episode 48/50] Win | Steps: 105 | Reward: 12384.00
+[Episode 49/50] Win | Steps: 100 | Reward: 12791.00
+[Episode 50/50] Win | Steps: 100 | Reward: 11658.00
+
+[*] Running 50-episode random baseline for collapse detection...
+  [Baseline 1/50] Reward: -1599.40
+  [Baseline 2/50] Reward: -1598.50
+  [Baseline 3/50] Reward: 2994.00
+  [Baseline 4/50] Reward: 6198.00
+  [Baseline 5/50] Reward: -1598.50
+  [Baseline 6/50] Reward: -1600.00
+  [Baseline 7/50] Reward: -1598.50
+  [Baseline 8/50] Reward: -1599.00
+  [Baseline 9/50] Reward: 2755.00
+  [Baseline 10/50] Reward: -1598.20
+  [Baseline 11/50] Reward: 6686.00
+  [Baseline 12/50] Reward: 2613.00
+  [Baseline 13/50] Reward: 8465.00
+  [Baseline 14/50] Reward: -1598.50
+  [Baseline 15/50] Reward: 4411.00
+  [Baseline 16/50] Reward: -1598.50
+  [Baseline 17/50] Reward: 8052.00
+  [Baseline 18/50] Reward: 5245.00
+  [Baseline 19/50] Reward: -1598.50
+  [Baseline 20/50] Reward: 2614.00
+  [Baseline 21/50] Reward: 2816.50
+  [Baseline 22/50] Reward: 1718.00
+  [Baseline 23/50] Reward: -1598.60
+  [Baseline 24/50] Reward: -1598.50
+  [Baseline 25/50] Reward: -1598.50
+  [Baseline 26/50] Reward: -1598.50
+  [Baseline 27/50] Reward: -1598.50
+  [Baseline 28/50] Reward: 5864.00
+  [Baseline 29/50] Reward: 4343.00
+  [Baseline 30/50] Reward: -1598.60
+  [Baseline 31/50] Reward: 843.00
+  [Baseline 32/50] Reward: -1598.50
+  [Baseline 33/50] Reward: 6865.50
+  [Baseline 34/50] Reward: -1598.20
+  [Baseline 35/50] Reward: -1598.60
+  [Baseline 36/50] Reward: 3854.00
+  [Baseline 37/50] Reward: 246.00
+  [Baseline 38/50] Reward: 6383.00
+  [Baseline 39/50] Reward: -1598.50
+  [Baseline 40/50] Reward: 4404.00
+  [Baseline 41/50] Reward: 1852.00
+  [Baseline 42/50] Reward: 3345.00
+  [Baseline 43/50] Reward: -1598.50
+  [Baseline 44/50] Reward: -1598.50
+  [Baseline 45/50] Reward: -1598.50
+  [Baseline 46/50] Reward: -1598.50
+  [Baseline 47/50] Reward: 9343.00
+  [Baseline 48/50] Reward: -1598.50
+  [Baseline 49/50] Reward: -1598.50
+  [Baseline 50/50] Reward: -1598.50
+
+[+] Evaluation complete!
+[+] Win Rate: 100.00% (50/50)  CI: [0.9286, 1.0000]
+[+] Reward: mean=12816.78  std=1364.70  CI: [12451.43, 13169.36]
+[+] Action entropy (normalized): 0.5695
+[+] Random baseline: mean=1174.96  win_rate=46.00%
+[+] Action Distribution: {'accept_cargo': 2500, 'deliver_cargo': 883, 'navigate_cargo_dest': 1792}
+[+] Detailed report saved to: /Users/vs7/Dev/Games/_UGT Universal Game Tester/integrations/spacerquest/results/trader_eval_summary.json

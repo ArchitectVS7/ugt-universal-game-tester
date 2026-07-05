@@ -1,0 +1,122 @@
+[*] Loading PPO model from: ./models/ppo_trader_final.zip
+[*] Initializing environment for 50 evaluation episodes (seed=42)...
+[Episode 1/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 2/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 3/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 4/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 5/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 6/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 7/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 8/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 9/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 10/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 11/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 12/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 13/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 14/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 15/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 16/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 17/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 18/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 19/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 20/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 21/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 22/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 23/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 24/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 25/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 26/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 27/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 28/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 29/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 30/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 31/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 32/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 33/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 34/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 35/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 36/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 37/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 38/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 39/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 40/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 41/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 42/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 43/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 44/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 45/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 46/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 47/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 48/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 49/50] Loss | Steps: 1000 | Reward: -100.00
+[Episode 50/50] Loss | Steps: 1000 | Reward: -100.00
+
+[*] Running 50-episode random baseline for collapse detection...
+  [Baseline 1/50] Reward: -399.76
+  [Baseline 2/50] Reward: 1609.00
+  [Baseline 3/50] Reward: 2499.20
+  [Baseline 4/50] Reward: -399.68
+  [Baseline 5/50] Reward: 1833.00
+  [Baseline 6/50] Reward: -399.72
+  [Baseline 7/50] Reward: 1479.80
+  [Baseline 8/50] Reward: 2404.60
+  [Baseline 9/50] Reward: -399.70
+  [Baseline 10/50] Reward: -399.70
+  [Baseline 11/50] Reward: -399.70
+  [Baseline 12/50] Reward: 2031.94
+  [Baseline 13/50] Reward: 1136.60
+  [Baseline 14/50] Reward: -399.70
+  [Baseline 15/50] Reward: 1549.00
+  [Baseline 16/50] Reward: -399.70
+  [Baseline 17/50] Reward: -399.70
+  [Baseline 18/50] Reward: -399.70
+  [Baseline 19/50] Reward: -399.76
+  [Baseline 20/50] Reward: 1853.20
+  [Baseline 21/50] Reward: 1701.00
+  [Baseline 22/50] Reward: -399.70
+  [Baseline 23/50] Reward: -399.72
+  [Baseline 24/50] Reward: -399.70
+  [Baseline 25/50] Reward: -399.70
+  [Baseline 26/50] Reward: -399.70
+  [Baseline 27/50] Reward: -399.70
+  [Baseline 28/50] Reward: 2314.60
+  [Baseline 29/50] Reward: 1354.20
+  [Baseline 30/50] Reward: -399.70
+  [Baseline 31/50] Reward: -399.70
+  [Baseline 32/50] Reward: -399.66
+  [Baseline 33/50] Reward: -399.70
+  [Baseline 34/50] Reward: -399.70
+  [Baseline 35/50] Reward: -399.70
+  [Baseline 36/50] Reward: 2185.80
+  [Baseline 37/50] Reward: -399.64
+  [Baseline 38/50] Reward: 2154.20
+  [Baseline 39/50] Reward: 2384.80
+  [Baseline 40/50] Reward: 1004.60
+  [Baseline 41/50] Reward: -399.70
+  [Baseline 42/50] Reward: -399.70
+  [Baseline 43/50] Reward: 2236.50
+  [Baseline 44/50] Reward: 1872.30
+  [Baseline 45/50] Reward: 2215.50
+  [Baseline 46/50] Reward: 1930.20
+  [Baseline 47/50] Reward: 2707.00
+  [Baseline 48/50] Reward: -399.70
+  [Baseline 49/50] Reward: 1243.80
+  [Baseline 50/50] Reward: 2121.80
+
+=================================================================
+  !! COLLAPSE DETECTED — EVALUATION RESULT IS LIKELY INVALID !!
+  Reasons:
+    - zero_variance: reward std=0.0000 < 0.01 (50 episodes produced identical rewards)
+    - not_above_random: trained_mean=-100.00 <= threshold=693.64 (random_mean=660.61, margin=5% of |rand|)
+    - low_entropy: normalized_entropy=0.0000 < 0.2 (agent used only 1/6 actions)
+  The report will be prefixed INVALID_ and flagged in JSON.
+=================================================================
+
+
+[+] Evaluation complete!
+[+] Win Rate: 0.00% (0/50)  CI: [0.0000, 0.0714]
+[+] Reward: mean=-100.00  std=0.00  CI: [-100.00, -100.00]
+[+] Action entropy (normalized): 0.0000
+[+] Random baseline: mean=660.61  win_rate=46.00%
+[+] Action Distribution: {'navigate_cheap_fuel': 50000}
+[+] Detailed report saved to: /Users/vs7/Dev/Games/_UGT Universal Game Tester/integrations/spacerquest/results/INVALID_trader_eval_summary.json
