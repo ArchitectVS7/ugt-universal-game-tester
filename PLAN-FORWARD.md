@@ -89,6 +89,11 @@ live server entirely through `RealClientAdapter.step(action_id)` — resets, ste
 and re-drives the **trade loop** (accept→navigate→auto-deliver, credits up) AND a **real combat encounter**
 (resolves in <15 attacks, no soft-lock) end-to-end. **13/13 checks.** Regression: spike 7/7, smoke 8/8.
 
+**Phase 1 v1 status (2026-07-05):** exploit-hunter built (`ugt/core/exploit_hunter.py` +
+`integrations/spacerquest/run_exploit_hunter.py`). Run: **5 episodes × 40 steps = 200 steps**, all 11 subset
+actions exercised (accept 69 / navigate 22 / attack 34 / retreat 15 / buy_fuel 21 / upgrades 20 / …),
+**0 invariant violations, 0 crashes.** The game is robust on the checked invariants under random+heuristic play.
+
 **Findings (as of Phase 1 exploit-hunter, 2026-07-05):**
 - ~~battlesWon AND battlesLost both increment in one encounter (accounting bug)~~ **RETRACTED — NOT A BUG.** Focused
   repro (12 base-ship trips → 12 single losses; 1 upgraded trip → 1 clean win) shows each encounter records exactly
