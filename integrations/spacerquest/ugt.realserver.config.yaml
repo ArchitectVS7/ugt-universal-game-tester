@@ -121,6 +121,13 @@ observation_space:
 # ONLY the actions RealClientAdapter.ACTION_HANDLERS actually maps to the real game.
 # Anything else must stay unmapped (NotImplementedError by design — never fabricate).
 # Id 0 MUST remain "wait": the playtester's press_key path calls step(0) to refresh state.
+#
+# METHODOLOGY NOTES for reading campaign results (Gate B review, 2026-07-05):
+# - accept_cargo always picks manifest slot 1 and confirms — contract CHOICE is not part
+#   of the agent's strategy space. Metrics measure "loop economics under fixed contract
+#   choice", not full-strategy play.
+# - Combat rounds dominate the action budget (~9 attacks per encounter, every trip spawns
+#   one) — expect ~60-70% of actions to be combat_attack in a competent run.
 action_space:
   type: "discrete"
   size: 12

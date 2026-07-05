@@ -2,7 +2,9 @@
 
 > Every number below is sourced from the game code (constants.ts, auth.ts dev-setup,
 > economy.ts, docking.ts, upgrades.ts, end-turn.ts) — 2026-07-05. If the game contradicts
-> this guide, TRUST THE GAME and flag the mismatch with `potential_bug`.
+> this guide, TRUST THE GAME and flag the mismatch with `potential_bug`. Concrete rule:
+> if any number this guide states is contradicted by the game TWICE, you MUST file a
+> `potential_bug` describing guide-said vs game-did — that is part of your job.
 
 ## CRITICAL: The Profitable Loop (do this, in order)
 
@@ -14,8 +16,10 @@
    `destination == 0`; if `destination > 0` you already have one).
 3. `navigate_cargo_dest` — launches and arrives. An encounter fires EVERY trip
    (deterministic). If `in_combat == 1` after arriving: `combat_attack` repeatedly
-   until `in_combat == 0` (win pays loot ~500–3,000 cr). Use `combat_retreat` only
-   if `hull_condition <= 3` (retreat ALWAYS succeeds but pays nothing).
+   until `in_combat == 0`. Loot is enemy-dependent and often SMALL (baseLoot + your
+   BF÷10 — frequently only ~70 cr), and every combat round burns fuel equal to
+   weapons÷2 — combat is a toll you fight through, DELIVERIES are the profit. Use
+   `combat_retreat` only if `hull_condition <= 3` (retreat ALWAYS succeeds).
 4. Delivery is AUTOMATIC on arrival — credits += payment, score += 2.
 5. **If you LOST the fight (battles_lost went up) or a launch fails with "Ship too
    badly damaged": `repair_ship` before anything else.** A damaged ship cannot lift
@@ -31,8 +35,9 @@
   gives **+2 score**; rim deliveries, patrol battles, duels (+10), rescues (+11) give
   more. This is a marathon by design — your job is a strong score/credits VELOCITY,
   not reaching 10,000 in one session.
-- **Ranks by score:** COMMANDER 150 (you start at 148 — your first delivery promotes
-  you!), CAPTAIN 300, COMMODORE 450, ADMIRAL 750, TOP_DOG 1200, GRAND_MUFTI 1650,
+- **Ranks by score:** COMMANDER 150 (you start at 148 — your first delivery earns the
+  points, and the promotion + honorarium land at your NEXT `end_turn`, not instantly),
+  CAPTAIN 300, COMMODORE 450, ADMIRAL 750, TOP_DOG 1200, GRAND_MUFTI 1650,
   MEGA_HERO 2250, GIGA_HERO 2700. Promotions pay an honorarium (credits).
 - **Setbacks (not game over):** combat defeat costs cargo pods / half fuel; getting
   stranded (`is_lost == 1`) needs rescue; jail (`in_jail == 1`) needs bail. Flag a
@@ -107,7 +112,8 @@ X=Stats). If a screen looks broken (raw JSON, `undefined`, NaN, empty render), f
 - Credits unchanged after a completed delivery (arrival at the contract destination)
 - destination still > 0 after a successful navigate_cargo_dest
 - score does NOT increase (+2 minimum) on a correct delivery
-- rank_index not advancing when score crosses a threshold above
+- rank_index not advancing at the FIRST end_turn after score crossed a threshold
+  (rank recalculates at turn processing, not instantly — instant non-advance is normal)
 - in_combat == 1 persisting after 20+ combat_attack actions with battles_won/lost
   unchanged (combat stall)
 - end_turn confirmed but trip_count does not reset to 0

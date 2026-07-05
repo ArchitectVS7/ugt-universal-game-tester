@@ -207,6 +207,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
     invariant_violations = []
     action_counts = {}
     episode_resets = 0
+    unexpected_delta_steps = 0
     ended_early = None
     # Shared mutable context for stateful invariants (exploit-hunter semantics:
     # one ctx per episode — cleared whenever the game resets mid-run).
@@ -348,6 +349,13 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
             "expected": expected,
             "state_delta": delta,
         }
+        # Mechanical expected-vs-delta escalation: the LLM rarely volunteers mismatches,
+        # so surface state changes its stated expectation never mentioned. Heuristic
+        # (leaf-name substring match) — an escalation signal for triage, not a verdict.
+        surprises = _unexpected_delta_fields(delta, f"{expected} {reasoning}")
+        if surprises:
+            log_entry["unexpected_deltas"] = surprises
+            unexpected_delta_steps += 1
         if is_novel:
             log_entry["is_novel"] = True
             novel_behaviors.append(log_entry)
@@ -387,6 +395,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         "episode_resets": episode_resets,
         "bugs_flagged": len(potential_bugs),
         "invariant_violations": len(invariant_violations),
+        "unexpected_delta_steps": unexpected_delta_steps,
     }
     for e in summary_paths:
         final = _resolve_path(current_state, e["path"])
@@ -698,6 +707,22 @@ def _key_values_line(playtest_cfg, current_state):
     if not parts:
         return ""
     return "⚡ KEY VALUES: " + ", ".join(parts) + "\n\n"
+
+
+def _unexpected_delta_fields(delta, expectation_text):
+    """State-change keys whose leaf name the LLM's expectation/reasoning never mentioned.
+
+    Heuristic escalation only: leaf-name substring match, underscores also matched as
+    spaces (e.g. delta key 'ship.shield_strength' is 'mentioned' by 'shield strength').
+    """
+    text = (expectation_text or "").lower()
+    surprises = {}
+    for key, change in delta.items():
+        leaf = key.rsplit(".", 1)[-1].lower()
+        if leaf in text or leaf.replace("_", " ") in text:
+            continue
+        surprises[key] = change
+    return surprises
 
 
 def _compute_delta(before, after, prefix=""):
