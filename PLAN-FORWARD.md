@@ -118,8 +118,9 @@ actions exercised (accept 69 / navigate 22 / attack 34 / retreat 15 / buy_fuel 2
   engineering** — this is what RL is actually good at here. Answers *"does the game break?"*
 - **Phase 2 — LLM BALANCE playtester.** LLM reads the real terminal, presses keys like a player, plays
   competently, N runs with confidence intervals. Answers *"is the game good/balanced/beatable?"* Slower but
-  competent — and for balance, competence beats volume (RL never achieved competent play here). The existing
-  `AGENT-PLAYTEST-FRAMEWORK.md` is the design spec for this tier (transport is now the real client, not the bridge).
+  competent — and for balance, competence beats volume (RL never achieved competent play here). `PLAYTEST-DESIGN.md`
+  is the design spec for this tier. Concrete starting task: `ugt playtest` (`ugt/core/playtester.py`) only
+  supports `browser`/`simulation` engines today — wire in `RealClientAdapter` for `engine.type: "real_server"`.
 
 **Reward-design insight to carry into any agent:** reward realized **profit** (net credits), not raw activity
 (trip_count); profiles differ by reward **weights**, not by hiding actions.
@@ -145,6 +146,19 @@ A minimal working spike client (auth + screen loop + `/api/character`) is docume
 
 ---
 
+## Framework backlog (cross-game, not SpacerQuest-specific)
+
+Salvaged from the archived `DEV-CHECKLIST.md` — still-open work on UGT itself, independent of any one game
+integration. Revisit when a task below actually blocks the current game, not on a schedule:
+
+- **Browser feature map + screen detection** — `press_key`/`type_text` action syntax in `feature-map.yaml`,
+  plus `detect_screen()`/`waitForScreen()` for browser games (needed for `ugt verify` to cover browser titles).
+- **`ugt verify`/`ugt playtest` don't support `engine.type: "real_server"`** — see Phase 2 above; the same gap
+  applies to `verify`, lower priority since the exploit-hunter scripts cover robustness for now.
+- **Desktop adapter** (Adapter 4) — `pyautogui` or a computer-use API for non-browser, non-terminal games.
+- **HTML coverage report** — human-readable `coverage-report.html` generated from the JSON.
+- **`ugt init --with-feature-map`** — scaffold a starter `feature-map.yaml` alongside `ugt.config.yaml`.
+
 ## Key references
 
 | Thing | Where |
@@ -152,8 +166,8 @@ A minimal working spike client (auth + screen loop + `/api/character`) is docume
 | Current direction + protocol + spike | memory `architecture-pivot-real-server` |
 | Why we pivoted (combat missing) | memory `combat-not-in-bridge` |
 | RL collapse root cause + Gate-1 history | memory `rootcause-rl-collapse` |
-| Accurate critical review of UGT | `ASSESSMENT-AND-FIX-ROADMAP.md` |
-| LLM playtest design spec (Phase 2) | `AGENT-PLAYTEST-FRAMEWORK.md` |
+| LLM playtest design spec (Phase 2) | `PLAYTEST-DESIGN.md` |
 | Onboard a new game + methodology | `UGT-USER-MANUAL.md` |
 | Real game routes (nav/arrive/combat) | `SpacerQuest/spacerquest-web/src/app/routes/`, `src/sockets/game.ts` |
 | Retired bridge (do not extend) | `integrations/spacerquest/sim_bridge.ts` |
+| Superseded docs (why + where content went) | `archive/README.md` |

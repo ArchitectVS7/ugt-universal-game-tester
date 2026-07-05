@@ -10,7 +10,7 @@ playtester** (strategy & balance). UGT does two jobs at once — it validates *t
 > drive the real running game, never a re-implementation of it.** Early SpacerQuest work used a headless "bridge"
 > that drifted into a partial copy of the game (it had no combat) — so agents learned the wrong game. The current
 > direction drives the real game server directly. RL as a pure balance oracle was tried and demoted; see
-> `PLAN-FORWARD.md` and `ASSESSMENT-AND-FIX-ROADMAP.md` for the honest history.
+> `PLAN-FORWARD.md` for the honest history (older assessments are in `archive/`).
 
 ## Architecture
 
