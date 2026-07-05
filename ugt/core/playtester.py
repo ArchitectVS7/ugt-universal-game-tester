@@ -49,18 +49,28 @@ LLM_ACTION_SCHEMA = {
 _VALID_ACTION_TYPES = {"action_id", "press_key", "type_text", "wait", "diagnose", "end_turn"}
 
 
-def playtest_game(config, strategy_guide, max_actions=100, output_path=None, provider="anthropic", model=None):
+def playtest_game(config, strategy_guide, max_actions=100, output_path=None, provider="anthropic",
+                  model=None, runs=1, invariants=None):
     """
     Phase 3: LLM-powered playtest.
 
     config         — UgtConfig instance
     strategy_guide — string content of the strategy guide markdown file
-    max_actions    — maximum LLM actions to take
-    output_path    — path to write playtest-report.json (default: results/playtest-report.json)
+    max_actions    — maximum LLM actions per run
+    output_path    — report path. runs==1: playtest-report.json (legacy shape + summary).
+                     runs>1: per-run playtest-run-{i}.json + aggregate playtest-summary.json
+                     (output_path overrides the summary path).
     provider       — "anthropic" or "ollama"
     model          — model name override (None = provider default)
+    runs           — number of independent runs (adapter.reset() isolates each)
+    invariants     — optional machine checks run after every executed action, kept fully
+                     game-agnostic: either a list of objects with .name and
+                     .check(before, action_id, info, after, ctx) (the exploit-hunter
+                     contract), or a callable (adapter) -> such a list. Violations are
+                     recorded per run (separate from LLM-suspected potential_bugs) and
+                     never abort the run — a failed check is data.
 
-    Returns the playtest report dict.
+    Returns the aggregate report dict (runs>1) or the single run report (runs==1).
     """
     sys.stdout.reconfigure(line_buffering=True)
 
@@ -71,13 +81,15 @@ def playtest_game(config, strategy_guide, max_actions=100, output_path=None, pro
     else:
         raise ValueError(f"Unknown LLM provider: '{provider}'. Choose 'anthropic' or 'ollama'.")
 
-    from ugt.adapters.subprocess import SubprocessAdapter
-    from ugt.adapters.playwright import PlaywrightAdapter
-
     if config.engine_type == "browser":
+        from ugt.adapters.playwright import PlaywrightAdapter
         adapter = PlaywrightAdapter(config)
     elif config.engine_type == "simulation":
+        from ugt.adapters.subprocess import SubprocessAdapter
         adapter = SubprocessAdapter(config)
+    elif config.engine_type == "real_server":
+        from ugt.adapters.realclient import RealClientAdapter
+        adapter = RealClientAdapter(config)
     else:
         raise ValueError(f"Unknown engine type: '{config.engine_type}'")
 
@@ -85,35 +97,124 @@ def playtest_game(config, strategy_guide, max_actions=100, output_path=None, pro
     results_dir = os.path.join(project_dir, "results")
     os.makedirs(results_dir, exist_ok=True)
 
-    if output_path is None:
-        output_path = os.path.join(results_dir, "playtest-report.json")
-
-    # Build action name → ID map for simulation games
-    action_names = {}
-    name_to_id = {}
-    for action_id, action_def in config.action_mappings.items():
-        name = action_def.get("name", str(action_id)) if isinstance(action_def, dict) else str(action_def)
-        action_names[int(action_id)] = name
-        name_to_id[name] = int(action_id)
+    playtest_cfg = config.data.get("playtest", {}) if isinstance(config.data, dict) else {}
 
     print(f"[*] Phase 3 — Playtest: connecting to game ({config.engine_type})...")
     adapter.connect()
+
+    invariant_list = list(invariants(adapter)) if callable(invariants) else list(invariants or [])
+    if invariant_list:
+        print(f"[*] {len(invariant_list)} invariant check(s) active during play")
+
+    run_reports = []
+    try:
+        for run_index in range(1, runs + 1):
+            if runs > 1:
+                print(f"\n[*] ── Run {run_index}/{runs} "
+                      f"(provider={provider}, model={llm.model}, max_actions={max_actions}) ──")
+            else:
+                print(f"[*] Connected. Starting LLM playtest (provider={provider}, "
+                      f"model={llm.model}, max_actions={max_actions})...")
+            run_report = _run_single_playtest(
+                adapter, llm, config, strategy_guide, max_actions,
+                playtest_cfg, invariant_list, run_index,
+            )
+            run_report["provider"] = provider
+            run_report["model"] = llm.model
+            run_reports.append(run_report)
+            if runs > 1:
+                run_path = os.path.join(results_dir, f"playtest-run-{run_index}.json")
+                with open(run_path, "w") as f:
+                    json.dump(run_report, f, indent=2, default=str)
+                s = run_report["summary"]
+                print(f"[+] Run {run_index}: actions={s['actions_taken']} "
+                      + " ".join(f"{k}={v}" for k, v in s.items()
+                                 if k not in ("actions_taken",) and not isinstance(v, (dict, list))))
+    finally:
+        adapter.close()
+
+    if runs == 1:
+        report = run_reports[0]
+        report["game"] = config.project_name
+        out = output_path or os.path.join(results_dir, "playtest-report.json")
+        with open(out, "w") as f:
+            json.dump(report, f, indent=2, default=str)
+        _print_run_summary(report, out)
+        return report
+
+    aggregate = _aggregate_runs(run_reports)
+    summary_report = {
+        "game": config.project_name,
+        "provider": provider,
+        "model": llm.model,
+        "runs": runs,
+        "max_actions": max_actions,
+        "aggregate": aggregate,
+        "runs_detail": [r["summary"] for r in run_reports],
+        "run_report_files": [f"playtest-run-{i}.json" for i in range(1, runs + 1)],
+    }
+    out = output_path or os.path.join(results_dir, "playtest-summary.json")
+    with open(out, "w") as f:
+        json.dump(summary_report, f, indent=2, default=str)
+
+    print(f"\n[+] Playtest batch complete: {runs} runs × {max_actions} actions")
+    for label, stats in aggregate.items():
+        if isinstance(stats, dict) and "mean" in stats:
+            print(f"    {label}: mean={stats['mean']} ±{stats['ci95_half_width']} (95% CI), "
+                  f"std={stats['std']}, values={stats['values']}")
+        else:
+            print(f"    {label}: {stats}")
+    print(f"[+] Summary: {out}")
+    return summary_report
+
+
+def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
+                         playtest_cfg, invariant_list, run_index):
+    """One playtest run: reset, drive up to max_actions LLM decisions, return the run report."""
+    terminal_budget = int(playtest_cfg.get("terminal_char_budget", 400))
+    summary_paths = [e for e in (playtest_cfg.get("summary_paths") or [])
+                     if isinstance(e, dict) and "path" in e]
+
+    # Build action name → ID map
+    name_to_id = {}
+    for action_id, action_def in config.action_mappings.items():
+        name = action_def.get("name", str(action_id)) if isinstance(action_def, dict) else str(action_def)
+        name_to_id[name] = int(action_id)
+
     current_state = adapter.reset()
-    print(f"[*] Connected. Starting LLM playtest (provider={provider}, model={llm.model}, max_actions={max_actions})...")
+    baseline_state = json.loads(json.dumps(current_state, default=str))
+    # Deltas accumulated across mid-run episode resets: on each reset we bank
+    # (pre-reset value − baseline value) per summary path, then re-baseline.
+    banked = {e["path"]: 0 for e in summary_paths}
+
+    def bank_deltas(pre_reset_state):
+        for e in summary_paths:
+            pre = _resolve_path(pre_reset_state, e["path"])
+            base = _resolve_path(baseline_state, e["path"])
+            if isinstance(pre, (int, float)) and isinstance(base, (int, float)):
+                banked[e["path"]] += pre - base
 
     action_log = []
     potential_bugs = []
     novel_behaviors = []
+    invariant_violations = []
+    action_counts = {}
+    episode_resets = 0
+    ended_early = None
+    # Shared mutable context for stateful invariants (exploit-hunter semantics:
+    # one ctx per episode — cleared whenever the game resets mid-run).
+    inv_ctx = {}
     start_time = time.time()
 
     for step_num in range(1, max_actions + 1):
-        terminal_text = adapter.get_terminal_text(600)
+        terminal_text = adapter.get_terminal_text(terminal_budget)
         prompt = _build_prompt(config, strategy_guide, current_state, terminal_text, action_log)
 
         try:
             llm_action = llm.choose_action(prompt)
         except Exception as api_err:
             print(f"  [Step {step_num}] LLM error: {api_err}")
+            ended_early = f"llm_error: {api_err}"
             break
 
         action_type   = llm_action.get("action_type", "wait")
@@ -126,17 +227,18 @@ def playtest_game(config, strategy_guide, max_actions=100, output_path=None, pro
         print(f"  [Step {step_num}] {action_type}({value!r}) — {reasoning[:60]}")
 
         if potential_bug:
-            bug_entry = {
+            potential_bugs.append({
                 "step": step_num,
                 "description": potential_bug,
                 "state": current_state,
                 "terminal_text": terminal_text,
-            }
-            potential_bugs.append(bug_entry)
+            })
             print(f"  [!] Potential bug flagged: {potential_bug[:80]}")
 
         before_state = json.loads(json.dumps(current_state, default=str))
         terminated = truncated = False
+        step_info = {}
+        executed_action_id = None
 
         try:
             if action_type == "action_id":
@@ -144,10 +246,13 @@ def playtest_game(config, strategy_guide, max_actions=100, output_path=None, pro
                 if action_id is None:
                     print(f"  [Step {step_num}] Unknown action name '{value}' — skipping")
                     continue
-                current_state, terminated, truncated, _ = adapter.step(action_id)
+                executed_action_id = action_id
+                current_state, terminated, truncated, step_info = adapter.step(action_id)
 
             elif action_type == "press_key":
                 adapter.press_key(value)
+                executed_action_id = -1
+                step_info = {"key": value}
                 try:
                     current_state, terminated, truncated, _ = adapter.step(0)
                 except Exception:
@@ -155,6 +260,8 @@ def playtest_game(config, strategy_guide, max_actions=100, output_path=None, pro
 
             elif action_type == "type_text":
                 adapter.type_text(value)
+                executed_action_id = -1
+                step_info = {"text": value}
 
             elif action_type == "wait":
                 pass
@@ -167,10 +274,16 @@ def playtest_game(config, strategy_guide, max_actions=100, output_path=None, pro
                     "state": current_state,
                     "terminal_text": terminal_text,
                 })
+                pre_reset = current_state
                 try:
                     current_state = adapter.reset()
                 except Exception:
                     pass
+                else:
+                    bank_deltas(pre_reset)
+                    baseline_state = json.loads(json.dumps(current_state, default=str))
+                    episode_resets += 1
+                    inv_ctx.clear()
                 continue
 
             elif action_type == "end_turn":
@@ -178,10 +291,39 @@ def playtest_game(config, strategy_guide, max_actions=100, output_path=None, pro
 
         except Exception as exec_err:
             print(f"  [Step {step_num}] Execution error: {exec_err}")
+            # The game is being reset mid-step: invariants must not compare the
+            # pre-error state against the post-reset state (false violations —
+            # same rule as exploit_hunter's crash path).
+            executed_action_id = None
+            pre_reset = current_state
             try:
                 current_state = adapter.reset()
             except Exception:
                 pass
+            else:
+                bank_deltas(pre_reset)
+                baseline_state = json.loads(json.dumps(current_state, default=str))
+                episode_resets += 1
+                inv_ctx.clear()
+
+        action_counts[f"{action_type}:{value}"] = action_counts.get(f"{action_type}:{value}", 0) + 1
+
+        # Machine-checked invariants (exploit-hunter contract) — run on every executed action.
+        if invariant_list and executed_action_id is not None:
+            for inv in invariant_list:
+                try:
+                    msg = inv.check(before_state, executed_action_id, step_info, current_state, inv_ctx)
+                except Exception as inv_err:  # a broken check is itself worth surfacing
+                    msg = f"invariant check crashed: {inv_err}"
+                if msg:
+                    invariant_violations.append({
+                        "step": step_num,
+                        "name": getattr(inv, "name", inv.__class__.__name__),
+                        "message": msg,
+                        "action_type": action_type,
+                        "action": value,
+                    })
+                    print(f"  [!!] INVARIANT VIOLATION [{getattr(inv, 'name', '?')}]: {msg}")
 
         after_state = current_state
         delta = _compute_delta(before_state, after_state)
@@ -202,8 +344,13 @@ def playtest_game(config, strategy_guide, max_actions=100, output_path=None, pro
 
         if terminated or truncated:
             print(f"  [Step {step_num}] Episode ended (terminated={terminated}) — resetting")
+            pre_reset = current_state
             try:
                 current_state = adapter.reset()
+                bank_deltas(pre_reset)
+                baseline_state = json.loads(json.dumps(current_state, default=str))
+                episode_resets += 1
+                inv_ctx.clear()
                 # Insert a marker so the LLM knows this is a fresh episode, not a crash.
                 action_log.append({
                     "step": step_num,
@@ -214,36 +361,101 @@ def playtest_game(config, strategy_guide, max_actions=100, output_path=None, pro
                     "state_delta": {},
                 })
             except Exception:
+                ended_early = "reset_failed_after_episode_end"
                 break
 
-    adapter.close()
     duration = round(time.time() - start_time, 1)
 
-    report = {
-        "game": config.project_name,
-        "provider": provider,
-        "model": llm.model,
+    # ── Per-run summary: deltas from the post-reset baseline (plus banked segments) ──
+    real_actions = [e for e in action_log if e.get("action_type") != "episode_reset"]
+    summary = {
+        "actions_taken": len(real_actions),
+        "duration_seconds": duration,
+        "ended_early": ended_early,
+        "episode_resets": episode_resets,
+        "bugs_flagged": len(potential_bugs),
+        "invariant_violations": len(invariant_violations),
+    }
+    for e in summary_paths:
+        final = _resolve_path(current_state, e["path"])
+        base = _resolve_path(baseline_state, e["path"])
+        label = e.get("label", e["path"])
+        if isinstance(final, (int, float)) and isinstance(base, (int, float)):
+            summary[label] = banked[e["path"]] + (final - base)
+    win_path = playtest_cfg.get("win_path")
+    loss_path = playtest_cfg.get("loss_path")
+    if win_path:
+        summary["won_game"] = bool(_resolve_path(current_state, win_path))
+    if loss_path:
+        summary["lost_game"] = bool(_resolve_path(current_state, loss_path))
+
+    return {
+        "run": run_index,
         "total_actions": len(action_log),
         "duration_seconds": duration,
+        "summary": summary,
+        "baseline_state": baseline_state,
+        "final_state": current_state,
+        "action_counts": action_counts,
         "potential_bugs": potential_bugs,
         "novel_behaviors": novel_behaviors,
+        "invariant_violations": invariant_violations,
         "action_log": action_log,
     }
 
-    with open(output_path, "w") as f:
-        json.dump(report, f, indent=2, default=str)
 
-    print(f"\n[+] Playtest complete in {duration}s")
-    print(f"[+] Actions taken: {len(action_log)} / {max_actions}")
-    print(f"[+] Potential bugs flagged: {len(potential_bugs)}")
-    print(f"[+] Novel behaviors observed: {len(novel_behaviors)}")
-    if potential_bugs:
+def _aggregate_runs(run_reports):
+    """mean/std/95%-CI per numeric summary metric across runs (stdlib statistics;
+    normal-approximation CI, same spirit as evaluate's seed-band aggregation)."""
+    import math
+    import statistics
+
+    summaries = [r["summary"] for r in run_reports]
+    n = len(summaries)
+    aggregate = {"runs": n}
+
+    numeric_keys = sorted({
+        k for s in summaries for k, v in s.items()
+        if isinstance(v, (int, float)) and not isinstance(v, bool)
+    })
+    for key in numeric_keys:
+        values = [s.get(key, 0) for s in summaries]
+        mean = statistics.mean(values)
+        std = statistics.stdev(values) if n > 1 else 0.0
+        half = 1.96 * std / math.sqrt(n) if n > 1 else 0.0
+        aggregate[key] = {
+            "mean": round(mean, 2),
+            "std": round(std, 2),
+            "ci95": [round(mean - half, 2), round(mean + half, 2)],
+            "ci95_half_width": round(half, 2),
+            "values": values,
+        }
+
+    aggregate["wins"] = sum(1 for s in summaries if s.get("won_game"))
+    aggregate["losses"] = sum(1 for s in summaries if s.get("lost_game"))
+    aggregate["runs_ended_early"] = sum(1 for s in summaries if s.get("ended_early"))
+    aggregate["bugs_flagged_total"] = sum(s.get("bugs_flagged", 0) for s in summaries)
+    aggregate["invariant_violations_total"] = sum(s.get("invariant_violations", 0) for s in summaries)
+    return aggregate
+
+
+def _print_run_summary(report, output_path):
+    print(f"\n[+] Playtest complete in {report['duration_seconds']}s")
+    print(f"[+] Actions taken: {report['total_actions']}")
+    print(f"[+] Potential bugs flagged: {len(report['potential_bugs'])}")
+    print(f"[+] Invariant violations: {len(report.get('invariant_violations', []))}")
+    print(f"[+] Novel behaviors observed: {len(report['novel_behaviors'])}")
+    if report.get("summary"):
+        interesting = {k: v for k, v in report["summary"].items()
+                       if k not in ("actions_taken", "duration_seconds")}
+        print(f"[+] Summary: {interesting}")
+    if report["potential_bugs"]:
         print("[!] Potential bugs:")
-        for b in potential_bugs:
+        for b in report["potential_bugs"]:
             print(f"    Step {b['step']}: {b['description'][:80]}")
+    for v in report.get("invariant_violations", []):
+        print(f"[!!] Invariant violation at step {v['step']} [{v['name']}]: {v['message'][:100]}")
     print(f"[+] Report: {output_path}")
-
-    return report
 
 
 # ---------------------------------------------------------------------------
@@ -391,6 +603,10 @@ def _parse_json_action(raw_text):
 # ---------------------------------------------------------------------------
 
 def _build_prompt(config, strategy_guide, current_state, terminal_text, action_log):
+    playtest_cfg = config.data.get("playtest", {}) if isinstance(config.data, dict) else {}
+    guide_budget = int(playtest_cfg.get("guide_char_budget", 2000))
+    terminal_budget = int(playtest_cfg.get("terminal_char_budget", 400))
+
     action_lines = []
     for action_id, action_def in config.action_mappings.items():
         name = action_def.get("name", str(action_id)) if isinstance(action_def, dict) else str(action_def)
@@ -415,20 +631,45 @@ def _build_prompt(config, strategy_guide, current_state, terminal_text, action_l
         f"VALID action names (use one as value when action_type=action_id):\n"
         f"  {action_name_list}\n\n"
         f"## Current State\n"
-        + (
-            f"⚡ KEY VALUES: credits={current_state.get('character',{}).get('credits',0)}, "
-            f"cargo_pods={current_state.get('character',{}).get('cargo_pods',0)}, "
-            f"destination={current_state.get('character',{}).get('destination',0)}, "
-            f"trip_count={current_state.get('character',{}).get('trip_count',0)}/2 (2=blocked until end_turn), "
-            f"fuel={current_state.get('ship',{}).get('fuel',0)}\n\n"
-            if isinstance(current_state, dict) else ""
-        )
+        + _key_values_line(playtest_cfg, current_state)
         + f"```json\n{json.dumps(current_state, indent=2, default=str)}\n```\n\n"
         f"## Recent Actions\n{recent_summary}\n\n"
-        f"## Terminal Output\n```\n{terminal_text[-400:]}\n```\n\n"
-        f"## Strategy Guide\n{strategy_guide[:2000]}\n\n"
+        f"## Terminal Output\n```\n{terminal_text[-terminal_budget:]}\n```\n\n"
+        f"## Strategy Guide\n{strategy_guide[:guide_budget]}\n\n"
         f"Respond JSON only. Use action_type=\"action_id\" and value=<one of the action names above>."
     )
+
+
+def _resolve_path(state, path):
+    """Resolve a dot-separated path into a nested dict; None if any hop is missing."""
+    node = state
+    for part in path.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node
+
+
+def _key_values_line(playtest_cfg, current_state):
+    """Optional '⚡ KEY VALUES' prompt line, driven entirely by the config's
+    playtest.key_state_paths ({path, label, note} entries). Games declare which state
+    fields the LLM should watch — nothing game-specific lives in this module."""
+    paths = playtest_cfg.get("key_state_paths") or []
+    if not paths or not isinstance(current_state, dict):
+        return ""
+    parts = []
+    for entry in paths:
+        if not isinstance(entry, dict) or "path" not in entry:
+            continue
+        value = _resolve_path(current_state, entry["path"])
+        if value is None:
+            continue
+        label = entry.get("label", entry["path"])
+        note = entry.get("note")
+        parts.append(f"{label}={value}" + (f" ({note})" if note else ""))
+    if not parts:
+        return ""
+    return "⚡ KEY VALUES: " + ", ".join(parts) + "\n\n"
 
 
 def _compute_delta(before, after, prefix=""):

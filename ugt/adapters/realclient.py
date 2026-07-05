@@ -94,6 +94,14 @@ class RealClientAdapter(BaseAdapter):
         self._last_render = None
         self._render_evt = threading.Event()
         self._last_terminal = ""  # cache for get_terminal_text()
+        # Free-form navigation state (transport bookkeeping, not game logic):
+        # the screen the next press_key/type_text targets. Updated by every
+        # screen_request/_input_follow/press_menu_key; reset() lands on main-menu.
+        self._current_screen = self.main_menu
+        # Metadata about the last input sent — lets callers (LLM playtest log) see which
+        # screen a key actually went to (the server silently falls back to main-menu on
+        # unknown screen ids, so this is the only drift signal available client-side).
+        self._last_input_meta = None
 
     # ── BaseAdapter lifecycle ────────────────────────────────────────────────
     def connect(self):
@@ -153,17 +161,13 @@ class RealClientAdapter(BaseAdapter):
 
     # ── BaseAdapter optional UI actions ──────────────────────────────────────
     def press_key(self, key: str) -> None:
-        """Send a single keypress to the CURRENT screen (defaults to main menu)."""
-        resp = self.screen_input(self.main_menu, key)
-        nxt = resp.get("nextScreen")
-        self._last_terminal = (self.screen_request(nxt) if nxt else resp).get("output", "")
+        """Send a single keypress to the CURRENT screen (tracked across inputs)."""
+        self._input_follow(self._current_screen, key)
 
     def type_text(self, text: str, press_enter: bool = True) -> None:
         """Type a string into the current screen. The server treats input as a line, so we
         send the whole string as one screen:input (press_enter is implicit at the protocol)."""
-        resp = self.screen_input(self.main_menu, text)
-        nxt = resp.get("nextScreen")
-        self._last_terminal = (self.screen_request(nxt) if nxt else resp).get("output", "")
+        self._input_follow(self._current_screen, text)
 
     def get_terminal_text(self, chars: int = 600) -> str:
         """Return the last `chars` of the most recent rendered terminal (for the LLM tier)."""
@@ -209,16 +213,27 @@ class RealClientAdapter(BaseAdapter):
             raise RuntimeError("server rejected authentication")
 
     def screen_request(self, screen: str) -> dict:
-        return self._roundtrip("screen:request", {"screen": screen})
+        resp = self._roundtrip("screen:request", {"screen": screen})
+        # Some renders are redirects (reason text + nextScreen, e.g. end-turn when the
+        # turn can't end yet). Track where the server says we ARE — without re-requesting,
+        # so callers still see the reason text in this response's output.
+        self._current_screen = resp.get("nextScreen") or screen
+        return resp
 
     def screen_input(self, screen: str, key: str) -> dict:
         return self._roundtrip("screen:input", {"screen": screen, "input": key})
 
     def press_menu_key(self, key: str, from_screen: str | None = None) -> dict:
         """Press a menu key and auto-follow its nextScreen to load real content."""
-        resp = self.screen_input(from_screen or self.main_menu, key)
+        src = from_screen or self.main_menu
+        resp = self.screen_input(src, key)
         nxt = resp.get("nextScreen")
-        dest = self.screen_request(nxt) if nxt else resp
+        self._last_input_meta = {"screen": src, "input": key, "had_next": bool(nxt)}
+        if nxt:
+            dest = self.screen_request(nxt)
+        else:
+            dest = resp
+            self._current_screen = src
         self._last_terminal = dest.get("output", "")
         return dest
 
@@ -334,14 +349,17 @@ class RealClientAdapter(BaseAdapter):
             return r.status_code, {"raw": r.text}
 
     def _input_follow(self, screen: str, key: str):
-        """screen:input on `screen`; if it returns a nextScreen, request it. Returns (screen_now, output)."""
+        """screen:input on `screen`; if it returns a nextScreen, request it. Returns (screen_now, output).
+        Keeps `_current_screen` pointed at wherever the input landed us."""
         resp = self.screen_input(screen, key)
         nxt = resp.get("nextScreen")
+        self._last_input_meta = {"screen": screen, "input": key, "had_next": bool(nxt)}
         if nxt:
             out = self.screen_request(nxt).get("output", "")
             self._last_terminal = out
             return nxt, out
         self._last_terminal = resp.get("output", "")
+        self._current_screen = screen
         return screen, resp.get("output", "")
 
     def _goto_main(self):
@@ -420,11 +438,25 @@ class RealClientAdapter(BaseAdapter):
         return {"action": "buy_fuel", "units_requested": units}
 
     def _act_end_turn(self):
-        """main-menu D -> end-turn. NOTE: CLASSIC_MODE=true makes this a 'wait for next day' no-op."""
+        """main-menu D -> end-turn screen. The screen is a confirm flow (end-turn.ts):
+        render asks 'End your turn? [Y]es / [N]o'; Y executes the turn (bot turns run,
+        tripCount resets) and shows results; any key then returns to the menu.
+        Validation failures render a reason and bounce to main-menu:
+          - CLASSIC_MODE=true          -> 'Classic mode — wait for next day'
+          - tripCount < DAILY_TRIP_LIMIT -> 'You still have N trip(s) remaining'
+        """
         self._goto_main()
         s, out = self._input_follow(self.main_menu, "D")
+        low = out.lower()
+        if "end your turn?" in low:
+            s, results = self._input_follow(s, "Y")   # executes the turn, shows summary
+            self._input_follow(s, " ")                # any-key -> back to main-menu
+            self._goto_main()
+            return {"action": "end_turn", "confirmed": True}
         self._goto_main()
-        return {"action": "end_turn", "classic_mode_noop": "wait for next day" in out.lower()}
+        return {"action": "end_turn", "confirmed": False,
+                "classic_mode_noop": "wait for next day" in low,
+                "blocked_reason": " ".join(out.split())[:120] or None}
 
     def _act_upgrade_weapons(self):
         out = self._do_upgrade(self._UPGRADE_KEY["weapons"])
@@ -443,6 +475,18 @@ class RealClientAdapter(BaseAdapter):
         out = self._do_upgrade(self._UPGRADE_KEY[comp])
         return {"action": "upgrade_cheapest", "component": comp,
                 "ok": "upgraded successfully" in out.lower()}
+
+    def _act_repair_ship(self):
+        """main-menu S -> shipyard R ('[R]epair all damage'; renders result in place).
+        Repair cost/validation are the game's own (repairs.ts) — we just press the key."""
+        self._goto_main()
+        s, _ = self._input_follow(self.main_menu, "S")   # -> shipyard
+        s, out = self._input_follow(s, "R")              # repair all (in-place render)
+        self._goto_main()
+        low = out.lower()
+        return {"action": "repair_ship",
+                "ok": "repair" in low and "failed" not in low,
+                "detail": " ".join(out.split())[:120]}
 
     def _act_combat_attack(self):
         """Drive the 'combat' SCREEN with 'A' (the stateful path that resolves the encounter)."""
@@ -470,4 +514,5 @@ class RealClientAdapter(BaseAdapter):
         "combat_retreat": _act_combat_retreat,
         "upgrade_weapons": _act_upgrade_weapons,
         "upgrade_shields": _act_upgrade_shields,
+        "repair_ship": _act_repair_ship,
     }

@@ -1,151 +1,115 @@
-# SpacerQuest — LLM Playtest Strategy Guide
+# SpacerQuest — LLM Playtest Strategy Guide (real server)
 
-## CRITICAL: The Only Loop That Earns Score
+> Every number below is sourced from the game code (constants.ts, auth.ts dev-setup,
+> economy.ts, docking.ts, upgrades.ts, end-turn.ts) — 2026-07-05. If the game contradicts
+> this guide, TRUST THE GAME and flag the mismatch with `potential_bug`.
 
-DO THIS in exact order, then repeat forever:
+## CRITICAL: The Profitable Loop (do this, in order)
 
-1. `upgrade_cheapest` — first action only. Costs 10,000 cr, upgrades hull, unlocks cargo capacity.
-2. `accept_cargo` — pick up contract. **Works from ANY system. Do NOT navigate anywhere first.**
-3. `navigate_cargo_dest` — fly to destination. Auto-delivers on arrival. Earns score + credits.
-4. If trip_count == 2 after navigating: call `end_turn` FIRST (resets trip_count to 0), THEN go to step 2.
-5. Go to step 2 (accept next contract). Repeat forever.
+1. **First two actions of a fresh run:** `upgrade_weapons`, then `upgrade_shields`
+   (20,000 cr each: 10→20 strength). Every trip forces a combat encounter and the
+   starting ship (weapons 10 / shields 10) LOSES most fights — upgrading first turns
+   forced encounters into loot instead of losses.
+2. `accept_cargo` — signs delivery contract #1 from the manifest board (only when
+   `destination == 0`; if `destination > 0` you already have one).
+3. `navigate_cargo_dest` — launches and arrives. An encounter fires EVERY trip
+   (deterministic). If `in_combat == 1` after arriving: `combat_attack` repeatedly
+   until `in_combat == 0` (win pays loot ~500–3,000 cr). Use `combat_retreat` only
+   if `hull_condition <= 3` (retreat ALWAYS succeeds but pays nothing).
+4. Delivery is AUTOMATIC on arrival — credits += payment, score += 2.
+5. **If you LOST the fight (battles_lost went up) or a launch fails with "Ship too
+   badly damaged": `repair_ship` before anything else.** A damaged ship cannot lift
+   off, and you cannot end the turn until you finish your 2 trips — repair is the
+   only way out of that corner.
+6. After 2 trips (`trip_count == 2`): `end_turn` (required — the 3rd launch is
+   blocked until you do). Then back to step 2.
+7. `buy_fuel` (buys 100 units) when `fuel < 200`.
 
-**If fuel == 0 or < 10**: call `buy_fuel` ONCE, then immediately go back to whichever step you were on.
-**NEVER call navigate_neighbor** — it wastes a trip slot and earns nothing.
-**NEVER call accept_cargo when destination > 0** — you already have a contract; deliver it first.
-**NEVER call navigate_cargo_dest when trip_count == 2** — it will silently fail; call end_turn first.
+## Win, loss, and what "progress" means
 
----
+- **Win:** score ≥ 10,000 → Conqueror (character retires with honors). Cargo delivery
+  gives **+2 score**; rim deliveries, patrol battles, duels (+10), rescues (+11) give
+  more. This is a marathon by design — your job is a strong score/credits VELOCITY,
+  not reaching 10,000 in one session.
+- **Ranks by score:** COMMANDER 150 (you start at 148 — your first delivery promotes
+  you!), CAPTAIN 300, COMMODORE 450, ADMIRAL 750, TOP_DOG 1200, GRAND_MUFTI 1650,
+  MEGA_HERO 2250, GIGA_HERO 2700. Promotions pay an honorarium (credits).
+- **Setbacks (not game over):** combat defeat costs cargo pods / half fuel; getting
+  stranded (`is_lost == 1`) needs rescue; jail (`in_jail == 1`) needs bail. Flag a
+  `potential_bug` if you can't recover from any of these.
 
-## Win Condition
-
-Accumulate **10,000 score points**. This grants Conqueror rank and ends the game
-(the Andromeda wormhole / Maligna route opens). Score comes from:
-- Cargo deliveries (primary source, ~50–200 points per delivery)
-- Combat victories
-- Completing missions
-
-The game ends in **defeat** when hull_condition = 0 AND credits = 0 simultaneously.
-You lose both your hull AND your credits — not just one of them.
-
----
-
-## Starting State
+## Starting State (after each reset — exact)
 
 | Field | Value |
 |-------|-------|
-| credits | 1,000 cr |
-| fuel | 50 units |
+| credits | 100,000 cr |
+| score | 148 (2 short of COMMANDER) |
+| rank | LIEUTENANT (rank_index 0) |
+| fuel | 800 units |
+| hull 30 (cond 9) · weapons 10 · shields 10 · drives 10 · nav 40 | |
+| cargo_pods | 0 loaded (capacity 200) |
 | current_system | 1 (Sun-3) |
-| rank | LIEUTENANT (rank_index=0) |
-| hull_strength | 5 |
-| hull_condition | 9/9 |
-| cargo_pods | 0 (no trading yet) |
+| trip_count | 0 (limit 2 per turn) |
 
-**The single most important early action: upgrade_cheapest (which upgrades hull).** Hull
-strength determines cargo capacity and unlocks the cargo trading loop. After upgrading
-hull once (hull_strength goes from 5 → 15), you gain cargo pods and can start using
-accept_cargo. All upgrades cost 10,000 cr — hull is the highest-value target every time.
+## Economy facts (judge balance against these)
 
-**CRITICAL SEQUENCE — follow this exactly:**
-1. Start: upgrade_cheapest (costs 10,000 cr, upgrades hull, unlocks cargo capacity)
-2. IMMEDIATELY after upgrade: accept_cargo — do NOT navigate first. accept_cargo works
-   from ANY system and assigns you a delivery contract (cargo_pods → 50, destination → N).
-3. Then: navigate_cargo_dest to fly to the destination and auto-deliver.
-4. Repeat from step 2 for income.
+- Cargo payment = (value·distance ÷ 3)·pods + fuel×5 + 1,000, **capped at 15,000 cr**
+  (rim contracts pay 1.4×, capped 25,000). Expect ~2,000–15,000 per delivery.
+- Wrong-destination delivery pays 50% and costs −5 score. Never do it on purpose.
+- Fuel prices: Sun-3 = 8 cr/unit, Mira-9 (system 8) = 4, Vega-6 = 6, most others 5.
+- Component upgrade = +10 strength, price = (strength÷10 + 1) × 10,000 cr — so
+  weapons 10→20 costs 20k, 20→30 costs 30k. `upgrade_cheapest` picks your
+  lowest-strength core component (hull/drives/weapons/shields).
+- Combat power (Battle Factor) comes ONLY from your ship (weapons·cond + shields·cond
+  + support components + battles won) — rank gives no combat bonus.
 
-**DO NOT navigate_neighbor between upgrade and accept_cargo.** Navigation costs credits
-and doesn't bring you closer to cargo. If cargo_pods == 0 and destination == 0, call
-accept_cargo NOW.
+## Action Vocabulary (these are ALL the mapped actions)
 
----
+| Name | When |
+|------|------|
+| wait | Never (wasted step) — only if truly nothing else is legal |
+| buy_fuel | fuel < 200 (buys 100 units at the local port) |
+| accept_cargo | destination == 0 and trip_count < 2 |
+| navigate_cargo_dest | destination > 0 (launch + arrive + auto-deliver) |
+| deliver_cargo | Only to CONFIRM a delivery happened (it's automatic) — not needed in the loop |
+| upgrade_cheapest | credits > 40,000 and weapons+shields already ≥ 20 |
+| end_turn | trip_count == 2 (resets trips; other spacers take their turns) |
+| combat_attack | in_combat == 1 and hull_condition > 3 |
+| combat_retreat | in_combat == 1 and hull_condition <= 3 |
+| upgrade_weapons | First action of a run; again when credits allow |
+| upgrade_shields | Second action of a run; again when credits allow |
+| repair_ship | After LOSING a fight, or when a launch fails with "Ship too badly damaged" — repairs all damage at the shipyard (cost scales with damage) |
 
-## Core Game Loop
+You may also explore with `press_key`/`type_text` (single keys sent to the CURRENT
+screen — e.g. from the main menu: T=Traders, S=Shipyard, P=Pub, B=Bank, D=End turn,
+X=Stats). If a screen looks broken (raw JSON, `undefined`, NaN, empty render), flag
+`potential_bug` — exploring is encouraged AFTER the core loop is running profitably.
 
-```
-EARLY GAME (rank_index 0–3):
-  → sell_fuel (50 units) → earn credits
-  → navigate to cheap fuel system (1, 8, or 14) → buy_fuel
-  → save up 10,000 cr → upgrade_cheapest (hull strength)
-  → once cargo_pods >= 1: enter cargo loop
+## Good state looks like
 
-CARGO LOOP (main income):
-  → accept_cargo (get a delivery contract with destination)
-  → navigate_cargo_dest (fly to destination system)
-  → (cargo is auto-delivered on arrival)
-  → back to start for next contract
+- credits trending UP across trips (delivery payment > fuel spend)
+- score +2 or more per delivery; rank_index rising at the thresholds above
+- battles WON after weapons/shields hit 20+ (early losses are expected, chronic
+  losses after upgrading are a balance flag, not your mistake — report it)
+- hull_condition ≥ 7; fuel ≥ 200 before each launch
 
-MID GAME (rank_index 3–6):
-  → upgrade weapons and shields alongside hull
-  → accept combat_attack when in_combat (for battle_won score)
-  → combat_retreat when ship condition < 5
+## Danger signs
 
-LATE GAME (rank_index 7–8, score > 8000):
-  → focus exclusively on cargo deliveries for score
-  → bank_deposit to protect credits
-  → repair_ship whenever hull_condition < 7
-```
+- fuel < 100 → buy_fuel NOW (stranded = rescue fees)
+- hull_condition ≤ 3 → retreat from combat; consider upgrade_cheapest (hull)
+- credits < 20,000 and weapons still 10 → you upgraded too much or fought too little;
+  prioritize cargo runs
+- trip_count == 2 and you keep trying to fly → you MUST end_turn (this is the rule,
+  not a bug)
 
----
+## Bug signatures (flag with potential_bug)
 
-## Action Vocabulary
-
-| ID | Name | When to use |
-|----|------|-------------|
-| 0 | wait | Never — it's a no-op that wastes a step |
-| 1 | navigate_cheap_fuel | When fuel < 100 and you're not near a cheap system |
-| 2 | navigate_cargo_dest | When you have a cargo contract (destination > 0) |
-| 3 | navigate_neighbor | When exploring or repositioning |
-| 4 | buy_fuel | After arriving at a cheap fuel system (1, 8, 14) |
-| 5 | sell_fuel | When fuel > 300 and you need quick credits |
-| 6 | accept_cargo | When cargo_pods == 0 and destination == 0 (pick up a new contract) |
-| 7 | deliver_cargo | Redundant with navigate_cargo_dest — use 2 instead |
-| 8 | upgrade_cheapest | When credits > 5,000 (robotics upgrade) or > 10,000 (hull) |
-| 9 | repair_ship | When hull_condition < 7 |
-| 10 | combat_attack | When in_combat == 1 and weapon_strength >= 5 |
-| 11 | combat_retreat | When in_combat == 1 and hull_condition <= 3 |
-| 12 | pub_gamble_wheel | Sparingly — high variance, mostly avoid |
-| 13 | bank_deposit | When credits > 20,000 (protect earnings) |
-| 14 | end_turn | Every ~10 actions to let bot events tick |
-
----
-
-## Cheap Fuel Systems
-
-| System | Fuel Price |
-|--------|-----------|
-| 1 (Sun-3) | 8 cr/unit |
-| 8 (Mira-9) | 4 cr/unit |
-| 14 (Vega-6) | 6 cr/unit |
-
-Always navigate to system 8 or 14 to refuel — they are 2–4× cheaper than other systems.
-
----
-
-## Good State Looks Like
-
-- `character.credits` increasing steadily over time
-- `character.trip_count` increasing (delivering cargo regularly)
-- `ship.hull_condition` staying at 8–9
-- `character.cargo_pods >= 1` by turn 50
-- `character.score` growing each cargo delivery
-- `ship.fuel >= 100` before any long journey
-
-## Danger Signs
-
-- `ship.fuel < 20` — you may be unable to travel. Navigate to nearest cheap system first.
-- `ship.hull_condition < 4` — critical. Repair immediately or you'll be destroyed.
-- `character.credits < 500 AND ship.fuel < 20` — terminal spiral. Use sell_fuel to get credits.
-- `character.destination > 0 AND cargo_pods == 0` — stuck. Use wait to skip (cargo contracts lapse).
-- `in_combat == 1 AND weapon_strength < 3` — retreat immediately.
-
-## Bug Signatures (flag with potential_bug)
-
-- Credits unchanged after accepting and delivering a cargo contract
-- `destination` still > 0 after navigate_cargo_dest (travel didn't resolve)
-- `current_system` unchanged after navigate_neighbor (travel didn't fire)
-- `hull_condition` decreased without a combat event
-- `player_won = 1` before `character.score >= 10000`
-- `character.rank_index` not increasing as `character.score` increases
-- `in_combat = 1` persisting for more than 3 turns (combat stuck)
-- Any action returning credits < 0 (negative credits should be impossible)
+- Credits unchanged after a completed delivery (arrival at the contract destination)
+- destination still > 0 after a successful navigate_cargo_dest
+- score does NOT increase (+2 minimum) on a correct delivery
+- rank_index not advancing when score crosses a threshold above
+- in_combat == 1 persisting after 20+ combat_attack actions with battles_won/lost
+  unchanged (combat stall)
+- end_turn confirmed but trip_count does not reset to 0
+- Negative credits or fuel anywhere, ever
+- EPISODE_RESET markers are NORMAL (fresh episode), never a bug

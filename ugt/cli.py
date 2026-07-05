@@ -196,7 +196,8 @@ def handle_verify(config_path, feature_map_path, max_turns, output):
         sys.exit(1)
 
 
-def handle_playtest(config_path, strategy_guide_path, max_actions, output, provider="anthropic", model=None):
+def handle_playtest(config_path, strategy_guide_path, max_actions, output, provider="anthropic",
+                    model=None, runs=1):
     from ugt.core.playtester import playtest_game
     try:
         config = UgtConfig(config_path)
@@ -212,7 +213,7 @@ def handle_playtest(config_path, strategy_guide_path, max_actions, output, provi
         sys.exit(1)
     try:
         playtest_game(config, guide, max_actions=max_actions, output_path=output,
-                      provider=provider, model=model)
+                      provider=provider, model=model, runs=runs)
     except (ImportError, RuntimeError) as e:
         print(f"[-] {e}")
         sys.exit(1)
@@ -291,6 +292,12 @@ def main():
         "--model", default=None,
         help="Model name override (e.g. 'gemma4:26b' for ollama, 'claude-opus-4-8' for anthropic)"
     )
+    playtest_parser.add_argument(
+        "--runs", type=int, default=1,
+        help="Independent playtest runs (each starts from a fresh reset). runs>1 writes "
+             "per-run playtest-run-{i}.json plus an aggregate playtest-summary.json with "
+             "mean/std/95%%-CI per summary metric (default: 1)"
+    )
 
     # dashboard
     dash_parser = subparsers.add_parser("dashboard", help="Launch TensorBoard to view training metrics")
@@ -311,7 +318,7 @@ def main():
         handle_smoke_test(args.config, args.profile)
     elif args.command == "playtest":
         handle_playtest(args.config, args.strategy_guide, args.max_actions, args.output,
-                        provider=args.provider, model=args.model)
+                        provider=args.provider, model=args.model, runs=args.runs)
     elif args.command == "train":
         try:
             config = UgtConfig(args.config)

@@ -87,34 +87,46 @@ def main() -> int:
         ck("deliver_cargo confirms delivery", state["character"]["cargo_pods"] == 0, f"info={info}")
 
         # ── COMBAT end-to-end (if the trip spawned a hostile encounter) ────
+        # A single trip can CHAIN multiple encounters (see PLAN-FORWARD findings), so an
+        # attack budget alone is flaky. "No soft-lock" means PROGRESS: battle outcomes keep
+        # being recorded. Fail only if in_combat persists with no outcome delta (true stall).
         print("\n  -- combat --")
-        in_combat = bool(state["character"]["in_combat"])
-        if in_combat:
-            resolved = False
+
+        def fight_through(state, budget=120, stall_window=20):
+            """Attack until combat ends. 'No soft-lock' means the player can EXIT combat:
+            fail fast if `stall_window` trailing attacks record no outcome (frozen fight),
+            and fail at `budget` even with outcomes (endless encounter chaining also traps
+            the player). Chained encounters legitimately exceed a small budget, hence 120."""
             rounds = 0
-            for i in range(15):
+            since_outcome = 0
+            outcomes = state["character"]["battles_won"] + state["character"]["battles_lost"]
+            for i in range(budget):
                 state, term, trunc, info = ad.step(10)  # combat_attack
                 rounds += 1
+                now = state["character"]["battles_won"] + state["character"]["battles_lost"]
+                since_outcome = 0 if now > outcomes else since_outcome + 1
+                outcomes = now
                 if not state["character"]["in_combat"]:
-                    resolved = True
-                    break
-            ck("combat resolves end-to-end (no soft-lock)", resolved,
-               f"resolved in {rounds} attacks; won={state['character']['battles_won']} lost={state['character']['battles_lost']}")
-        else:
+                    return state, True, rounds, since_outcome
+                if since_outcome >= stall_window:
+                    return state, False, rounds, since_outcome
+            return state, False, rounds, since_outcome
+
+        in_combat = bool(state["character"]["in_combat"])
+        if not in_combat:
             # No hostile encounter this trip — drive one more trip to force combat.
             ad.step(6); state, *_, info = ad.step(2)
             in_combat = bool(state["character"]["in_combat"])
-            if in_combat:
-                resolved = False
-                for i in range(15):
-                    state, *_ = ad.step(10)
-                    if not state["character"]["in_combat"]:
-                        resolved = True
-                        break
-                ck("combat resolves end-to-end (no soft-lock)", resolved,
-                   f"won={state['character']['battles_won']} lost={state['character']['battles_lost']}")
-            else:
-                ck("combat encounter occurred", False, "no hostile encounter in 2 trips (unexpected)")
+        if in_combat:
+            state, resolved, rounds, since_outcome = fight_through(state)
+            ck("combat resolves end-to-end (no soft-lock)", resolved,
+               (f"resolved in {rounds} attacks" if resolved
+                else (f"STALLED: {since_outcome} trailing attacks with no outcome after {rounds} total"
+                      if since_outcome >= 20 else
+                      f"NEVER EXITED combat in {rounds} attacks despite outcomes (endless chaining)"))
+               + f"; won={state['character']['battles_won']} lost={state['character']['battles_lost']}")
+        else:
+            ck("combat encounter occurred", False, "no hostile encounter in 2 trips (unexpected)")
 
         # ── unmapped action still guarded ─────────────────────────────────
         raised = False
