@@ -106,6 +106,13 @@ def playtest_game(config, strategy_guide, max_actions=100, output_path=None, pro
     if invariant_list:
         print(f"[*] {len(invariant_list)} invariant check(s) active during play")
 
+    # Give the LLM layer the action vocabulary so mis-fielded intents can be salvaged.
+    valid_action_names = set()
+    for action_def in config.action_mappings.values():
+        valid_action_names.add(action_def.get("name") if isinstance(action_def, dict) else str(action_def))
+    if hasattr(llm, "valid_actions"):
+        llm.valid_actions = valid_action_names
+
     run_reports = []
     try:
         for run_index in range(1, runs + 1):
@@ -287,7 +294,12 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
                 continue
 
             elif action_type == "end_turn":
-                pass
+                # If the game maps an end-turn action, "turn complete" means EXECUTE it;
+                # only games without one treat this as a pure signal.
+                end_turn_id = name_to_id.get(value) or name_to_id.get("end_turn")
+                if end_turn_id is not None:
+                    executed_action_id = end_turn_id
+                    current_state, terminated, truncated, step_info = adapter.step(end_turn_id)
 
         except Exception as exec_err:
             print(f"  [Step {step_num}] Execution error: {exec_err}")
@@ -507,6 +519,7 @@ class _OllamaLLM:
 
     def __init__(self, model):
         self.model = model
+        self.valid_actions = set()  # set by playtest_game; enables intent salvage in parsing
         self._host = os.environ.get("OLLAMA_HOST", self.DEFAULT_HOST).rstrip("/")
         self._verify_server()
 
@@ -558,11 +571,18 @@ class _OllamaLLM:
             raise RuntimeError(f"Ollama HTTP {e.code}: {e.read().decode()[:200]}")
 
         raw = body.get("message", {}).get("content", "")
-        return _parse_json_action(raw)
+        return _parse_json_action(raw, self.valid_actions)
 
 
-def _parse_json_action(raw_text):
-    """Parse LLM JSON response, tolerating markdown fences and minor formatting."""
+def _parse_json_action(raw_text, valid_actions=None):
+    """Parse LLM JSON response, tolerating markdown fences and minor formatting.
+
+    `valid_actions` (a set of the config's action names) enables salvaging two common
+    small-model mistakes instead of burning the step as a wait:
+      {"action_type": "<action name>"}          -> action_id with that name
+      {"action_type": "wait", "value": "<action name>"} -> action_id with that name
+    """
+    valid_actions = valid_actions or set()
     text = raw_text.strip()
     if not text:
         return {"action_type": "wait", "value": "", "reasoning": "(empty response)", "expected_outcome": ""}
@@ -586,9 +606,17 @@ def _parse_json_action(raw_text):
             print(f"  [warn] No JSON object in LLM response, skipping step: {text[:100]}")
             return {"action_type": "wait", "value": "", "reasoning": "(no json)", "expected_outcome": ""}
 
-    # Validate required fields; default gracefully
-    if "action_type" not in data or data["action_type"] not in _VALID_ACTION_TYPES:
-        data["action_type"] = "wait"
+    # Validate required fields; salvage recognizable intents, else default gracefully
+    atype = data.get("action_type")
+    if atype not in _VALID_ACTION_TYPES:
+        if atype in valid_actions:  # model put the action NAME in action_type
+            data["action_type"] = "action_id"
+            data["value"] = atype
+        else:
+            data["action_type"] = "wait"
+    if data["action_type"] == "wait" and data.get("value") in valid_actions and data.get("value"):
+        # model hedged: declared wait but named a real action — take it at its word
+        data["action_type"] = "action_id"
     if "value" not in data:
         data["value"] = ""
     if "reasoning" not in data:

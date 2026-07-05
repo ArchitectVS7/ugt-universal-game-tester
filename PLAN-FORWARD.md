@@ -107,7 +107,44 @@ actions exercised (accept 69 / navigate 22 / attack 34 / retreat 15 / buy_fuel 2
 
 ---
 
-## Phase 0 is COMPLETE. Next: Phase 1 (RL/random exploit-hunter) — see the two-tiers section below.
+## Phase 0 COMPLETE · Phase 1 COMPLETE · Phase 2 IN PROGRESS (2026-07-05)
+
+**Phase 2 build is done and Gate-A-reviewed** (commit `ed9f290`): `ugt playtest` drives the real server
+(`engine.type: real_server` branch in `playtester.py`), with `--runs N` aggregation (per-run baseline-delta
+summaries + mean/std/95%-CI), config-driven prompts (`playtest.key_state_paths` — the framework layer now has
+ZERO SpacerQuest-specific code), optional invariant injection (Phase-1 checks run alongside LLM play), adapter
+current-screen tracking (free-form `press_key` works beyond main-menu), and new
+`integrations/spacerquest/{ugt.realserver.config.yaml, run_llm_playtest.py}`. Strategy guide rewritten from
+game source. Review process: parallel sub-agent board per gate (Gate A = UGT-intent + correctness review of
+the diff; Gate B = methodology review of a real run; Gate C = balance verdict vs the game's documented intent
+in `../SpacerQuest/PRD.md`/`User-Manual.md`/`constants.ts`).
+
+**Findings (Phase 2 build, 2026-07-05):**
+- **`end_turn` was a no-op in EVERY mode** — `_act_end_turn` sent `D` but never the `Y` confirm, so
+  `executeEndTurn` (bot turns + tripCount reset) never ran. All Phase-0/1 runs silently never ended a turn.
+  Fixed (adapter now drives the real confirm flow; verified live: trips 2→0, ~3s).
+- **GAME BUG (fixed upstream, commit `c0f1b9fa` in spacerquest-web): nondeterministic user/character
+  resolution.** `dev-login` used a bare `findFirst()` over ALL users; every route + the socket layer used
+  unordered `findFirst({userId})`. With 57 stray test users/characters in the DB (old bridge-era runs), HTTP
+  and socket sessions could bind DIFFERENT characters — observed live as battle counters "resetting" 41→0 and
+  a 40-attack combat stall (attacks hit character A, `in_combat` read from character B). Fixed with
+  oldest-first ordering + dev-setup now enforces one-character-per-user (+ clears `isConqueror`). Test DB
+  purged to 1 user/1 character.
+- **`DAILY_TRIP_LIMIT` env var is dead config** (like `ENCOUNTER_CHANCE`): the real limit is the hardcoded
+  constant **2** in `constants.ts`; `.env.ugt`'s value 10 was never read. Annotated in `.env.ugt`.
+- **A damaged ship is a turn-trap without repair:** losing a fight can zero hull condition → launch fails
+  ("Ship too badly damaged") → can't complete the 2 trips → can't end_turn. Real players repair at the
+  shipyard; `repair_ship` (S→R) is now a mapped action and in the strategy guide.
+- **CLASSIC_MODE=true caps any playtest at 2 deliveries total** (end_turn always refused, day advances in
+  real time only). Balance runs use `CLASSIC_MODE=false`.
+- **Score pacing ground truth:** cargo delivery = **+2 score** (`docking.ts:244`), win at 10,000 → the
+  Conqueror win is a ~5,000-delivery marathon BY DESIGN (BBS daily-turn game). Balance runs measure score
+  VELOCITY and extrapolate; they do not expect a literal win.
+- **Doc-vs-code discrepancy (game doc bug):** `User-Manual.md` Appendix A rank thresholds ≠
+  `constants.ts RANK_THRESHOLDS` (code: 150/300/450/750/1200/1650/2250/2700; the manual self-flags as
+  unverified). Report upstream; code treated as truth.
+- Old `strategy-guide.md` was materially wrong for the real server (claimed 1k cr/fuel 50/hull 5 start, flat
+  10k upgrades, ~50-200 score per delivery). Lesson: **source guides from game code, not memory.**
 
 ---
 
