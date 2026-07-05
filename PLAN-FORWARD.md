@@ -89,11 +89,16 @@ live server entirely through `RealClientAdapter.step(action_id)` — resets, ste
 and re-drives the **trade loop** (accept→navigate→auto-deliver, credits up) AND a **real combat encounter**
 (resolves in <15 attacks, no soft-lock) end-to-end. **13/13 checks.** Regression: spike 7/7, smoke 8/8.
 
-**⚠ Open game finding (surfaced by the DoD run — triage in Phase 1):** in a resolved encounter `battlesWon` AND
-`battlesLost` both incremented (won=2/lost=2 for one trip's combat). Combat *resolves* (DoD unaffected), but the
-win/loss accounting looks wrong — exactly the kind of balance/correctness bug the exploit-hunter should chase.
-Also latent: the socket `combat:action` handler is stateless (never persists/resolves) while the real client uses
-the combat screen — dead/buggy path worth fixing. Details in memory `architecture-pivot-real-server`.
+**Findings (as of Phase 1 exploit-hunter, 2026-07-05):**
+- ~~battlesWon AND battlesLost both increment in one encounter (accounting bug)~~ **RETRACTED — NOT A BUG.** Focused
+  repro (12 base-ship trips → 12 single losses; 1 upgraded trip → 1 clean win) shows each encounter records exactly
+  one outcome. The "won=2/lost=2" was a **cumulative-counter misread**: `dev-setup-character` does NOT reset
+  `battlesWon`/`battlesLost` (only `patrolBattlesWon/Lost`), so they accumulate across episodes, and one trip can
+  chain multiple encounters. Lesson recorded in `[[feedback-intent-over-plan-no-defer]]`: investigate before *confirming*, not just before dismissing.
+- **Minor real finding:** `dev-setup-character` leaves `battlesWon`/`battlesLost` uncleared → episodes aren't fully
+  isolated on those counters (exploit-hunter uses deltas, so unaffected; would matter for absolute-value analysis).
+- **Latent:** the socket `combat:action` handler (`sockets/game.ts:91`) is stateless (never persists/resolves) —
+  the real client uses the combat SCREEN, so it's a dead/buggy path, not player-facing. Code-confirmed.
 
 ---
 
