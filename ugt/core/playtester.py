@@ -207,6 +207,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
     invariant_violations = []
     action_counts = {}
     episode_resets = 0
+    noop_streaks = {}  # action -> consecutive no-material-delta count (contradiction detector)
     ended_early = None
     # Shared mutable context for stateful invariants (exploit-hunter semantics:
     # one ctx per episode — cleared whenever the game resets mid-run).
@@ -357,6 +358,31 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         if is_novel:
             log_entry["is_novel"] = True
             novel_behaviors.append(log_entry)
+
+        # Mechanical contradiction detector (Gate-C fix): the surprise heuristic only sees
+        # deltas that HAPPENED — it is blind to expected deltas that DIDN'T. If the same
+        # action keeps producing no material state change while the agent keeps expecting
+        # one, that's either a silent game refusal (e.g. a hidden precondition) or the
+        # agent stuck in a loop — both are auto-flag-worthy without LLM cooperation.
+        material_delta = {k: v for k, v in delta.items() if k != "turn_number"}
+        noop_key = f"{action_type}:{value}"
+        if not material_delta and action_type in ("action_id", "press_key", "type_text", "end_turn"):
+            noop_streaks[noop_key] = noop_streaks.get(noop_key, 0) + 1
+            if noop_streaks[noop_key] == 3:
+                potential_bugs.append({
+                    "step": step_num,
+                    "description": (
+                        f"AUTO-FLAG (contradiction detector): action '{value}' produced no "
+                        f"material state change {noop_streaks[noop_key]} consecutive times "
+                        f"while the agent expected: {expected[:160]!r}. Silent refusal "
+                        f"(hidden precondition?) or stuck loop."
+                    ),
+                    "state": current_state,
+                    "terminal_text": terminal_text,
+                })
+                print(f"  [!] AUTO-FLAG: '{value}' no-op x{noop_streaks[noop_key]} — silent refusal or stuck loop")
+        else:
+            noop_streaks[noop_key] = 0
 
         action_log.append(log_entry)
 

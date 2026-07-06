@@ -146,6 +146,85 @@ in `../SpacerQuest/PRD.md`/`User-Manual.md`/`constants.ts`).
 - Old `strategy-guide.md` was materially wrong for the real server (claimed 1k cr/fuel 50/hull 5 start, flat
   10k upgrades, ~50-200 score per delivery). Lesson: **source guides from game code, not memory.**
 
+**Phase 2 MAIN CAMPAIGN (cell C) — 10 runs × 100 actions, claude-sonnet-5, 2026-07-05**
+(`results/campaign-10x100-summary.json`; per-run `playtest-run-{i}.json`):
+- **Robustness: perfect.** 1,000 LLM-chosen actions against the live server: 0 invariant violations, 0 crashes,
+  0 early terminations, 0 episode resets. (Combined with Phase 1's 200 random steps: the game does not break.)
+- **Score velocity: 18.4 ± 2.4 per 100 actions** (95% CI; 9 of 10 runs in 18–22). At +2/delivery this is
+  ~9 deliveries per run. Extrapolated win (score 10,000): **~54,000 actions** — the Conqueror is a
+  months-long marathon, consistent with the PRD's daily-turn BBS intent, unreachable in any single session.
+- **Economy: profitable loop, high-variance capex.** credits_gain mean +14,640 but 95% CI [−11,500, +40,700]
+  — CI includes 0. 8/10 runs positive (+6k to +44k); 2 runs deep negative (−87.6k, −28.0k) from aggressive
+  upgrade spending (upgrade price scales (str/10+1)×10k, so chasing strength eats capital fast). Recurring
+  loop economics (deliveries − fuel) are consistently positive; profitability at 100 actions hinges on
+  upgrade discipline.
+- **Combat: ship-investment check works as intended.** 35 wins / 1 loss across all runs after weapons/shields
+  20; loot tiny (~70 cr) — combat is a fuel toll on trade, not an income source (matches original design).
+- **Promotions: exactly 1/run** (COMMANDER honorarium at first end_turn — by construction of the score-148
+  dev baseline; honorarium +20k is a significant chunk of run profit).
+- LLM flagged 0 potential_bugs in 1,000 actions; the mechanical surprise-metric flagged ~34 steps/run for
+  triage. Gate-C reviewers judge both.
+- Cell D re-scoped: measured velocity makes a 600–800-action "win probe" pointless (arithmetic already
+  answers it); replaced with a 1×300 ENDURANCE run (post-capex economy stability, velocity persistence).
+- **Endurance (1×300, `results/endurance-1x300-report.json`):** credits +178,940 (+68k/+69k/+41k per
+  100-action third) — the loop is strongly profitable at scale; score +53; 7W/0L; 20 retreats / 20 repairs /
+  14 refuels (the survival loop works); **the LLM flagged the fuel-in-combat anomaly twice** (steps 94/203).
+
+## GATE C VERDICT (2026-07-05) — sub-agent board: SpacerQuest-intent + methodology reviewers
+
+**Balance verdict: the ECONOMY meets the game's documented design intent under competent play; the
+PROGRESSION does not — and the gap traces to CONFIRMED rewrite deviations from the 1991 source, not to
+design.** Robustness is exemplary: 0 invariant violations, 0 crashes, 0 soft-locks in 1,300 LLM actions +
+200 Phase-1 random steps.
+
+**Corrected statistics (methodology ruling):** the mean±CI headline was the wrong frame. Decomposed:
+**trade-loop OPERATING profit = +71.6k mean / +77.5k median per 100 actions, 10/10 runs positive** (verified
+per-run from state deltas; reconciles exactly). Net-of-capex median +33.8k. Upgrade purchases are a separate
+strategy-variance line (40k–120k per run at LLM discretion). Run 3 excluded from the balance aggregate
+(57/100 actions were silent no-ops — it measures a stall, not the economy; promoted to finding G1). Also:
+the guaranteed +20k COMMANDER honorarium (dev baseline score 148) is LARGER than the raw mean credits_gain —
+back it out and raw mean ≈ −5.4k; future campaigns should start the baseline mid-band (e.g. score 200) or
+subtract it in analysis.
+
+**Findings for the SpacerQuest developers (ranked, all with file:line evidence in the Gate-C reports):**
+1. **CONFIRMED (high, progression): cargo-docking score dropped the original's distance (q6) and
+   battles-won (wb) terms** — flat +2/delivery vs authentic `2 + distance + wins − losses`
+   (`docking.ts:227-244`, comment literally says "regular=TBD"; `SP.DOCK1.txt:163-169`; `patrol.ts:197`
+   already implements it correctly). Root cause of the ~54,000-action conquest extrapolation; restoring it
+   returns pacing to the authentic months-scale order of magnitude.
+2. **CONFIRMED (high, combat/economy): no fuel gate on attacking** — full-power attacks are FREE at
+   fuel < weapons/2; fuel clamps at 0 (`screens/combat.ts:177-178`). The original made weapons
+   "Malfunction!" (attack skipped, enemy still fires — `SP.FIGHT1.txt:308-310`). Not a soft-lock (retreat is
+   always free) but an exploit + authenticity break. Found live by the LLM (endurance steps 94/203) and hit
+   silently in campaign run 9 (4 no-op combat rounds at fuel 0).
+3. **CONFIRMED (medium, economy): Roscoe's strength upgrade grants +10 for the original's per-+1 price**
+   (`upgrades.ts:442` vs `SP.SPEED.txt:158-179`; contradicts its own comment at `upgrades.ts:10-15`; home-
+   system discount omitted). Simultaneously 10× too generous vs the original and a mid-game capital trap vs
+   the shipyard tier path (strength 90 for 10k flat). Explains the campaign's capex-crater runs.
+4. **CONFIRMED (medium, near-soft-lock, root cause open): cargo contracts silently no-op in some state.**
+   Campaign-wide: all 44 successful accepts at credits ≥ 39,870, all 29 failures at ≤ 12,420 (run 3,
+   steps 43+) with NO state feedback — the signing path has no credit check, so the correlation is a proxy
+   (candidate causes: empty/exhausted daily manifest board, location, fuel gate). Player-facing issue: the
+   refusal is silent. Repro data: `playtest-run-3.json`.
+5. **CONFIRMED (medium, docs): User-Manual Appendix A rank thresholds wrong from Admiral up**
+   (600/900/1,100/1,400/1,700 listed vs correct 750/1,200/1,650/2,250/2,700 per `constants.ts` +
+   `SP.END.txt:373-381`).
+6. **CONFIRMED (low, pacing): `DAILY_TRIP_LIMIT = 2` conflates the original's 2 sessions/day with its
+   3 cargo trips/day** (`constants.ts:162`; `travel.ts:203-207` prints the session message when blocking a
+   trip; Manual §2.8). Compounds finding 1.
+7. **PLAUSIBLE (low, docs): PRD §9.2's "~50% combat win rate" metric is unachievable under the authentic
+   jm/jn encounter-band matchmaking** (upgraded ships only ever fight K1 → 35W/1L observed). Amend the
+   metric, not the mechanics.
+
+**UGT methodology findings (fixed or queued):**
+- The LLM alone under-flags: 0 volunteered flags in 1,000 campaign actions despite two known flag-worthy
+  events (run 3's 29 contradictions of the guide; run 9's fuel-0 stall, noticed then rationalized). **Fixed:**
+  playtester now has a mechanical contradiction detector (same action → no material delta ×3 while the agent
+  expects change → auto-filed potential_bug); verified live (auto-flagged gemma's accept-spam on first try).
+- Anywhere "0 bugs in 1,000 actions" is cited it must read "0 LLM-volunteered flags; 2 post-hoc misses".
+- Queued: promote potential_bugs to PLAYTEST-DESIGN's `BugReport` shape; coverage note — verdict covers the
+  core loop only (`deliver_cargo`/`wait` never chosen; jail/lost/bank/surrender paths untouched).
+
 ---
 
 ## After the adapter — the two tiers (user chose "both, in sequence")
