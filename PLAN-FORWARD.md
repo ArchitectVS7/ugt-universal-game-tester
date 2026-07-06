@@ -294,6 +294,23 @@ was net-negative); queued BugReport promotion DONE (all 3 flag sites emit the PL
 Live 1×10 smoke on the fixed server: 10/10 actions, 0 violations, end_turn-after-1-trip verified live,
 honorarium adjustment correct. Remaining before the sonnet campaign (step 1): nothing — it's next.
 
+**SONNET VELOCITY CAMPAIGN (2026-07-06, `results/sonnet-newcode-2026-07-06/`):** 3×100 claude-sonnet-5;
+run 3 truncated at 23 actions by an Anthropic **API credit-balance exhaustion** (billing 400 — top up before
+any further LLM campaigns). Results from the two complete runs + partial:
+- **Score velocity 78 and 113 per 100 actions (run 3 pace ≈ 139) vs 18.4 same-model old-code = 4.2–6.1×
+  (partial-run pace 7.6×) — the 5–15× projection's lower bound is REACHED**, and entirely WITHOUT the +wb
+  term: sonnet went 0W/0L (fuel-disciplined hit-and-retreat: attack while hull > 3, retreat, repair, deliver
+  long hauls). Conquest extrapolation at ~95/100 actions: ~10,400 actions (was ~54,000 pre-fix) — back to the
+  authentic months-scale order. Residual gap: battles_won=+wb has STILL never fired in live campaign play
+  (verified only by upstream unit tests + keystroke probes); a win-seeking guide variant would close it.
+- **Economy: raw credits mean −28.4k/100 actions; honorarium-adjusted −48.4k [CI −81.8k, −15.0k], 2/3 runs
+  deeply negative.** Post-fix competent play is score-positive but credits-NEGATIVE at 100-action scale
+  (upgrades+repairs+fuel outrun delivery payments; zero combat loot without kills). Candidate balance
+  finding for SpacerQuest triage — or a long-horizon effect (capex front-loading) needing an endurance run.
+- **Robustness: 0 invariant violations / 0 flags in 223 more live actions.** Allowance end_turn used
+  deliberately (run 3 step 16 ended at trip 2 to bank a fragile ship). Guide compliance visibly exact
+  (attack-cost arithmetic quoted per combat step). Stage-1 fixes held live.
+
 ---
 
 ## After the adapter — the two tiers (user chose "both, in sequence")
