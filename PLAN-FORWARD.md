@@ -284,6 +284,16 @@ summary of the UGT-side work:
 5. **Baseline honorarium** — still start test baselines mid-band (e.g. score 200) or subtract the +20k
    COMMANDER honorarium in analysis (standing caveat from Gate C).
 
+**STATUS UPDATE (2026-07-06, loose-ends session):** the two NEW findings above are **FIXED in the game**
+(spacerquest `394cf100`, branch `ugt-reverify-findings`: arrive 400s without TravelState; end_turn is now a
+trip ALLOWANCE — suite 1,953 green) — live re-verification of both rides with the next campaign. UGT side:
+step 4 DONE (guide teaches fuel-reserve ≥ 3×floor(weapons/2), fuel-capped upgrades, allowance end_turn);
+step 5 DONE (per-run `credits_gain_honorarium_adjusted` via rank_index deltas × `RANK_HONORARIA` from game
+constants — applied to the haiku reference set it flips mean credits +18.2k → **−1.8k**, so raw haiku play
+was net-negative); queued BugReport promotion DONE (all 3 flag sites emit the PLAYTEST-DESIGN shape).
+Live 1×10 smoke on the fixed server: 10/10 actions, 0 violations, end_turn-after-1-trip verified live,
+honorarium adjustment correct. Remaining before the sonnet campaign (step 1): nothing — it's next.
+
 ---
 
 ## After the adapter — the two tiers (user chose "both, in sequence")

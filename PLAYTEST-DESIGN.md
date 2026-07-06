@@ -75,9 +75,14 @@ Every flagged `potential_bug` should carry enough to reproduce without re-runnin
 }
 ```
 
-`playtester.py` already captures most of this per-step in `action_log`/`potential_bugs`; if bug triage becomes
-a regular activity, promote the ad hoc dict into a small `BugReport` shape so reports are consistent across
-runs.
+**Done (2026-07-06):** `playtester.py::_make_bug_report()` now emits this exact shape from all three flag
+sites — LLM-volunteered `potential_bug`, the `diagnose`/agent-confusion path, and the mechanical contradiction
+detector — so reports are consistent across runs. The design keys above are the floor; each report also keeps
+`step`, `source` (which detector fired), and `description` for triage. `expected`/`actual` are populated per
+site (LLM flag: chosen action's `expected_outcome` vs. the suspected-bug text; contradiction detector: the
+agent's expected change vs. "no material state change after N repeats"). `action_sequence` is the last ~10
+action-log steps plus the action in flight; `terminal_text` is the last ~600 chars at flag time;
+`reproducible` stays `None` until a targeted re-run fills it in.
 
 ## RNG seam pattern (Python), if a new probabilistic feature needs one
 

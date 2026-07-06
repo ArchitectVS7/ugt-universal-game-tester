@@ -235,12 +235,21 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         print(f"  [Step {step_num}] {action_type}({value!r}) — {reasoning[:60]}")
 
         if potential_bug:
-            potential_bugs.append({
-                "step": step_num,
-                "description": potential_bug,
-                "state": current_state,
-                "terminal_text": terminal_text,
-            })
+            potential_bugs.append(_make_bug_report(
+                step=step_num,
+                source="llm_flag",
+                description=potential_bug,
+                action_log=action_log,
+                current_action={"step": step_num, "action_type": action_type,
+                                "action": value, "expected": expected},
+                # The LLM flags a suspected bug in the CURRENT state, before the
+                # chosen action executes — so before/after are the same state here.
+                preconditions=current_state,
+                post_state=current_state,
+                expected=expected,
+                actual=potential_bug,
+                terminal_text=terminal_text,
+            ))
             print(f"  [!] Potential bug flagged: {potential_bug[:80]}")
 
         before_state = json.loads(json.dumps(current_state, default=str))
@@ -276,12 +285,22 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
 
             elif action_type == "diagnose":
                 print(f"  [Step {step_num}] Agent is confused — flagging as potential bug")
-                potential_bugs.append({
-                    "step": step_num,
-                    "description": f"Agent confusion: {reasoning}",
-                    "state": current_state,
-                    "terminal_text": terminal_text,
-                })
+                confusion_desc = f"Agent confusion: {reasoning}"
+                potential_bugs.append(_make_bug_report(
+                    step=step_num,
+                    source="agent_confusion",
+                    description=confusion_desc,
+                    action_log=action_log,
+                    current_action={"step": step_num, "action_type": action_type,
+                                    "action": value, "expected": expected},
+                    # 'diagnose' flags the current state as confusing/broken before
+                    # any state transition — before/after are the same state.
+                    preconditions=current_state,
+                    post_state=current_state,
+                    expected=expected,
+                    actual=confusion_desc,
+                    terminal_text=terminal_text,
+                ))
                 pre_reset = current_state
                 try:
                     current_state = adapter.reset()
@@ -369,17 +388,27 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         if not material_delta and action_type in ("action_id", "press_key", "type_text", "end_turn"):
             noop_streaks[noop_key] = noop_streaks.get(noop_key, 0) + 1
             if noop_streaks[noop_key] == 3:
-                potential_bugs.append({
-                    "step": step_num,
-                    "description": (
-                        f"AUTO-FLAG (contradiction detector): action '{value}' produced no "
-                        f"material state change {noop_streaks[noop_key]} consecutive times "
-                        f"while the agent expected: {expected[:160]!r}. Silent refusal "
-                        f"(hidden precondition?) or stuck loop."
-                    ),
-                    "state": current_state,
-                    "terminal_text": terminal_text,
-                })
+                repeats = noop_streaks[noop_key]
+                contradiction_desc = (
+                    f"AUTO-FLAG (contradiction detector): action '{value}' produced no "
+                    f"material state change {repeats} consecutive times "
+                    f"while the agent expected: {expected[:160]!r}. Silent refusal "
+                    f"(hidden precondition?) or stuck loop."
+                )
+                potential_bugs.append(_make_bug_report(
+                    step=step_num,
+                    source="contradiction_detector",
+                    description=contradiction_desc,
+                    action_log=action_log,
+                    current_action={"step": step_num, "action_type": action_type,
+                                    "action": value, "expected": expected},
+                    preconditions=before_state,
+                    post_state=after_state,
+                    expected=expected,
+                    actual=f"no material state change after {repeats} consecutive repeats",
+                    terminal_text=terminal_text,
+                    extra={"noop_repeats": repeats},
+                ))
                 print(f"  [!] AUTO-FLAG: '{value}' no-op x{noop_streaks[noop_key]} — silent refusal or stuck loop")
         else:
             noop_streaks[noop_key] = 0
@@ -676,6 +705,70 @@ def _parse_json_action(raw_text, valid_actions=None):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _json_safe(value):
+    """Round-trip through JSON so a bug report never carries un-serializable objects."""
+    try:
+        return json.loads(json.dumps(value, default=str))
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _make_bug_report(step, source, description, action_log, current_action,
+                     preconditions, post_state, expected, actual, terminal_text,
+                     tail=10, extra=None):
+    """Structured BugReport shape (PLAYTEST-DESIGN.md §"Bug report shape").
+
+    All three flag sites (LLM-volunteered, agent confusion/diagnose, and the mechanical
+    contradiction detector) emit this SAME shape so reports are consistent across runs.
+    Stays fully game-agnostic — no game-specific keys or strings.
+
+    Design-spec keys (the floor): action_sequence, preconditions, post_state, expected,
+    actual, terminal_text, reproducible. Additional keys kept for triage: step, source,
+    description (source == which detector/flag fired).
+
+    step            — 1-based step index at which the flag fired
+    source          — which flag site emitted this (e.g. "llm_flag")
+    description     — human-readable summary (kept from the legacy ad-hoc dict)
+    action_log      — the run's action log; its tail becomes action_sequence
+    current_action  — the action in flight at flag time, appended to the sequence
+                      (None to append nothing)
+    preconditions   — tracked state before the flagged step
+    post_state      — tracked state after the flagged step
+    expected/actual — what was expected vs. what actually happened, per site
+    terminal_text   — terminal text at flag time (last ~600 chars kept; "" if none)
+    tail            — how many prior log steps to include in action_sequence
+    extra           — optional dict of extra site-specific keys merged in last
+    """
+    sequence = []
+    for e in list(action_log)[-tail:]:
+        sequence.append({
+            "step": e.get("step"),
+            "action_type": e.get("action_type"),
+            "action": e.get("action"),
+            "expected": e.get("expected", ""),
+        })
+    if current_action is not None:
+        sequence.append(current_action)
+
+    report = {
+        # --- design-spec shape (the floor) ---
+        "action_sequence": sequence,
+        "preconditions": _json_safe(preconditions),
+        "post_state": _json_safe(post_state),
+        "expected": expected or "",
+        "actual": actual or "",
+        "terminal_text": (terminal_text or "")[-600:],
+        "reproducible": None,
+        # --- additional triage keys (kept from the legacy dict) ---
+        "step": step,
+        "source": source,
+        "description": description,
+    }
+    if extra:
+        report.update(extra)
+    return report
+
 
 def _build_prompt(config, strategy_guide, current_state, terminal_text, action_log):
     playtest_cfg = config.data.get("playtest", {}) if isinstance(config.data, dict) else {}
