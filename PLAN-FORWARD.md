@@ -227,6 +227,65 @@ subtract it in analysis.
 
 ---
 
+## RE-VERIFICATION (2026-07-06) — all 7 Gate-C findings fixed upstream; fixes CONFIRMED live
+
+SpacerQuest `main` (through `98868f04`) fixed all 7 ranked findings (see the FIX STATUS table in
+`../SpacerQuest/UGT-PLAYTEST-FINDINGS.md`). Re-verified from this repo against the live server
+(`CLASSIC_MODE=false`), 3×100 actions, `claude-haiku-4-5-20251001` (user-directed model; old-code
+haiku control run scored 17/100 vs sonnet's 18.4 → near-equivalent driver for this guide-driven loop).
+
+**Results** (`integrations/spacerquest/results/reverify-newcode-2026-07-06/`, old-code control in
+`results/oldcode-haiku-2026-07-06/`, pre-fix campaign preserved in `results/baseline-2026-07-05/`):
+- **Finding 1 (docking varfix) CONFIRMED FIXED** — per-delivery score = 2 + trip distance − losses,
+  verified per-step (+11 for a 9-distance haul; −4 dockings after lost battles). Also probe-verified
+  +7 for a clean 1→6 hop on both plain-dock and cargo paths.
+- **Finding 2 (fuel malfunction gate) CONFIRMED FIXED** — keystroke-path probe at fuel 1: "Weapons
+  Malfunction!", 0 fuel burned, enemy still fires. The gate BITES: haiku went 0W/14L across 300
+  actions, losing every fight it entered at fuel 0 (vs 35W/1L pre-fix free-attack exploit).
+- **Finding 6 (3-trip cap) CONFIRMED** — 3 trips/turn flow; strategy-guide.md updated (was teaching 2).
+- **Finding 4 (Commandant hijack)** — no recurrence: 0 silent contract-refusal stretches in 300 actions
+  (weapons+shields crossed 50 in every run, the old trigger condition).
+- **Score velocity: 33.7 mean [11, 50, 40] per 100 actions vs 17 same-model old-code (~2-3×).** The
+  5-15× projection needs combat WINS (+wb) and long hauls; under haiku fuel discipline losses (−lb)
+  drag it. Robustness held: **0 invariant violations in 300 actions.**
+
+**NEW findings for SpacerQuest (noted in its UGT-PLAYTEST-FINDINGS.md, uncommitted):**
+1. **Bare `POST /api/navigation/arrive` with no active travel is a score pump** — each call runs the
+   plain-docking varfix (+2, q6=0) and spawns an encounter. New with the varfix-on-plain-docking fix.
+   Not UI-reachable; guard: reject arrive when no TravelState exists.
+2. **Poverty trap: `end_turn` requires tripCount == DAILY_TRIP_LIMIT (now 3)** and refuses otherwise,
+   while `buy_fuel` refuses silently when credits < price (both auto-flagged by the contradiction
+   detector, run 1 steps 35/56). A broke player who can't fund a 3rd trip can neither fly nor end the
+   turn. Recoverable in our runs, but the refusals are invisible in tracked state.
+
+**Process lesson (cost a full aborted 3×100 campaign):** the first campaign ran against a STALE server
+from a previous session still holding :3005 — our fresh server died on EADDRINUSE and the health check
+passed against the old process. After starting a server, verify the LISTENING PID is the process you
+spawned (`lsof -nP -iTCP:3005 -sTCP:LISTEN`) before trusting any results.
+
+### NEXT STEPS (2026-07-06) — in priority order
+
+The authoritative continue-from-here doc is `../SpacerQuest/HANDOVER.md` (rewritten this session);
+summary of the UGT-side work:
+
+1. **Sonnet-competence velocity run** — 3×100 with `claude-sonnet-5`. The 5–15× projection is still
+   unmeasured under play that WINS battles (haiku went 0W/14L, so the `+wb` term never fired live and
+   `−lb` dragged velocity to 2–3×). This is the remaining acceptance check on Finding 1's pacing.
+2. **Coverage expansion (playtester)** — the balance verdict still covers only the core loop. Never
+   exercised: jail, bank, lost-in-space rescue, surrender/tribute, pub, patrol commissions, missions,
+   Andromeda. Extend the action map + strategy guide per system, one at a time.
+3. **API-surface robustness sweep (exploit-hunter)** — the bare-arrive score pump was found by hand,
+   not by the hunter, because the hunter only drives UI-level actions. Add a probe tier that fuzzes
+   the HTTP routes the frontend uses (arrive with no travel, double-arrive, launch-while-in-combat,
+   negative/oversized bodies) and asserts state invariants after each.
+4. **Guide tuning for the new meta** — haiku's weapons-99 death spiral suggests the guide's
+   `upgrade_cheapest when credits > 40k` rule needs a cap tied to fuel economy (each attack costs
+   weapons/2 fuel); consider "keep fuel ≥ 3 × weapons/2 before any launch".
+5. **Baseline honorarium** — still start test baselines mid-band (e.g. score 200) or subtract the +20k
+   COMMANDER honorarium in analysis (standing caveat from Gate C).
+
+---
+
 ## After the adapter — the two tiers (user chose "both, in sequence")
 
 - **Phase 1 — RL/random EXPLOIT-HUNTER (robustness).** Drive random/curiosity-driven *real* inputs + assert

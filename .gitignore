@@ -8,6 +8,9 @@ dist/
 build/
 .eggs/
 
+# Secrets (repo root .env holds ANTHROPIC_API — never commit)
+.env
+
 # UGT generated output
 models/
 logs/
