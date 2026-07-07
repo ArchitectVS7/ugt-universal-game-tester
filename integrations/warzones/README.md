@@ -52,15 +52,27 @@ python3 integrations/warzones/verify_round2.py   # [seed] optional, default 2026
 - **WZ-R3 (major, open):** `ContractScene` never launched (known: scoped out of v0.8).
 - **WZ-R4 — FIXED.** New games were seeded with `Date.now()` only; `launchNewGame`/
   `__FAST_RESET__` accept an optional fixed seed. Same-seed reproduction verified live.
-- **WZ-R5 (minor, open):** the "Turn ended." summary event is stamped with the NEXT
-  turn's number (`turn-manager.ts:116` increments before the `:119` log), while the
-  territory-income `TurnEnd` (`:95`) uses the ending turn — one moment, two turn stamps.
-- **WZ-R7 (minor, open):** combat flee chance uses unseeded `Math.random()`
-  (`CombatScene.ts` `flee()`) — outside the `SeededRandom` discipline used everywhere
-  else; needs an RNG seam before deterministic combat tests. *Scope extended in
-  Round 2:* salvage (`combat-system.ts` `calculateSalvage()`, 0.25–0.5× roll) is also
-  unseeded — three same-seed Round-2 runs paid 488/878/533cr for the same pirate.
-  Same fix: route both through the game's seeded RNG.
+- **WZ-R5 (minor) — FIXED & VERIFIED LIVE (pre-Round-3 cleanup).** The "Turn ended."
+  summary was logged after `turnNumber++` and so stamped with the NEXT turn while the
+  territory-income `TurnEnd` used the ending turn. Now logged before the increment;
+  pinned by `tests/core/services/turn-end-stamp.test.ts`. Round 1's tolerant check
+  passes without emitting the finding anymore.
+- **WZ-R7 (minor) — FIXED & VERIFIED LIVE (pre-Round-3 cleanup).** Combat and bot
+  randomness escaped the `SeededRandom` discipline in four places, making same-seed
+  runs (and both gates) flaky: (a) `CombatScene.flee()` rolled `Math.random()`;
+  (b) `CombatScene`'s `CombatSystem` was seeded from `Date.now()` — three same-seed
+  Round-2 runs paid 488/878/533cr salvage for the same pirate; (c) `executeBotTurn`
+  never passed an RNG to `selectBestAction`, so bot utility jitter and bot-vs-bot
+  `CombatSystem`s were unseeded; (d) `getRandomPersonality()` rolled `Math.random()`
+  at spawn, so same-seed galaxies got different bot personalities. Fix: per-encounter
+  seeding (`pc:<seed>:<turn>:<botId>`) in `CombatScene.init`, flee draws from
+  `CombatSystem.next()`, per-bot-turn RNG (`bot:<seed>:<turn>:<botId>`) in
+  `executeBotTurn`, spawn RNG threaded into personalities. Pinned by
+  `tests/core/combat/combat-rng-seam.test.ts`. Verified live: two back-to-back
+  `verify_round2.py` runs are now byte-identical (salvage 598, hull 50→44, credits
+  5341 each cycle). Residual unseeded sites, all outside the run loop today:
+  `dialogue-service.ts` (cosmetic line pick), `contracts.ts:391` (default param,
+  callers can pass a roll), `legendary-module-system.ts` (no live caller).
 - **WZ-R8 (critical, found in Round 2) — FIXED & VERIFIED LIVE.** The commodity
   registry was NEVER populated in the running game: no code in `src/` called
   `registerCommodity` (only tests did), and the `commodities.json` referenced by
