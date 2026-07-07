@@ -1,0 +1,63 @@
+# UGT config for tarot-war (REAL game, browser adapter).
+#
+# Drives the actual React game served by `npm run dev` in ../tarot-war
+# (Vite, port 5173) through the UGT hooks installed in src/ugt-hooks.ts
+# (window.__GET_STATE__ / __SEND_ACTION__ / __RESET_GAME__(seed)).
+# The hooks are transport only: they call the exact useGameState callbacks
+# the UI buttons receive (never a re-implementation — sim_bridge lesson).
+#
+# Action ids MUST stay in lockstep with the dispatch table in
+# tarot-war/src/ugt-hooks.ts.
+
+project:
+  name: "Tarot War (real client)"
+  version: "0.2.0"
+
+engine:
+  type: "browser"
+  entry: "http://localhost:5173"
+  step_delay_ms: 25   # hooks resolve their own promise after React applies the action
+
+observation_space:
+  type: "box"
+  shape: 6
+  mappings:
+    - path: "currentRound"
+      min: 0
+      max: 1000
+    - path: "player1.score"
+      min: 0
+      max: 500
+    - path: "player2.score"
+      min: 0
+      max: 500
+    - path: "player1.deckCount"
+      min: 0
+      max: 44
+    - path: "player2.deckCount"
+      min: 0
+      max: 44
+    - path: "gameLogTotal"
+      min: 0
+      max: 100000
+
+action_space:
+  type: "discrete"
+  size: 8
+  actions:
+    0: { name: "wait" }
+    1: { name: "play_round" }        # Begin Battle / Draw Cards / Next Round button
+    2: { name: "set_ai_easy" }       # difficulty picker — setup screen only,
+    3: { name: "set_ai_medium" }     #   exactly like the real UI
+    4: { name: "set_ai_hard" }
+    5: { name: "set_mode_classic" }  # game-mode picker — setup screen only
+    6: { name: "set_mode_survival" }
+    7: { name: "set_mode_endless" }
+
+# Placeholder profile: Round 1 is playability verification, not training.
+# Rewards realized score margin, not activity counters.
+reward_profiles:
+  duelist:
+    formula: "(state.player1.score - before.player1.score) - (state.player2.score - before.player2.score)"
+    win_bonus: 50
+    loss_penalty: 50
