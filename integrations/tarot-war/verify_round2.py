@@ -258,14 +258,13 @@ def main() -> int:
             world_idx = max(i for i, e in enumerate(log_a) if "The World completes!" in e["message"])
             post_finish = [e for e in log_a[world_idx + 1:] if e["round"] == log_a[world_idx]["round"]]
             if post_finish:
-                finding("TW-R8 observed live: The World's instant victory does not stop the "
+                finding("TW-R8 regression: The World's instant victory does not stop the "
                         f"round pipeline — {len(post_finish)} log entr{'y' if len(post_finish)==1 else 'ies'} "
                         f"after the victory (e.g. \"{post_finish[-1]['message'][:60]}\"): the round "
                         "keeps resolving (claims/wars/scores mutate) after gamePhase='finished'")
-            finding("TW-R7 (design question, from code read): The World's trigger counts only "
-                    "deck+hand and IGNORES the discard pile — 'total cards <= 7' can fire while "
-                    "the caster still owns many more cards that would recycle back "
-                    "(majorArcana.ts world.execute: totalCards = deck.length + hand.length)")
+            # TW-R7 (World ignored the discard pile) is FIXED upstream and
+            # pinned by effectDeterminism.test.ts — a World ending seen here
+            # now means the caster truly owned <= 7 cards.
         ck("classic: per-dispatch invariants held (phase/scores/log/war-pile/winner)",
            not ta.violations, f"{len(ta.violations)} violations" if ta.violations else f"{da} dispatches clean")
         for viol in ta.violations[:5]:

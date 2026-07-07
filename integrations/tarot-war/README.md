@@ -34,7 +34,7 @@ python3 integrations/tarot-war/verify_round3.py   # [base_seed] optional, defaul
 | 2 | `verify_round2.py` | **PASSED 12/12 (2026-07-07).** All three modes played to completion through the hooks under per-dispatch invariants (legal phase transitions, scores/rounds/log monotonic, war pile empty between dispatches, finished⇒winner, card census with exact Tower −2 accounting), effect coverage aggregated with exact accounting (wars, Towers, Magician/Empress/Hierophant discard moves, recycling), effect-log round stamping, hard-AI same-seed determinism (12 rounds move-for-move), reset preserving mode/difficulty. Surfaced TW-R6 live (86 mis-stamped entries) and TW-R8 (twice — the first fix left the opponent's effect executing post-finish). |
 | 3 | `verify_round3.py` | **PASSED 7/7 (2026-07-07) — TRIAL LADDER COMPLETE.** UGT's real `ExploitHunter` tier: 3 seeded episodes (classic 400 steps to round 175 / endless to 13 / survival), phase-aware seeded policy that picks each episode's mode+difficulty through the real setup pickers and deliberately probes refusal paths (mid-game pickers, unmapped action id 99), 12 invariants after every one of 418 steps (census, phase machine, monotonicity, finished-is-terminal, refused-actions-inert, soft-lock), zero findings, and a same-seed 400-step replay of episode 0 byte-identical. Episode resets normalize mode/difficulty to baseline because RESET_GAME deliberately preserves them — episode independence is the harness's job. |
 
-## Findings registry (R1: 22/22 · R2: 12/12 · R3: 7/7 — ladder complete 2026-07-07)
+## Findings registry (R1: 22/22 · R2: 12/12 · R3: 7/7 — ladder complete, all 8 findings closed 2026-07-07)
 
 - **TW-R1 (critical) — FIXED & VERIFIED LIVE.** Every war round duplicated the
   two tied cards and inflated the war winner's score by +2: the war-resolution
@@ -67,13 +67,23 @@ python3 integrations/tarot-war/verify_round3.py   # [base_seed] optional, defaul
   `__RESET_GAME__(seed)` seeds it. Pinned by
   `src/__tests__/utils/seededRandom.test.ts`; verified live (deck fingerprints
   + 3-round replays identical across same-seed resets, twice).
-- **TW-R4 (minor, OPEN — watch).** tarot-war's own
-  `gameModes.test.tsx` › "logs an ENDLESS-tagged special entry" failed ONCE
-  mid-session and never again (0 repros in ~50 subsequent runs: 30× isolated,
-  10× file, 8× full suite; assertion detail lost). TW-R2's undefined-card
-  corruption is the best crash-class candidate and is now fixed. Watch during
-  Round 2, which plays endless mode to completion repeatedly through the real
-  game.
+- **TW-R4 (minor) — CLOSED: root-caused to TW-R2 with high confidence
+  (2026-07-07 closure pass).** tarot-war's own `gameModes.tsx` › "logs an
+  ENDLESS-tagged special entry" failed ONCE mid-session (assertion detail
+  lost) and never again. The crash chain, demonstrated link by link:
+  (1) at flake time the code had the TW-R1 fix but NOT the TW-R2 fix — endless
+  mode skipped the total-exhaustion check, and a probe on that code PROVED a
+  fully cardless player made the reducer draw `undefined` and push `undefined`
+  into the winner's discard; (2) endless recycling shuffles that discard back
+  into the deck, so `undefined` can land in the AI's look-ahead window;
+  (3) `selectCard` (medium — the flake test's difficulty) reads `card.power`
+  over that window (`aiOpponent.ts` candidates loop) → TypeError inside
+  PLAY_ROUND → the test fails once, non-reproducibly (rng-dependent drain).
+  The chain is severed at link 1 by TW-R2 (game ends before any undefined
+  draw; pinned by `warConservation.test.ts`). Soak on fixed code: 0 failures
+  in 25 full-suite + 60 gameModes-file runs, on top of ~50 clean runs earlier
+  and Round 2/3 playing endless to completion live. No remaining reachable
+  crash path; closed.
 - **TW-R6 (major, found in Round 2) — FIXED & VERIFIED LIVE.** Every log entry
   pushed during REVEAL/PRE_COMBAT/EFFECT_EXECUTE (Oracle flavor lines,
   Temperance balancing, all card-effect messages) was stamped with the
@@ -85,11 +95,18 @@ python3 integrations/tarot-war/verify_round3.py   # [base_seed] optional, defaul
   live (86 mis-stamped entries in one classic game). Fix: the round number is
   now stamped at the top of the round-resolution path; pinned by
   `src/__tests__/integration/logRoundStamps.test.ts`.
-- **TW-R7 (design question, OPEN — report upstream).** The World's instant
-  victory triggers on `deck.length + hand.length <= 7` and IGNORES the discard
-  pile — the "comeback" can fire while the caster still owns 20+ cards that
-  would recycle back. Needs a design decision (include discard, or rename the
-  trigger); not changed unilaterally.
+- **TW-R7 (bug, was filed as design question) — FIXED & VERIFIED LIVE
+  (2026-07-07 closure pass).** The World's instant victory triggered on
+  `deck.length + hand.length <= 7`, IGNORING the discard pile — the "comeback"
+  could fire while the caster still owned 20+ cards that recycle back. Closed
+  as a code-vs-text bug, not a design fork: the card's own text
+  (`cardEffects.json`: "If you have 7 or fewer cards, win the game instantly")
+  counts what the player *has*, and the discard is theirs (it recycles into
+  the deck). The count now includes the discard. Pinned by
+  `src/__tests__/utils/effectDeterminism.test.ts` (small deck + full discard
+  must NOT fire; deck+discard ≤ 7 fires). Gates re-verified: the seed-20260708
+  classic still ends via The World at round 34 — at that point the caster
+  genuinely owns ≤ 7 cards.
 - **TW-R8 (major, found in Round 2) — FIXED & VERIFIED LIVE.** The World's
   instant victory set `gamePhase='finished'` mid-pipeline but the round KEPT
   RESOLVING: the opponent's card effect still executed (a post-finish Magician
@@ -101,11 +118,14 @@ python3 integrations/tarot-war/verify_round3.py   # [base_seed] optional, defaul
   the other card's effect is skipped and the interrupted round's cards return
   to their owners' discards (census intact). Pinned in
   `warConservation.test.ts`.
-- **TW-R5 (minor, OPEN).** `ActiveEffect` ids use wall-clock uniqueness
-  (`tower-${Date.now()}`, `sun-${Date.now()}` in `majorArcana.ts`) — two
-  effects minted in the same millisecond collide, and ids are nondeterministic
-  across same-seed runs (harmless today: nothing looks effects up by id, and
-  the UGT projection omits them). Fold into any future effect-system cleanup.
+- **TW-R5 (minor) — FIXED (2026-07-07 closure pass).** `ActiveEffect` ids used
+  wall-clock uniqueness (`tower-${Date.now()}`, `sun-${Date.now()}` in
+  `majorArcana.ts`) — two effects minted in the same millisecond collided, and
+  ids differed across same-seed runs. Now deterministic:
+  `<source>-<playerId>-r<round>` (unique per game — one copy of each card per
+  deck, and replays land on different rounds). No consumer reads these ids
+  today (verified by grep), so this is determinism hygiene with zero behavior
+  change. Pinned by `effectDeterminism.test.ts`.
 - **Observation (design, not a bug):** in classic mode `score` is *cumulative
   cards claimed*, while the win comes from opponent total-exhaustion — so the
   classic winner can finish with the LOWER score (seen live: 178–179). Worth a
@@ -117,8 +137,9 @@ python3 integrations/tarot-war/verify_round3.py   # [base_seed] optional, defaul
   a watch-item.
 
 Baseline: tarot-war's own suite must stay green — 434 tests pre-integration,
-**444 after the trial's pinning tests** (seededRandom ×6, warConservation ×3,
-logRoundStamps ×1). Run `npx vitest run` in `../tarot-war`.
+**448 after the trial's pinning tests** (seededRandom ×6, warConservation ×3,
+logRoundStamps ×1, effectDeterminism ×4). Run `npx vitest run` in
+`../tarot-war`.
 
 Action ids in `ugt.config.yaml` must stay in lockstep with the dispatch table in
 `tarot-war/src/ugt-hooks.ts`.
