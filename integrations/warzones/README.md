@@ -19,7 +19,8 @@ lsof -nP -iTCP:3000 -sTCP:LISTEN
 
 # 3. From the UGT repo root:
 python3 integrations/warzones/verify_round1.py
-python3 integrations/warzones/verify_round2.py   # [seed] optional, default 20260706
+python3 integrations/warzones/verify_round2.py    # [seed] optional, default 20260706
+python3 integrations/warzones/verify_round10.py   # [base_seed] optional, default 20260707
 ```
 
 ## Test ladder (test → fix upstream → re-test)
@@ -28,9 +29,9 @@ python3 integrations/warzones/verify_round2.py   # [seed] optional, default 2026
 |---|---|---|
 | 1 | `verify_round1.py` | **PASSED 23/23 (2026-07-06).** One full turn cycle: player acts, all info accessible, bots act, cycle repeats. Probes record findings (determinism, trading dead end WZ-R2, combat run-destruction WZ-R1). |
 | 2 | `verify_round2.py` | **PASSED 12/12 (2026-07-07).** Three clean consecutive turn cycles: a real buy AND sell through TradingScene's own handlers (credits/cargo/stock deltas == quoted prices), a mid-run combat the run survives (salvage credited exactly, hull damage persists, pirate removed), and per-action invariants (AP ≥ 0, fog monotonic, turnNumber only via end_turn, credits ≥ 0, cargo ≤ capacity, no stuck scene). Surfaced WZ-R8. |
-| 3 | `verify_round10.py` (next) | Ten turns; exploit-hunter invariants (AP never negative, fog monotonic, no stuck scene). |
+| 3 | `verify_round10.py` | **PASSED 6/6 (2026-07-07).** Ten-turn cycles under UGT's real `ExploitHunter` tier (its first browser-game outing): 3 seeded episodes × 400 steps with a scene-aware heuristic policy, 11 invariants checked after every step (AP ≥ 0, fog monotonic, turn only via end_turn, credits ≥ 0, cargo ≤ capacity, hull bounds, no bot resurrection, world constants stable, event log append-only, no stuck scene, no soft-lock), all 12 hook actions attempted, and a same-seed replay of episode 0 reproducing all 400 steps exactly. Surfaced WZ-R9. Trial ladder complete. |
 
-## Findings registry (Round 1: 2026-07-06 23/23; Round 2: 2026-07-07 12/12, seed 20260706)
+## Findings registry (R1: 23/23 · R2: 12/12 · R3: 6/6 — ladder complete 2026-07-07)
 
 - **WZ-R1 (critical) — FIXED & VERIFIED LIVE.** Was: any pirate encounter destroyed the
   run. Three compounding bugs fixed: (a) `CombatScene.init` expected `{botId}` but
@@ -73,6 +74,19 @@ python3 integrations/warzones/verify_round2.py   # [seed] optional, default 2026
   5341 each cycle). Residual unseeded sites, all outside the run loop today:
   `dialogue-service.ts` (cosmetic line pick), `contracts.ts:391` (default param,
   callers can pass a roll), `legendary-module-system.ts` (no live caller).
+- **WZ-R9 (major, found in Round 3) — FIXED & VERIFIED LIVE.** A successful flee
+  never marked the combat resolved: `CombatScene.flee()` only scheduled
+  `exitToMap` 3 wall-clock seconds later, so during that window ATTACK still
+  worked and re-engaged an enemy the player had already escaped ("COMBAT
+  AVOIDED" on screen, full combat resolution anyway) — a rules hole for humans
+  and a wall-clock race for agents. Surfaced by Round 3's coverage gate: flee
+  was unreachable at 30% sampling (combats resolve in 1–2 steps), and forcing
+  coverage exposed the timing hazard. Fix: on flee success the scene now sets
+  `combatResolved = true` with a `CombatOutcome.Fled` result (the enum existed,
+  unused) before the delayed exit; `attack()` already guards on
+  `combatResolved`. Verified live: flee exercised 5× in Round 3 and the
+  same-seed 400-step replay stayed byte-identical with combat+flee in the
+  trajectory.
 - **WZ-R8 (critical, found in Round 2) — FIXED & VERIFIED LIVE.** The commodity
   registry was NEVER populated in the running game: no code in `src/` called
   `registerCommodity` (only tests did), and the `commodities.json` referenced by
