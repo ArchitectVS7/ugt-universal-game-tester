@@ -43,7 +43,7 @@ observation_space:
 
 action_space:
   type: "discrete"
-  size: 10
+  size: 12
   actions:
     0: { name: "wait" }
     1: { name: "end_turn" }
@@ -55,6 +55,8 @@ action_space:
     7: { name: "combat_flee" }       # CombatScene: attempt to flee
     8: { name: "trade_open" }        # GalaxyMapScene: click TRADE (needs port in sector)
     9: { name: "trade_exit" }        # TradingScene: leave the port back to the map
+    10: { name: "trade_buy" }        # TradingScene: Buy-1 handler, deterministic commodity pick
+    11: { name: "trade_sell" }       # TradingScene: Sell-All handler, first held commodity port buys
 
 # Placeholder profile: Round 1 is playability verification, not training.
 # Rewards realized exploration/economy deltas, not activity counters.

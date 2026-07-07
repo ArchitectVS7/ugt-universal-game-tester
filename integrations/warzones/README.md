@@ -19,17 +19,18 @@ lsof -nP -iTCP:3000 -sTCP:LISTEN
 
 # 3. From the UGT repo root:
 python3 integrations/warzones/verify_round1.py
+python3 integrations/warzones/verify_round2.py   # [seed] optional, default 20260706
 ```
 
 ## Test ladder (test → fix upstream → re-test)
 
 | Round | Script | Gate |
 |---|---|---|
-| 1 | `verify_round1.py` | One full turn cycle: player acts, all info accessible, bots act, cycle repeats. Probes record findings (determinism, trading dead end WZ-R2, combat run-destruction WZ-R1). |
-| 2 | `verify_round3.py` (next) | Three clean turn cycles incl. surviving a port arrival and a combat entry+return. Requires WZ-R1/WZ-R2 fixes. |
-| 3 | `verify_round10.py` (later) | Ten turns; exploit-hunter invariants (AP never negative, fog monotonic, no stuck scene). |
+| 1 | `verify_round1.py` | **PASSED 23/23 (2026-07-06).** One full turn cycle: player acts, all info accessible, bots act, cycle repeats. Probes record findings (determinism, trading dead end WZ-R2, combat run-destruction WZ-R1). |
+| 2 | `verify_round2.py` | **PASSED 12/12 (2026-07-07).** Three clean consecutive turn cycles: a real buy AND sell through TradingScene's own handlers (credits/cargo/stock deltas == quoted prices), a mid-run combat the run survives (salvage credited exactly, hull damage persists, pirate removed), and per-action invariants (AP ≥ 0, fog monotonic, turnNumber only via end_turn, credits ≥ 0, cargo ≤ capacity, no stuck scene). Surfaced WZ-R8. |
+| 3 | `verify_round10.py` (next) | Ten turns; exploit-hunter invariants (AP never negative, fog monotonic, no stuck scene). |
 
-## Findings registry (Round 1 final run: 2026-07-06, 23/23 checks, seed 20260706)
+## Findings registry (Round 1: 2026-07-06 23/23; Round 2: 2026-07-07 12/12, seed 20260706)
 
 - **WZ-R1 (critical) — FIXED & VERIFIED LIVE.** Was: any pirate encounter destroyed the
   run. Three compounding bugs fixed: (a) `CombatScene.init` expected `{botId}` but
@@ -56,7 +57,23 @@ python3 integrations/warzones/verify_round1.py
   territory-income `TurnEnd` (`:95`) uses the ending turn — one moment, two turn stamps.
 - **WZ-R7 (minor, open):** combat flee chance uses unseeded `Math.random()`
   (`CombatScene.ts` `flee()`) — outside the `SeededRandom` discipline used everywhere
-  else; needs an RNG seam before deterministic combat tests.
+  else; needs an RNG seam before deterministic combat tests. *Scope extended in
+  Round 2:* salvage (`combat-system.ts` `calculateSalvage()`, 0.25–0.5× roll) is also
+  unseeded — three same-seed Round-2 runs paid 488/878/533cr for the same pirate.
+  Same fix: route both through the game's seeded RNG.
+- **WZ-R8 (critical, found in Round 2) — FIXED & VERIFIED LIVE.** The commodity
+  registry was NEVER populated in the running game: no code in `src/` called
+  `registerCommodity` (only tests did), and the `commodities.json` referenced by
+  comments didn't exist. `TradingScene.displayCommodities()` iterates
+  `getAllCommodities()` → the commodities tab rendered **zero rows** for a real
+  player; ports had prices/stock internally (`port-factory.ts` hardcodes bases)
+  but the entire player-facing economy loop was unreachable. First player-driven
+  trade attempt found it instantly. Fix upstream: new `src/core/data/commodities.json`
+  (ids/bases in lockstep with `setupCommodities()`), `loadCommodities()` in
+  `commodity.ts` mirroring `loadModules()`, called from `BootScene.create()`;
+  pinned by `tests/core/entities/commodity-loading.test.ts`. Verified live: buy 1
+  contraband at 280cr quoted = 280cr paid, stock −1; sell 2 fuel_ore at 108cr →
+  +216cr, stack cleared.
 
 Also removed (2026-07-06): the retired Python re-implementation. `examples/warzones/`
 (UGT repo) and `warzones-ml/` (warzones repo) are deleted — recoverable from git
