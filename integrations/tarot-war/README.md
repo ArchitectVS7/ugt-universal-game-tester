@@ -23,6 +23,7 @@ lsof -nP -iTCP:5173 -sTCP:LISTEN
 # 3. From the UGT repo root:
 python3 integrations/tarot-war/verify_round1.py   # [seed] optional, default 20260707
 python3 integrations/tarot-war/verify_round2.py   # [base_seed] optional, default 20260708
+python3 integrations/tarot-war/verify_round3.py   # [base_seed] optional, default 20260709
 ```
 
 ## Test ladder (test → fix upstream → re-test)
@@ -31,9 +32,9 @@ python3 integrations/tarot-war/verify_round2.py   # [base_seed] optional, defaul
 |---|---|---|
 | 1 | `verify_round1.py` | **PASSED 22/22 (2026-07-07, twice back-to-back).** One full playable loop: seeded reset, info accessibility, setup pickers through real handlers, player turn + Oracle answers in-turn, UI auto-advance cycles the game, second cycle, same-seed determinism (fingerprint + 3-round replay), full classic game terminates (161 rounds, 3 wars, 2 Tower destructions) with all 44 cards conserved. Surfaced TW-R1 live (21/22 on first run). |
 | 2 | `verify_round2.py` | **PASSED 12/12 (2026-07-07).** All three modes played to completion through the hooks under per-dispatch invariants (legal phase transitions, scores/rounds/log monotonic, war pile empty between dispatches, finished⇒winner, card census with exact Tower −2 accounting), effect coverage aggregated with exact accounting (wars, Towers, Magician/Empress/Hierophant discard moves, recycling), effect-log round stamping, hard-AI same-seed determinism (12 rounds move-for-move), reset preserving mode/difficulty. Surfaced TW-R6 live (86 mis-stamped entries) and TW-R8 (twice — the first fix left the opponent's effect executing post-finish). |
-| 3 | (planned) | Exploit-hunter invariants: seeded episodes of random/heuristic action streams, invariants after every step (card conservation, score bounds, no stuck phase, no soft-lock, finished is terminal), full action coverage incl. refusal paths, same-seed episode replay byte-identical. |
+| 3 | `verify_round3.py` | **PASSED 7/7 (2026-07-07) — TRIAL LADDER COMPLETE.** UGT's real `ExploitHunter` tier: 3 seeded episodes (classic 400 steps to round 175 / endless to 13 / survival), phase-aware seeded policy that picks each episode's mode+difficulty through the real setup pickers and deliberately probes refusal paths (mid-game pickers, unmapped action id 99), 12 invariants after every one of 418 steps (census, phase machine, monotonicity, finished-is-terminal, refused-actions-inert, soft-lock), zero findings, and a same-seed 400-step replay of episode 0 byte-identical. Episode resets normalize mode/difficulty to baseline because RESET_GAME deliberately preserves them — episode independence is the harness's job. |
 
-## Findings registry (R1: 22/22 · R2: 12/12)
+## Findings registry (R1: 22/22 · R2: 12/12 · R3: 7/7 — ladder complete 2026-07-07)
 
 - **TW-R1 (critical) — FIXED & VERIFIED LIVE.** Every war round duplicated the
   two tied cards and inflated the war winner's score by +2: the war-resolution
