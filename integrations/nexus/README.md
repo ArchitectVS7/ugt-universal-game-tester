@@ -69,10 +69,39 @@ env var (the key is not committed).
 | P0 | `spike_nexus.py` · `smoke_nexus_adapter.py` · `verify_dod.py` | **PASSED (2026-07-08): spike 8/8, smoke 5/5, DoD 7/7** against the live server. Bring-up validated end-to-end; UGT drives a real hack loop (scan → connect → exploit → compromise) through the adapter. Surfaced + fixed **NX-P0-1** (R0 tutorial-gate blocker). |
 | R1 | `verify_round1.py` · `invariants.py` | **PASSED (2026-07-09): 25/25** live (spike 8/8). One full `the_breadcrumb` loop through the real handler — `help/status/missions/clues` → refuse garbage → `accept` → `scan` → `connect` → refuse `exploit sql_injection` → `exploit weak_password` (seeded roll) → `crack` (seeded password) → `cat` (mission completes) → refuse re-accept → `progress`. Rewards land EXACTLY once (credits +1000, xp Σgain+250, underground +5, both flags); every refusal game-state inert (rngCounter excluded, NX-OBS-1); per-command invariant sweep clean across BOTH runs; same-seed replay byte-identical + non-vacuous; 8-seed variance sweep varies. Surfaced + fixed **NX-R1-1** (seed dropped canonical mission ids) and **NX-R1-2** (missions with a skipped optional objective completed SILENTLY). |
 | R2 | `verify_round2.py` · `invariants.py` | **PASSED (2026-07-09): 36/36** live (spike 8/8). UGT drove the FULL 8-mission story spine (the_breadcrumb → following_the_money → project_meridian → dead_drop → into_the_syndicate → the_other → the_architect → point_of_no_return) to a REAL win through the adapter — `gameStatus.isComplete`, `ending "ending_liberation"`, 8/8 story missions — under **all three difficulty modes** (normal/tutorial/hardcore). Per mission: status completed, reward flags present, credits delta + xp residual (xpΔ − Σ command xpGain) == core-story.json rewards. Rewards land EXACTLY once (re-accept a completed mission → refused + game-state inert). Per-command invariant sweep CLEAN across every command of every mode (failed-hack retries success:false + inert). **XP scaling:** first `cat work_vpn.txt` (base 5) returns round(5·mult) == tutorial 4 / normal 5 / hardcore 8, while mission-reward xp AND credits are mode-INVARIANT (250 / 1000 constant across modes). Same-seed determinism over the non-vacuous M1-M4 prefix is byte-identical (commands + CommandResults + rngCounter + normalized final state; transcript carries a `[Success Rate:` roll AND the seeded `met_sp3ctr3` delivery). Hardcore ~30% odds → the retry-to-success loop earned its keep (a failed-then-retried hack observed). Surfaced + fixed **NX-R2-1** (`talk` could never unlock) and **NX-R2-2** (`talk` refused with AI disabled → `contact_npc` unfireable). |
-| R3 | _todo_ | UGT `ExploitHunter` tier: seeded stochastic policy (`NexusHttpAdapter.policy` stub is the seam), N-episode robustness run with invariants after every step (no negative resources, rngCounter +1/command, no crash/soft-lock, no stuck screen), deduped `Finding`/`HuntReport`. |
+| R3 | `verify_round3.py` · `invariants.py` | **PASSED (2026-07-09): 9/9** live (spike 8/8). UGT's REAL `ExploitHunter` (`ugt/core/exploit_hunter.py`, unchanged) drove **4 seeded episodes x 90 steps = 360 real steps** through the live handler under a phase-aware heuristic + refusal-probing policy over the whole 20-action vocabulary (args composed from OBSERVED state — discovered servers, analyzed vulns, listed files, live missions, met NPCs). **ZERO findings:** all 7 R1/R2 per-command invariants (wrapped to the hunter's `(before, action_id, info, after, ctx)` signature) PLUS 2 R3-only stateful invariants (completed-story-missions monotonic; no 25-in-a-row soft-lock) held on EVERY step — including under the 8 deliberate refusal probes (ungated/bad-vuln hacks, undiscovered connect, early choose, re-accept-completed, cat-missing-file, an intentionally-unmapped action id `action_18`, and a garbage token), each refused AND game-state inert. Every mapped action id was attempted (full coverage), the walk made real progress (7 server-compromises, 30 seeded rolls, a story mission completed in every episode), and a **fresh same-seed re-run of episode 0 replays byte-identically** (command stream + CommandResult stream + rngCounter progression + normalized per-step player-state, 90/90 steps) and is non-vacuous (≥1 seeded roll). No game defect surfaced → no upstream fix; game suite unchanged (unit 1265 / integration 173). **NEXUS trial ladder COMPLETE.** |
 
 ## Findings registry
 
+- **NX-R3 (round result) — CLEAN (2026-07-09).** *No game defect.* The
+  `ExploitHunter` robustness walk (4x90 real steps, 9 invariants/step, 8 refusal
+  probe kinds) surfaced **zero** invariant violations / crashes / soft-locks /
+  statistical anomalies against the live handler, so there was nothing to fix
+  upstream — the game repo is untouched by R3. Two issues were caught and fixed
+  **in the harness** (`verify_round3.py`), NOT the game: (1) the available-mission
+  parser first captured the trailing quote from `Use 'accept <id>' to start`
+  (sending `accept the_breadcrumb'` → every accept refused → an accept-loop that
+  correctly tripped the `no_soft_lock` invariant); tightened the regex to stop at
+  the closing quote. (2) A purely uniform connect/cat almost never aligns with a
+  mission's one specific server+file inside a short episode, so the policy now
+  leans on the known spine targets (the same test-side game knowledge R1/R2 use)
+  as its progress heuristic while keeping 15% refusal probes + 10% uniform
+  exploration + stochastic vuln/file fallbacks + the unmapped/garbage ids — with
+  a guaranteed-legal back-off after a run of failures (a real player retreats to
+  info commands; a genuine game soft-lock would still surface because those would
+  also fail). The `no_soft_lock` invariant remains fully armed at 25.
+- **NX-R3-OBS (coverage characterization, not a defect).** Verified independently
+  that R3 is a genuine robustness walk, not "R2 with probes": R2's *scripted* spine
+  wins all 8 missions, but R3 plateaus at exactly **1/8 story missions in every
+  4×90 episode** — stochasticity dominates (cat+ls alone are 217/360 steps, 20
+  distinct verbs, all 8 probe kinds fire). The honest limitation: because the walk
+  rarely gets past mission 1, the deeper directed legs — `crack` mission legs and
+  the **success** paths of `talk`/`choose` (`the_other`/`the_architect`/
+  `point_of_no_return`) — are exercised here only in their **refused** form; their
+  success paths are covered by **R2**, not re-covered by R3. This does not weaken
+  the R3 gate (breadth + refusals + all-invariants-every-step + byte-identical
+  replay). To strengthen later: longer episodes or a mid-spine seeded reset would
+  let the directed machinery drive the mid/late-game legs under the random walk.
 - **NX-R2-1 (game fix) — FIXED & VERIFIED LIVE (2026-07-09).** *Severity: high
   (story unwinnable over the real command surface).* **Live observation:** with
   BOTH `met_sp3ctr3` and `met_axiom` present in the player's flags, `talk sp3ctr3`
@@ -199,4 +228,8 @@ pins + net 1 for the reworked NX-R2-2 AI-disabled talk test), **integration
 173/173**, 0 skipped.
 
 Action ids in `ugt.config.yaml` must stay in lockstep with
-`NexusHttpAdapter._compose_command`.
+`NexusHttpAdapter._compose_command` (R3 extended the vocabulary 14 → 20:
+`talk`/`choose`/`disconnect`/`whoami` + an intentionally-unmapped `action_18`
+and a `garbage` token; ids 0–13 are frozen). The base adapter holds only simple
+defaults for the new verbs — all state-driven/probe/objective-directed arg
+composition lives in `verify_round3.py::R3NexusAdapter`, never the base.

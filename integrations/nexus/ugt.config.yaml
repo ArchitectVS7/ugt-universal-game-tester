@@ -58,7 +58,7 @@ observation_space:
 
 action_space:
   type: "discrete"
-  size: 14
+  size: 20
   actions:
     0: { name: "status" }       # info — always available
     1: { name: "help" }
@@ -74,6 +74,17 @@ action_space:
     11: { name: "backdoor" }
     12: { name: "download" }
     13: { name: "accept" }      # accept <mission_id> from live missions[]
+    # R3 (exploit-hunter): ids 0-13 above are frozen in lockstep; 14-19 extend
+    # the vocabulary for the robustness walk. State-driven/probe arg composition
+    # lives in the R3 subclass; the base _compose_command only holds simple
+    # defaults for talk/choose/disconnect/whoami/garbage.
+    14: { name: "talk" }        # talk <npc_handle> — narrative contact verb
+    15: { name: "choose" }      # choose <path> — Act-3 climax choice
+    16: { name: "disconnect" }  # clears the carried currentServerId
+    17: { name: "whoami" }      # info — bare
+    18: { name: "action_18" }   # INTENTIONALLY unmapped in _compose_command:
+                                #   sent verbatim -> "Command not found" (a refusal probe)
+    19: { name: "garbage" }     # composes a nonsense token -> "Command not found"
 
 # Placeholder profile: P0 is a playability/robustness bring-up, not training.
 # Rewards realized progress (compromises + story-mission completions), not

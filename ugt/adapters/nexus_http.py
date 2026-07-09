@@ -287,11 +287,13 @@ class NexusHttpAdapter(BaseAdapter):
     # ── Command composition (heuristic, from real state; NO game logic) ──────
     # A small fixed Phase-0 command set. Args are filled from live state where a
     # command needs them; a full stochastic policy is R3 (see `policy` below).
-    _BARE = {"status", "help", "missions", "scan", "ls", "analyze", "escalate", "backdoor"}
+    _BARE = {"status", "help", "missions", "scan", "ls", "analyze", "escalate",
+             "backdoor", "whoami", "disconnect"}
     _COMMON_VULN = "weak_password"
     _CRACK_TARGET = "/etc/shadow"
     _GENERIC_FILE = "/etc/passwd"
     _FALLBACK_MISSION = "the_breadcrumb"
+    _GARBAGE_TOKEN = "zzqq_nx_garble"
 
     def _compose_command(self, name: str) -> str:
         """Turn an action name into a concrete command string using current state.
@@ -322,7 +324,18 @@ class NexusHttpAdapter(BaseAdapter):
         if name == "accept":
             mid = self._pick_mission(state)
             return f"accept {mid}" if mid else f"accept {self._FALLBACK_MISSION}"
-        # Unknown action name: send it bare (honest — the game will report it).
+        # R3 verbs — simple, stateless defaults. The R3 subclass overrides
+        # _compose_command to fill these from live state / probe kinds; these are
+        # the base fallbacks so the whole action vocabulary is still driveable
+        # through the plain adapter.
+        if name == "talk":
+            return "talk sp3ctr3"
+        if name == "choose":
+            return "choose liberation"
+        if name == "garbage":
+            return self._GARBAGE_TOKEN
+        # Unknown action name (e.g. the intentionally-unmapped "action_18"): send
+        # it bare (honest — the game will report "Command not found").
         return name
 
     def _pick_connect_target(self, state):
