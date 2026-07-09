@@ -1,0 +1,85 @@
+# UGT config for nexus-world-builder (REAL Next.js game, HTTP adapter).
+#
+# Drives the actual running nexus-world-builder server (apps/game, `next dev`)
+# over its three UGT test routes via NexusHttpAdapter — never a re-implementation
+# (the sim_bridge lesson). See integrations/nexus/README.md for the run recipe.
+#
+# NOTE: the adapter does the string->int coercion (xp/credits arrive as BigInt
+# decimal STRINGS) and derives the *Count fields below from player-state; the
+# obs paths here index into the adapter's parsed state dict, not the raw route.
+#
+# Action ids MUST stay in lockstep with NexusHttpAdapter._compose_command.
+
+project:
+  name: "NEXUS World Builder (real server)"
+  version: "0.1.0"
+
+engine:
+  type: "real_server"
+  base_url: "http://127.0.0.1:3100"
+  # api_key falls back to the TEST_API_KEY env var when omitted (preferred, so
+  # the key is not committed). Must match the server's TEST_API_KEY.
+  api_key: null
+  episode_seed: "ugt-nexus-seed"
+  difficulty: "normal"          # tutorial | normal | hardcore
+  baseline: "post_tutorial"     # fresh leaves scan/connect/exploit LOCKED (R0/NX-P0-1)
+  connect_timeout: 60.0
+  request_timeout: 30.0
+  step_cap: 1000
+
+observation_space:
+  type: "box"
+  shape: 8
+  mappings:
+    - path: "level"
+      min: 0
+      max: 50
+    - path: "xp"
+      min: 0
+      max: 1000000
+    - path: "credits"
+      min: 0
+      max: 10000000
+    - path: "rngCounter"
+      min: 0
+      max: 1000000
+    - path: "discoveredServersCount"
+      min: 0
+      max: 200
+    - path: "compromisedServersCount"
+      min: 0
+      max: 200
+    - path: "missionsCompletedCount"
+      min: 0
+      max: 50
+    - path: "gameStatus.completedStoryMissions"
+      min: 0
+      max: 8
+
+action_space:
+  type: "discrete"
+  size: 14
+  actions:
+    0: { name: "status" }       # info — always available
+    1: { name: "help" }
+    2: { name: "missions" }
+    3: { name: "scan" }         # recon — populates discoveredServers
+    4: { name: "connect" }      # -> stateChanges.currentServerId (adapter carries it)
+    5: { name: "ls" }           # requires a connection
+    6: { name: "cat" }          # requires a connection
+    7: { name: "analyze" }
+    8: { name: "exploit" }      # seeded success roll -> compromise
+    9: { name: "crack" }
+    10: { name: "escalate" }
+    11: { name: "backdoor" }
+    12: { name: "download" }
+    13: { name: "accept" }      # accept <mission_id> from live missions[]
+
+# Placeholder profile: P0 is a playability/robustness bring-up, not training.
+# Rewards realized progress (compromises + story-mission completions), not
+# activity counters. Refined once the exploit-hunter/LLM tiers are wired (R2/R3).
+reward_profiles:
+  progress:
+    formula: "(state.compromisedServersCount - before.compromisedServersCount) + 10 * (state.missionsCompletedCount - before.missionsCompletedCount)"
+    win_bonus: 100
+    loss_penalty: 0
