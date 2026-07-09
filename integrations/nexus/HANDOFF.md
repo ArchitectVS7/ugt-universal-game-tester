@@ -8,12 +8,12 @@ registry + ladder table).
 
 ## TL;DR — where we are
 
-Phase 0 of the UGT bridge is **complete and verified live**. Both repos are on
-`main` and green. **R1 is the next step.** No open defects.
+Phase 0 **and R1** of the UGT bridge are **complete and verified live**. Both
+repos are on `main` and green. **R2 is the next step.** No open defects.
 
 | | |
 |---|---|
-| **NEXUS game** | `~/Dev/Games/nexus-world-builder`, app in `apps/game`. On `main` = `origin/main`. Gates green: typecheck+lint clean, **unit 1257/1257, integration 172/172** (0 skip). |
+| **NEXUS game** | `~/Dev/Games/nexus-world-builder`, app in `apps/game`. On `main` = `origin/main`. Gates green: typecheck+lint clean, **unit 1259/1259, integration 173/173** (0 skip). |
 | **UGT framework** | `~/Dev/Games/_UGT Universal Game Tester`. On `main` (NO git remote — local commits only). Nexus integration under `integrations/nexus/` + adapter `ugt/adapters/nexus_http.py`. |
 
 **Work on `main` in both repos now** — the earlier "do not merge to main" constraint
@@ -100,7 +100,7 @@ recipe (docker run + prisma db push + `seed.ts` THEN `seed-story.ts`) is in `REA
 | Round | Script | Gate | Status |
 |---|---|---|---|
 | Phase 0 | spike/smoke/verify_dod | spike 8/8, smoke 5/5, DoD 7/7 | **DONE (live-green 2026-07-08)** |
-| R1 | `verify_round1.py` | one playable loop + same-seed determinism + per-command invariants | **NEXT** |
+| R1 | `verify_round1.py` + `invariants.py` | one playable loop + same-seed determinism + per-command invariants | **DONE (live-green 2026-07-09): 25/25 + spike 8/8.** Fixed NX-R1-1 (seed dropped canonical mission ids) + NX-R1-2 (silent mission completion when optional objective skipped); game suite unit 1259 / integration 173 green. |
 | R2 | `verify_round2.py` | full 8-mission spine to a win via the adapter, all difficulty modes, per-command invariants | TODO |
 | R3 | `verify_round3.py` | real `ExploitHunter`: seeded episodes, heuristic policy, invariants every step, zero findings, byte-identical replay | TODO |
 

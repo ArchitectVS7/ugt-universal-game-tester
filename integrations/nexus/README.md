@@ -67,12 +67,56 @@ env var (the key is not committed).
 | Round | Script(s) | Gate |
 |---|---|---|
 | P0 | `spike_nexus.py` · `smoke_nexus_adapter.py` · `verify_dod.py` | **PASSED (2026-07-08): spike 8/8, smoke 5/5, DoD 7/7** against the live server. Bring-up validated end-to-end; UGT drives a real hack loop (scan → connect → exploit → compromise) through the adapter. Surfaced + fixed **NX-P0-1** (R0 tutorial-gate blocker). |
-| R1 | _todo_ | Playability sweep: broaden the command surface (ls/cat/crack/analyze/escalate/backdoor/download/accept), drive a mission to an `objectivesCompleted` increment, exercise every action id through the adapter, invariants after each step. |
+| R1 | `verify_round1.py` · `invariants.py` | **PASSED (2026-07-09): 25/25** live (spike 8/8). One full `the_breadcrumb` loop through the real handler — `help/status/missions/clues` → refuse garbage → `accept` → `scan` → `connect` → refuse `exploit sql_injection` → `exploit weak_password` (seeded roll) → `crack` (seeded password) → `cat` (mission completes) → refuse re-accept → `progress`. Rewards land EXACTLY once (credits +1000, xp Σgain+250, underground +5, both flags); every refusal game-state inert (rngCounter excluded, NX-OBS-1); per-command invariant sweep clean across BOTH runs; same-seed replay byte-identical + non-vacuous; 8-seed variance sweep varies. Surfaced + fixed **NX-R1-1** (seed dropped canonical mission ids) and **NX-R1-2** (missions with a skipped optional objective completed SILENTLY). |
 | R2 | _todo_ | Full modes/paths: multi-server compromise chains, mission acceptance→progress→completion, difficulty variants, same-seed replay of a multi-command episode byte-identical. |
 | R3 | _todo_ | UGT `ExploitHunter` tier: seeded stochastic policy (`NexusHttpAdapter.policy` stub is the seam), N-episode robustness run with invariants after every step (no negative resources, rngCounter +1/command, no crash/soft-lock, no stuck screen), deduped `Finding`/`HuntReport`. |
 
 ## Findings registry
 
+- **NX-R1-1 (game fix) — FIXED & VERIFIED LIVE (2026-07-09).** *Severity:
+  medium.* **Live observation:** `accept the_breadcrumb` (the canonical stable
+  mission id used by mission prereqs, objective events, the loader, and the
+  game's own `full-story-winnable` test) returned
+  `{success:false, error:"Mission with ID the_breadcrumb not found"}`; the
+  `missions` command instead quoted `accept <cuid>`. No mission could be
+  accepted by its canonical id, so the R1 loop (and every downstream check)
+  failed. **Root cause:** `prisma/seed-story.ts::storyMissionToPrismaInput`
+  built the Prisma create input WITHOUT the `id` field, so `Mission.id` fell
+  back to `@default(cuid())` — the canonical string id (`the_breadcrumb`) was
+  discarded at seed time. `acceptMission` looks a mission up by
+  `Mission.findUnique({ where: { id } })`, so only the random per-seed cuid
+  resolved. This also made seeded mission ids non-deterministic across
+  re-seeds and diverged from the intended contract (`full-story-winnable`
+  seeds `id: m.id`). **Fix (nexus `main`):** extracted the mapper to
+  `src/lib/narrative/story-mission-seed.ts` (importable + side-effect-free) and
+  set `id: mission.id`; `seed-story.ts` now imports it. **Pinning test:**
+  `tests/unit/narrative/story-mission-seed.test.ts` (2 cases: every story
+  mission's canonical id is preserved and is never a cuid; `the_breadcrumb`
+  maps to its canonical id with core fields intact).
+- **NX-R1-2 (game fix) — FIXED & VERIFIED LIVE (2026-07-09).** *Severity:
+  medium (player-facing feedback).* **Live observation:** completing
+  `the_breadcrumb` (via `cat` of the VPN file) auto-completed the mission and
+  granted its rewards (player-state showed `status:completed`, credits +1000,
+  xp +250, underground +5), but the `cat` output showed only
+  `"[✓] Objective completed! (1 objective)"` — never the `"MISSION COMPLETED!"`
+  banner or the reward summary. The mission completed SILENTLY. **Root cause:**
+  `src/lib/missions/objective-tracker.ts::checkMissionObjectives` decided
+  `missionCompleted` by comparing `getProgress().objectiveStats.completed ===
+  total`, which counts OPTIONAL objectives. `the_breadcrumb` has 2 required + 1
+  optional objective; after the 2 required were done `completed(2) !==
+  total(3)`, so it reported `missionCompleted:false` — even though the
+  authoritative `mission.updateObjective` had already auto-completed the mission
+  on REQUIRED objectives only (mission.ts: `requiredObjectives.every(...)`) and
+  granted rewards. Any mission whose optional objective is skipped completes
+  with no completion feedback — including the game's very first story mission.
+  **Fix (nexus `main`):** `checkMissionObjectives` now trusts the status
+  returned by `updateObjective` (`updatedMission.status === "completed"`) rather
+  than re-deriving completion (and drops the redundant `getProgress`
+  round-trip). **Pinning test:** `tests/integration/missions/objective-tracker.test.ts`
+  new case "reports missionCompleted when the last REQUIRED objective finishes
+  and an optional one is skipped (NX-R1-2)" (required done + optional skipped →
+  `missionCompleted:true` + rewards + `"MISSION COMPLETED!"`); existing mocks
+  updated to return the authoritative `status` the real router returns.
 - **NX-P0-1 (tooling/game fix) — FIXED & VERIFIED LIVE (2026-07-08).** The
   `reset-episode` route only had a **fresh** baseline (level 1, empty
   `storyFlags`/`unlockedCommands`), which leaves the entire hacking surface
@@ -105,8 +149,9 @@ env var (the key is not committed).
   seeds.
 
 Game-side baseline: `apps/game`'s own gates stay green after the NX-P0-1 change —
-typecheck clean, lint 0 errors, **unit 1257/1257**, **integration 172/172**
-(was 169; +3 reset-episode `post_tutorial` cases), 0 skipped.
+typecheck clean, lint 0 errors, **unit 1259/1259** (+2 story-mission-seed
+NX-R1-1 pins), **integration 173/173** (+1 objective-tracker NX-R1-2 pin),
+0 skipped.
 
 Action ids in `ugt.config.yaml` must stay in lockstep with
 `NexusHttpAdapter._compose_command`.
