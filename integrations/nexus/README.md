@@ -68,11 +68,56 @@ env var (the key is not committed).
 |---|---|---|
 | P0 | `spike_nexus.py` · `smoke_nexus_adapter.py` · `verify_dod.py` | **PASSED (2026-07-08): spike 8/8, smoke 5/5, DoD 7/7** against the live server. Bring-up validated end-to-end; UGT drives a real hack loop (scan → connect → exploit → compromise) through the adapter. Surfaced + fixed **NX-P0-1** (R0 tutorial-gate blocker). |
 | R1 | `verify_round1.py` · `invariants.py` | **PASSED (2026-07-09): 25/25** live (spike 8/8). One full `the_breadcrumb` loop through the real handler — `help/status/missions/clues` → refuse garbage → `accept` → `scan` → `connect` → refuse `exploit sql_injection` → `exploit weak_password` (seeded roll) → `crack` (seeded password) → `cat` (mission completes) → refuse re-accept → `progress`. Rewards land EXACTLY once (credits +1000, xp Σgain+250, underground +5, both flags); every refusal game-state inert (rngCounter excluded, NX-OBS-1); per-command invariant sweep clean across BOTH runs; same-seed replay byte-identical + non-vacuous; 8-seed variance sweep varies. Surfaced + fixed **NX-R1-1** (seed dropped canonical mission ids) and **NX-R1-2** (missions with a skipped optional objective completed SILENTLY). |
-| R2 | _todo_ | Full modes/paths: multi-server compromise chains, mission acceptance→progress→completion, difficulty variants, same-seed replay of a multi-command episode byte-identical. |
+| R2 | `verify_round2.py` · `invariants.py` | **PASSED (2026-07-09): 36/36** live (spike 8/8). UGT drove the FULL 8-mission story spine (the_breadcrumb → following_the_money → project_meridian → dead_drop → into_the_syndicate → the_other → the_architect → point_of_no_return) to a REAL win through the adapter — `gameStatus.isComplete`, `ending "ending_liberation"`, 8/8 story missions — under **all three difficulty modes** (normal/tutorial/hardcore). Per mission: status completed, reward flags present, credits delta + xp residual (xpΔ − Σ command xpGain) == core-story.json rewards. Rewards land EXACTLY once (re-accept a completed mission → refused + game-state inert). Per-command invariant sweep CLEAN across every command of every mode (failed-hack retries success:false + inert). **XP scaling:** first `cat work_vpn.txt` (base 5) returns round(5·mult) == tutorial 4 / normal 5 / hardcore 8, while mission-reward xp AND credits are mode-INVARIANT (250 / 1000 constant across modes). Same-seed determinism over the non-vacuous M1-M4 prefix is byte-identical (commands + CommandResults + rngCounter + normalized final state; transcript carries a `[Success Rate:` roll AND the seeded `met_sp3ctr3` delivery). Hardcore ~30% odds → the retry-to-success loop earned its keep (a failed-then-retried hack observed). Surfaced + fixed **NX-R2-1** (`talk` could never unlock) and **NX-R2-2** (`talk` refused with AI disabled → `contact_npc` unfireable). |
 | R3 | _todo_ | UGT `ExploitHunter` tier: seeded stochastic policy (`NexusHttpAdapter.policy` stub is the seam), N-episode robustness run with invariants after every step (no negative resources, rngCounter +1/command, no crash/soft-lock, no stuck screen), deduped `Finding`/`HuntReport`. |
 
 ## Findings registry
 
+- **NX-R2-1 (game fix) — FIXED & VERIFIED LIVE (2026-07-09).** *Severity: high
+  (story unwinnable over the real command surface).* **Live observation:** with
+  BOTH `met_sp3ctr3` and `met_axiom` present in the player's flags, `talk sp3ctr3`
+  still returned `{success:false, error:"Unknown command", "Command not found:
+  talk"}` — the verb never unlocked, so the two `contact_npc` missions (`the_other`,
+  `the_architect`) could never complete and the 8-mission spine was unwinnable.
+  **Root cause:** `src/lib/commands/registry.ts` gated `talk` with a SINGLE
+  unlock path AND-ing `["met_sp3ctr3", "met_axiom", "met_mercury"]`
+  (`unlock-checker.ts`: AND within a path, OR across paths). `met_mercury` is
+  granted only on delivery of the MERCURY message, whose trigger `bureau_aware` is
+  a DEAD trigger — no command, cat, or reward ever grants it — so the AND-path
+  could never be satisfied. The `full-story-winnable` integration test only passed
+  because it seeds `ALL_COMMANDS` into `unlockedCommands` (an explicit bypass in
+  `checkCommandUnlock`), masking the dead gate. **Fix (nexus `main`):** rewrote
+  `talk.unlockRequirements` to OR-logic across the REACHABLE met flags —
+  `paths: [{flags:["met_sp3ctr3"]}, {flags:["met_axiom"]}, {flags:["met_elena_cross"]}]`
+  — so meeting ANY surfaced NPC unlocks the verb; the authoritative per-NPC gate
+  stays in the executor (`talkCommand`'s `met_<npc>` check), so an unlocked `talk`
+  still refuses `talk e.cross` until Elena Cross is actually met. **Pinning test:**
+  `tests/unit/commands/unlock-checker.test.ts` (describe "talk command unlock
+  (NX-R2-1)": locked with no met flag; unlocks on `met_sp3ctr3` / `met_axiom` /
+  `met_elena_cross` alone; regression guard that `met_mercury` is NOT required and
+  `met_sp3ctr3`+`met_axiom` unlocks).
+- **NX-R2-2 (game fix) — FIXED & VERIFIED LIVE (2026-07-09).** *Severity: high
+  (story unwinnable in the deterministic / AI-off env).* **Live observation:**
+  after NX-R2-1, `talk sp3ctr3` passed the unlock + met gates but returned
+  `{success:false, error:"AI dialogue disabled", "AI dialogue is currently
+  disabled."}` — so `contact_npc` never fired and `the_other`/`the_architect`
+  never completed. **Root cause:**
+  `src/lib/commands/executors-narrative.ts::talkCommand` required
+  `AI_ENABLED && AI_DIALOGUE_ENABLED` and short-circuited to a failure BEFORE
+  emitting `ObjectiveEvents.contactNpc`. The bridge / replay env runs AI OFF by
+  design (`AI_*=false`, `UGT_DETERMINISTIC=1`), and the winnable test only worked
+  because it set `AI_ENABLED=true` and MOCKED `generateNPCDialogue` — neither of
+  which exists over the real HTTP surface. The objective is to CONTACT the NPC,
+  not to obtain an AI-authored reply. **Fix (nexus `main`, AI-off-preserving):**
+  when AI dialogue is disabled, `talk` now delivers the NPC's canonical SCRIPTED
+  lines (`npc.messages[0].lines`) and STILL emits `contact_npc` so the objective
+  completes deterministically, with `xpGain:5` parity. The met-gate above still
+  enforces WHO may be talked to; no live AI model is required. **Pinning test:**
+  `tests/unit/commands/executors-narrative.test.ts` (describe "talkCommand — AI
+  disabled delivers scripted dialogue (NX-R2-2)": with `AI_ENABLED=false`, `talk
+  sp3ctr3` succeeds with canned lines + `xpGain 5`, and `mission.updateObjective`
+  is called to complete the `contact_npc` objective — replaced the old test that
+  asserted the now-removed failure behavior).
 - **NX-R1-1 (game fix) — FIXED & VERIFIED LIVE (2026-07-09).** *Severity:
   medium.* **Live observation:** `accept the_breadcrumb` (the canonical stable
   mission id used by mission prereqs, objective events, the loader, and the
@@ -148,10 +193,10 @@ env var (the key is not committed).
   unseeded-RNG bug. Verified empirically: 23 success / 1 fail over 24 distinct
   seeds.
 
-Game-side baseline: `apps/game`'s own gates stay green after the NX-P0-1 change —
-typecheck clean, lint 0 errors, **unit 1259/1259** (+2 story-mission-seed
-NX-R1-1 pins), **integration 173/173** (+1 objective-tracker NX-R1-2 pin),
-0 skipped.
+Game-side baseline: `apps/game`'s own gates stay green after the R2 fixes —
+typecheck clean, lint 0 errors, **unit 1265/1265** (+6 vs R1: 5 NX-R2-1 talk-unlock
+pins + net 1 for the reworked NX-R2-2 AI-disabled talk test), **integration
+173/173**, 0 skipped.
 
 Action ids in `ugt.config.yaml` must stay in lockstep with
 `NexusHttpAdapter._compose_command`.

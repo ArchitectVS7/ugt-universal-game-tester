@@ -8,12 +8,13 @@ registry + ladder table).
 
 ## TL;DR — where we are
 
-Phase 0 **and R1** of the UGT bridge are **complete and verified live**. Both
-repos are on `main` and green. **R2 is the next step.** No open defects.
+Phase 0, **R1 and R2** of the UGT bridge are **complete and verified live**. Both
+repos are on `main` and green. **R3 (the `ExploitHunter` robustness tier) is the
+next step.** No open defects.
 
 | | |
 |---|---|
-| **NEXUS game** | `~/Dev/Games/nexus-world-builder`, app in `apps/game`. On `main` = `origin/main`. Gates green: typecheck+lint clean, **unit 1259/1259, integration 173/173** (0 skip). |
+| **NEXUS game** | `~/Dev/Games/nexus-world-builder`, app in `apps/game`. On `main` = `origin/main`. Gates green: typecheck+lint clean, **unit 1265/1265, integration 173/173** (0 skip). |
 | **UGT framework** | `~/Dev/Games/_UGT Universal Game Tester`. On `main` (NO git remote — local commits only). Nexus integration under `integrations/nexus/` + adapter `ugt/adapters/nexus_http.py`. |
 
 **Work on `main` in both repos now** — the earlier "do not merge to main" constraint
@@ -101,26 +102,32 @@ recipe (docker run + prisma db push + `seed.ts` THEN `seed-story.ts`) is in `REA
 |---|---|---|---|
 | Phase 0 | spike/smoke/verify_dod | spike 8/8, smoke 5/5, DoD 7/7 | **DONE (live-green 2026-07-08)** |
 | R1 | `verify_round1.py` + `invariants.py` | one playable loop + same-seed determinism + per-command invariants | **DONE (live-green 2026-07-09): 25/25 + spike 8/8.** Fixed NX-R1-1 (seed dropped canonical mission ids) + NX-R1-2 (silent mission completion when optional objective skipped); game suite unit 1259 / integration 173 green. |
-| R2 | `verify_round2.py` | full 8-mission spine to a win via the adapter, all difficulty modes, per-command invariants | TODO |
-| R3 | `verify_round3.py` | real `ExploitHunter`: seeded episodes, heuristic policy, invariants every step, zero findings, byte-identical replay | TODO |
+| R2 | `verify_round2.py` | full 8-mission spine to a win via the adapter, all difficulty modes, per-command invariants | **DONE (live-green 2026-07-09): 36/36 + spike 8/8.** Drove the whole spine to `isComplete` + `ending_liberation` + 8/8 under normal/tutorial/hardcore; per-mission credits/xp-residual/flags asserted, rewards-once (double-reward probe), invariant sweep clean every mode, XP scaling 4/5/8 with mode-invariant mission rewards, M1-M4 same-seed replay byte-identical. Fixed **NX-R2-1** (`talk` AND-gate required the ungrantable `met_mercury` → never unlocked) + **NX-R2-2** (`talk` refused with AI off → `contact_npc` unfireable); game suite unit 1259→1265 / integration 173 green. |
+| R3 | `verify_round3.py` | real `ExploitHunter`: seeded episodes, heuristic policy, invariants every step, zero findings, byte-identical replay | TODO (next) |
 
 After R3 (robustness tier complete): the LLM balance-playtester tier (gated on API
 credits), whose findings should drive the **deferred progression-math rebalance**
 (tool tiers / skill cap / hidden +15% baseline / XP curve) — held back on purpose so
 it's evidence-driven, with the user in the loop.
 
-## R1 spec (next)
+## R3 spec (next)
 
-`verify_round1.py` drives, via the adapter: seeded `reset(post_tutorial)` →
-`accept the_breadcrumb` → `exploit` its server → `cat` the target file → assert the
-objective/mission completes and rewards land once; exercise the info commands; assert
-per-command invariants; and prove **same-seed determinism** (two runs → identical
-output + rngCounter + player-state). Gate: all checks pass; findings → fixed upstream
-on `main` with a pinning test.
+`verify_round3.py` graduates from R2's FIXED scripted spine to the real UGT
+`ExploitHunter` robustness tier: a seeded stochastic/heuristic policy
+(`NexusHttpAdapter.policy` is the seam) drives N episodes of REAL actions, with
+`invariants.check_command` asserted after EVERY step (reuse `invariants.py`
+unchanged — the 7 predicates carry across all rounds), deduped `Finding`/`HuntReport`,
+and byte-identical same-seed replay. Zero surviving findings = gate. Findings →
+fixed upstream on `main` with a pinning test, then re-run (the dual-validation loop).
 
-Invariant set (from `ROLLOUT.md`): no crash · credits/xp ≥ 0 · xp non-decreasing ·
-`rngCounter` +1 per command · storyFlags append-only · legal mission transitions ·
-refused-actions **state-inert** · same-seed determinism.
+Invariant set (from `ROLLOUT.md`, encoded in `invariants.py`): no crash · credits/xp
+≥ 0 · xp non-decreasing · `rngCounter` +1 per command · storyFlags append-only ·
+legal mission transitions · refused-actions **state-inert** · same-seed determinism.
+
+R2 (done) is the reference for driving the game over HTTP: `verify_round2.py` +
+`invariants.py`. The full 8-mission spine (with exact IPs, vulns, file paths, and
+the two `talk` legs + `choose`) lives in `verify_round2.py::SPINE` — reuse it as the
+"known-good playthrough" an ExploitHunter episode can seed from or check against.
 
 ---
 
