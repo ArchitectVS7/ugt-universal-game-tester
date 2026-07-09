@@ -67,6 +67,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import invariants  # noqa: E402  (local module, from integrations/nexus/)
 
 from ugt.adapters.nexus_http import NexusHttpAdapter  # noqa: E402
+from ugt.core.trial import GateRunner, first_divergence  # noqa: E402
 from ugt.utils.config_parser import UgtConfig  # noqa: E402
 
 CONFIG_PATH = "integrations/nexus/ugt.config.yaml"
@@ -206,32 +207,7 @@ def _mission(state, mid):
     return None
 
 
-def _normalize_state(state):
-    """Canonical player-state for a byte-identical compare. player-state exposes
-    NO timestamp fields, so nothing to strip — only sort the set-like fields."""
-    return {
-        "level": state.get("level"),
-        "xp": state.get("xp"),
-        "credits": state.get("credits"),
-        "rngCounter": state.get("rngCounter"),
-        "difficulty": state.get("difficulty"),
-        "reputation": dict(sorted((state.get("reputation") or {}).items())),
-        "storyFlags": sorted(state.get("storyFlags") or []),
-        "unlockedCommands": sorted(state.get("unlockedCommands") or []),
-        "currentServerId": state.get("currentServerId"),
-        "discoveredServers": sorted(state.get("discoveredServers") or []),
-        "compromisedServers": sorted(
-            (c.get("ipAddress") for c in state.get("compromisedServers") or []),
-            key=lambda x: (x is None, x),
-        ),
-        "missions": sorted(
-            ((m.get("missionId"), m.get("status"),
-              m.get("objectivesCompleted", 0), m.get("objectivesTotal", 0))
-             for m in state.get("missions") or []),
-            key=lambda t: (t[0] is None, t[0]),
-        ),
-        "gameStatus": state.get("gameStatus") or {},
-    }
+_normalize_state = invariants.normalize_state
 
 
 def run_spine(ad, seed, difficulty, missions=SPINE):
@@ -338,16 +314,8 @@ def main() -> int:
     seed = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_SEED
     cfg = UgtConfig(CONFIG_PATH)
     ad = NexusHttpAdapter(cfg)
-    checks: list[tuple[str, bool, str]] = []
-    findings: list[str] = []
-
-    def ck(name, ok, detail=""):
-        checks.append((name, ok, detail))
-        print(f"  [{'PASS' if ok else 'FAIL'}] {name}" + (f"  — {detail}" if detail else ""))
-
-    def finding(text):
-        findings.append(text)
-        print(f"  [FINDING] {text}")
+    gate = GateRunner()
+    ck, finding = gate.ck, gate.finding
 
     print(f"NEXUS Round 2 — full 8-mission spine to a win, 3 modes (seed {seed!r})\n")
 
@@ -465,7 +433,7 @@ def main() -> int:
             ck("determinism: identical command sequence", False,
                f"length differs {len(cmds1)} vs {len(cmds2)}")
         else:
-            div = next((i for i in range(len(cmds1)) if cmds1[i] != cmds2[i]), None)
+            div = first_divergence(cmds1, cmds2)
             ck("determinism: identical command sequence (M1-M4)", div is None,
                "identical" if div is None else f"first divergence at {div}")
         res1 = [r["result"] for r in pre1["records"]]
@@ -577,23 +545,14 @@ def main() -> int:
     finally:
         ad.close()
 
-    passed = sum(1 for _, ok, _ in checks if ok)
-    total = len(checks)
-    print(f"\n{'=' * 70}")
-    if findings:
-        print("FINDINGS (bugs/anomalies in the game, to fix upstream):")
-        for i, f in enumerate(findings, 1):
-            print(f"  {i}. {f}")
-        print()
-    if passed == total:
-        print(f"ROUND 2 MET — {passed}/{total} checks. UGT drove the FULL 8-mission spine to "
-              f"a real win (isComplete + ending_liberation + 8/8) through the real handler, "
-              f"across normal/tutorial/hardcore; rewards landed once, XP scaled per mode while "
-              f"mission rewards stayed mode-invariant, every command held the invariants, and "
-              f"the M1-M4 prefix replays byte-identically. Ready for Round 3.")
-        return 0
-    print(f"ROUND 2 NOT MET — {passed}/{total} checks passed. Fix the failures above and re-run.")
-    return 1
+    return gate.finish(
+        "ROUND 2",
+        "UGT drove the FULL 8-mission spine to a real win (isComplete + "
+        "ending_liberation + 8/8) through the real handler, across "
+        "normal/tutorial/hardcore; rewards landed once, XP scaled per mode "
+        "while mission rewards stayed mode-invariant, every command held the "
+        "invariants, and the M1-M4 prefix replays byte-identically. "
+        "Ready for Round 3.")
 
 
 if __name__ == "__main__":

@@ -49,6 +49,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import invariants  # noqa: E402  (local module, from integrations/nexus/)
 
 from ugt.adapters.nexus_http import NexusHttpAdapter  # noqa: E402
+from ugt.core.trial import GateRunner, first_divergence  # noqa: E402
 from ugt.utils.config_parser import UgtConfig  # noqa: E402
 
 CONFIG_PATH = "integrations/nexus/ugt.config.yaml"
@@ -88,32 +89,7 @@ def _crack_tail(output):
     return output[idx + len(marker):].splitlines()[0]
 
 
-def _normalize_state(state):
-    """Canonical player-state for a byte-identical compare. player-state exposes
-    NO timestamp fields, so nothing to strip — only sort the set-like fields."""
-    return {
-        "level": state.get("level"),
-        "xp": state.get("xp"),
-        "credits": state.get("credits"),
-        "rngCounter": state.get("rngCounter"),
-        "difficulty": state.get("difficulty"),
-        "reputation": dict(sorted((state.get("reputation") or {}).items())),
-        "storyFlags": sorted(state.get("storyFlags") or []),
-        "unlockedCommands": sorted(state.get("unlockedCommands") or []),
-        "currentServerId": state.get("currentServerId"),
-        "discoveredServers": sorted(state.get("discoveredServers") or []),
-        "compromisedServers": sorted(
-            (c.get("ipAddress") for c in state.get("compromisedServers") or []),
-            key=lambda x: (x is None, x),
-        ),
-        "missions": sorted(
-            ((m.get("missionId"), m.get("status"),
-              m.get("objectivesCompleted", 0), m.get("objectivesTotal", 0))
-             for m in state.get("missions") or []),
-            key=lambda t: (t[0] is None, t[0]),
-        ),
-        "gameStatus": state.get("gameStatus") or {},
-    }
+_normalize_state = invariants.normalize_state
 
 
 def run_episode(ad, seed):
@@ -190,16 +166,8 @@ def main() -> int:
     seed = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_SEED
     cfg = UgtConfig(CONFIG_PATH)
     ad = NexusHttpAdapter(cfg)
-    checks: list[tuple[str, bool, str]] = []
-    findings: list[str] = []
-
-    def ck(name: str, ok: bool, detail: str = ""):
-        checks.append((name, ok, detail))
-        print(f"  [{'PASS' if ok else 'FAIL'}] {name}" + (f"  — {detail}" if detail else ""))
-
-    def finding(text: str):
-        findings.append(text)
-        print(f"  [FINDING] {text}")
+    gate = GateRunner()
+    ck, finding = gate.ck, gate.finding
 
     print(f"NEXUS Round 1 — one full mission loop + determinism (seed {seed!r})\n")
     try:
@@ -363,7 +331,7 @@ def main() -> int:
             ck("same-seed determinism: identical command sequence", False,
                f"length differs: run1={len(cmds1)} run2={len(cmds2)}")
         else:
-            first_div = next((i for i in range(len(cmds1)) if cmds1[i] != cmds2[i]), None)
+            first_div = first_divergence(cmds1, cmds2)
             ck("same-seed determinism: identical command sequence", first_div is None,
                "identical" if first_div is None
                else f"first divergence at index {first_div}: {cmds1[first_div]!r} vs {cmds2[first_div]!r}")
@@ -413,22 +381,12 @@ def main() -> int:
     finally:
         ad.close()
 
-    passed = sum(1 for _, ok, _ in checks if ok)
-    total = len(checks)
-    print(f"\n{'=' * 70}")
-    if findings:
-        print("FINDINGS (bugs/anomalies in the game, to fix upstream):")
-        for i, f in enumerate(findings, 1):
-            print(f"  {i}. {f}")
-        print()
-    if passed == total:
-        print(f"ROUND 1 MET — {passed}/{total} checks. UGT drove the_breadcrumb to completion "
-              f"through the real handler, rewards landed once, every refusal was state-inert, "
-              f"invariants held every step, and the run replays byte-identically on the same seed. "
-              f"Ready for Round 2.")
-        return 0
-    print(f"ROUND 1 NOT MET — {passed}/{total} checks passed. Fix the failures above and re-run.")
-    return 1
+    return gate.finish(
+        "ROUND 1",
+        "UGT drove the_breadcrumb to completion through the real handler, "
+        "rewards landed once, every refusal was state-inert, invariants held "
+        "every step, and the run replays byte-identically on the same seed. "
+        "Ready for Round 2.")
 
 
 if __name__ == "__main__":

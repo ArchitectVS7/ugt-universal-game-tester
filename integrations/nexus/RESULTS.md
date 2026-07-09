@@ -35,6 +35,22 @@ typecheck + lint clean.
 - **NX-R3** — R3 surfaced zero game defects; two issues fixed harness-side (a parse regex + policy arg-composition bias).
 - **NX-R3-OBS** — R3 is a genuine robustness walk (plateaus at 1/8 vs R2's scripted 8/8), not "R2 with probes"; late-game `talk`/`choose` success paths are R2-covered, not re-covered — strengthen later via longer episodes / mid-spine seeded reset.
 
+## Post-ladder: trial-scaffold extraction re-validation (2026-07-09)
+
+The ladder's shared skeleton (the `ck`/`finding`/footer gate runner, the
+invariant sweep + hunter-signature wrapping, the first-divergence determinism
+compare, and the per-script `_normalize_state` copies) was extracted into
+**`ugt/core/trial.py`** (`GateRunner` / `InvariantSuite` / `first_divergence`;
+`normalize_state` consolidated into `invariants.py`) — net **−92 lines** of
+per-game glue, zero intended behavior change. Validated by re-running the FULL
+ladder live (fresh server, PID-verified): **spike 8/8 · R1 25/25 · R2 36/36 ·
+R3 9/9**, zero findings, same winning seeds (`-tut`, `-hc-0`), same R3 profile
+(360 steps, 7 compromises, 30 seeded rolls), and both same-seed replays
+byte-identical — an exact reproduction of the pinned results above. The
+scaffold is the greenfield starting point for the next game's trial;
+warzones/tarot-war/SpacerQuest scripts backport lazily (they are frozen,
+passing, and commit-traceable).
+
 ## How to re-run (reproduce any result)
 
 Per `HANDOFF.md` §"Live bring-up": `docker start nexus_ugt_pg` → from `apps/game`

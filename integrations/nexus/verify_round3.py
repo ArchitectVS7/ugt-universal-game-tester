@@ -61,6 +61,7 @@ import invariants  # noqa: E402  (local module, from integrations/nexus/)
 
 from ugt.adapters.nexus_http import NexusHttpAdapter  # noqa: E402
 from ugt.core.exploit_hunter import ExploitHunter, Invariant  # noqa: E402
+from ugt.core.trial import GateRunner, first_divergence  # noqa: E402
 from ugt.utils.config_parser import UgtConfig  # noqa: E402
 
 CONFIG_PATH = "integrations/nexus/ugt.config.yaml"
@@ -164,32 +165,7 @@ _PATH_RE = re.compile(r"(/[^\s]+)")
 _ACCEPT_RE = re.compile(r"accept\s+([^\s']+)'?\s+to start")
 
 
-def _normalize_state(state):
-    """Canonical player-state for a byte-identical compare. player-state exposes
-    NO timestamp fields — only sort the set-like fields (mirrors R1/R2)."""
-    return {
-        "level": state.get("level"),
-        "xp": state.get("xp"),
-        "credits": state.get("credits"),
-        "rngCounter": state.get("rngCounter"),
-        "difficulty": state.get("difficulty"),
-        "reputation": dict(sorted((state.get("reputation") or {}).items())),
-        "storyFlags": sorted(state.get("storyFlags") or []),
-        "unlockedCommands": sorted(state.get("unlockedCommands") or []),
-        "currentServerId": state.get("currentServerId"),
-        "discoveredServers": sorted(state.get("discoveredServers") or []),
-        "compromisedServers": sorted(
-            (c.get("ipAddress") for c in state.get("compromisedServers") or []),
-            key=lambda x: (x is None, x),
-        ),
-        "missions": sorted(
-            ((m.get("missionId"), m.get("status"),
-              m.get("objectivesCompleted", 0), m.get("objectivesTotal", 0))
-             for m in state.get("missions") or []),
-            key=lambda t: (t[0] is None, t[0]),
-        ),
-        "gameStatus": state.get("gameStatus") or {},
-    }
+_normalize_state = invariants.normalize_state
 
 
 # ── the seeded, instrumented R3 adapter ──────────────────────────────────────
@@ -515,18 +491,10 @@ def inv_no_soft_lock(before, action_id, info, after, ctx):
     return None
 
 
-def wrap(pred):
-    """Adapt a per-command invariants.py predicate (before, after, command,
-    result) to the hunter's (before, action_id, info, after, ctx) signature."""
-    def check(before, action_id, info, after, ctx):
-        return pred(before, after, info.get("command", ""), info.get("result") or {})
-    check.__name__ = pred.__name__
-    return Invariant(pred.__name__, check, pred.__doc__ or "")
-
-
 # The 7 R1/R2 predicates (refused-state-inert already excludes rngCounter,
-# NX-OBS-1) + the 2 R3-only stateful invariants.
-INVARIANTS = [wrap(p) for p in invariants.ALL] + [
+# NX-OBS-1), wrapped to the hunter signature by the shared suite, + the 2
+# R3-only stateful invariants.
+INVARIANTS = invariants.SUITE.to_hunter_invariants() + [
     Invariant("story_missions_monotonic", inv_story_missions_monotonic,
               inv_story_missions_monotonic.__doc__ or ""),
     Invariant("no_soft_lock", inv_no_soft_lock, inv_no_soft_lock.__doc__ or ""),
@@ -539,11 +507,8 @@ def main() -> int:
     action_names = {int(k): v["name"]
                     for k, v in cfg.data["action_space"]["actions"].items()}
     action_ids = list(action_names.keys())
-    checks: list[tuple[str, bool, str]] = []
-
-    def ck(name, ok, detail=""):
-        checks.append((name, ok, detail))
-        print(f"  [{'PASS' if ok else 'FAIL'}] {name}" + (f"  — {detail}" if detail else ""))
+    gate = GateRunner()
+    ck = gate.ck
 
     print(f"NEXUS Round 3 — real ExploitHunter, {EPISODES} episodes x "
           f"{STEPS_PER_EPISODE} steps (base seed {BASE_SEED!r}, policy seed {POLICY_SEED})\n")
@@ -640,7 +605,7 @@ def main() -> int:
         first = adapter.stats[0]["traj"]
         second = replay_adapter.stats[0]["traj"]
         same_len = len(first) == len(second)
-        divergence = next((i for i, (x, y) in enumerate(zip(first, second)) if x != y), None)
+        divergence = first_divergence(first, second)
         ck("episode-0 replay is byte-identical (commands + CommandResults + "
            "rngCounter + normalized state)",
            same_len and divergence is None and not replay_report.findings,
@@ -660,20 +625,16 @@ def main() -> int:
     finally:
         adapter.close()
 
-    passed = sum(1 for _, ok, _ in checks if ok)
-    total = len(checks)
-    print(f"\n{'=' * 70}")
-    if passed == total:
-        print(f"ROUND 3 MET — {passed}/{total} checks. UGT's real ExploitHunter drove "
-              f"{EPISODES} seeded episodes of heuristic + refusal-probing real actions "
-              f"through the live handler: every invariant held on every step, the whole "
-              f"action vocabulary (and the unmapped-id + garbage probes) was exercised, the "
-              f"walk made real progress (compromises + mission completions + seeded rolls), "
-              f"and a fresh same-seed re-run replays episode 0 byte for byte. "
-              f"NEXUS trial ladder complete.")
-        return 0
-    print(f"ROUND 3 NOT MET — {passed}/{total} checks passed. Findings above are the work list.")
-    return 1
+    return gate.finish(
+        "ROUND 3",
+        f"UGT's real ExploitHunter drove {EPISODES} seeded episodes of "
+        f"heuristic + refusal-probing real actions through the live handler: "
+        f"every invariant held on every step, the whole action vocabulary "
+        f"(and the unmapped-id + garbage probes) was exercised, the walk made "
+        f"real progress (compromises + mission completions + seeded rolls), "
+        f"and a fresh same-seed re-run replays episode 0 byte for byte. "
+        f"NEXUS trial ladder complete.",
+        not_met_msg="Findings above are the work list.")
 
 
 if __name__ == "__main__":

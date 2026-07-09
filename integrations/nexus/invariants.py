@@ -27,6 +27,8 @@ Two pre-carved NEXUS quirks are encoded here so they are NOT mis-flagged:
 """
 from __future__ import annotations
 
+from ugt.core.trial import InvariantSuite
+
 
 # ── individual predicates ────────────────────────────────────────────────────
 def inv_well_formed(before, after, command, result):
@@ -198,13 +200,41 @@ ALL = [
     inv_refused_state_inert,
 ]
 
+# One definition, both tiers: R1/R2 sweep via SUITE.check_command; R3 hands the
+# same predicates to the ExploitHunter via SUITE.to_hunter_invariants().
+SUITE = InvariantSuite(ALL)
+
 
 def check_command(before, after, command, result):
     """Run every invariant for one command; return the list of violation strings
     (empty when all hold)."""
-    violations = []
-    for inv in ALL:
-        msg = inv(before, after, command, result)
-        if msg:
-            violations.append(msg)
-    return violations
+    return SUITE.check_command(before, after, command, result)
+
+
+def normalize_state(state):
+    """Canonical player-state for a byte-identical determinism compare (shared
+    by every round — was duplicated per script). player-state exposes NO
+    timestamp fields, so nothing to strip — only sort the set-like fields."""
+    return {
+        "level": state.get("level"),
+        "xp": state.get("xp"),
+        "credits": state.get("credits"),
+        "rngCounter": state.get("rngCounter"),
+        "difficulty": state.get("difficulty"),
+        "reputation": dict(sorted((state.get("reputation") or {}).items())),
+        "storyFlags": sorted(state.get("storyFlags") or []),
+        "unlockedCommands": sorted(state.get("unlockedCommands") or []),
+        "currentServerId": state.get("currentServerId"),
+        "discoveredServers": sorted(state.get("discoveredServers") or []),
+        "compromisedServers": sorted(
+            (c.get("ipAddress") for c in state.get("compromisedServers") or []),
+            key=lambda x: (x is None, x),
+        ),
+        "missions": sorted(
+            ((m.get("missionId"), m.get("status"),
+              m.get("objectivesCompleted", 0), m.get("objectivesTotal", 0))
+             for m in state.get("missions") or []),
+            key=lambda t: (t[0] is None, t[0]),
+        ),
+        "gameStatus": state.get("gameStatus") or {},
+    }
