@@ -30,8 +30,8 @@ class UgtConfig:
         if "engine" not in self.data:
             raise ConfigError("Missing required section: engine")
         engine = self.data["engine"]
-        if "type" not in engine or engine["type"] not in ["browser", "simulation", "real_server", "ddd"]:
-            raise ConfigError("engine.type must be one of 'browser', 'simulation', 'real_server', 'ddd'")
+        if "type" not in engine or engine["type"] not in ["browser", "simulation", "real_server"]:
+            raise ConfigError("engine.type must be one of 'browser', 'simulation', 'real_server'")
         # real_server drives a running game over HTTP/Socket.IO — it uses base_url/server_cmd,
         # not a sim entrypoint — so engine.entry is not required for it.
         if engine["type"] != "real_server" and "entry" not in engine:
