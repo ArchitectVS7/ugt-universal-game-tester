@@ -1,0 +1,92 @@
+# UGT config for DDD (deterministic dueling card game) — REAL engine via the
+# JSON-lines subprocess HARNESS (packages/harness/bin/harness.mjs), never a
+# re-implementation (the sim_bridge lesson).
+#
+# The DDD harness is a zero-dependency deterministic engine wrapper: one JSON
+# request per line in, one response per line out, in order. DddHarnessAdapter
+# (ugt/adapters/ddd_harness.py) spawns it and drives create/legal/act/replay.
+# See integrations/ddd/README.md for the run recipe.
+#
+# NOTE: DDD is tested by INVARIANTS + determinism (integrations/ddd/invariants.py,
+# verify_round1.py), NOT by reward shaping. The reward_profiles block below is
+# VESTIGIAL — UgtConfig requires it, but the exploit-hunter/trial path never reads
+# it. The trial scripts import DddHarnessAdapter directly and drive it by hand.
+#
+# Action ids MUST stay in lockstep with DddHarnessAdapter._select.
+
+project:
+  name: "DDD (deterministic card duel, real engine via harness)"
+  version: "0.1.0"
+
+engine:
+  # "simulation": the harness is a JSON-lines stdin/stdout subprocess. The adapter
+  # spawns it directly (Popen), so it also reads the DDD-specific keys below.
+  type: "simulation"
+  entry: "packages/harness/bin/harness.mjs"
+  harness_entry: "/Users/vs7/Dev/Games/DDD/packages/harness/bin/harness.mjs"
+  node_bin: "node"
+  # harness_cwd defaults (in the adapter) to the DDD repo root inferred from
+  # harness_entry; override with the DDD_HARNESS_CWD env var. harness_entry itself
+  # is overridable with the DDD_HARNESS_PATH env var.
+  decks: ["bb_competitive", "sw_competitive"]
+  format: "COMPETITIVE"
+  enabledWaves:
+    stanceEcho: true
+    chainsPredictions: false
+  maxTurns: 50
+  seed: "ddd-r1"
+
+# Observation paths index into the adapter's NORMALIZED state dict
+# (DddHarnessAdapter._normalize): turn, p0.*, p1.* seat summaries. These exist for
+# UgtConfig validity + a future env.py path; the trial scripts read the normalized
+# dict directly, not through this mapping.
+observation_space:
+  type: "box"
+  shape: 8
+  mappings:
+    - path: "turn"
+      min: 0
+      max: 100
+    - path: "p0.hp"
+      min: 0
+      max: 30
+    - path: "p1.hp"
+      min: 0
+      max: 30
+    - path: "p0.focus"
+      min: 0
+      max: 5
+    - path: "p1.focus"
+      min: 0
+      max: 5
+    - path: "p0.handCount"
+      min: 0
+      max: 7
+    - path: "p0.deckCount"
+      min: 0
+      max: 40
+    - path: "p1.deckCount"
+      min: 0
+      max: 40
+
+action_space:
+  type: "discrete"
+  size: 5
+  actions:
+    0: { name: "commit_first" }    # first legal COMMIT_SELECTION (deterministic)
+    1: { name: "commit_random" }   # a random legal COMMIT_SELECTION (adapter RNG)
+    2: { name: "pass" }            # COMMIT_PASS (legal only when no card is affordable)
+    3: { name: "mulligan_keep" }   # MULLIGAN full:false
+    4: { name: "mulligan_full" }   # MULLIGAN full:true
+  # CONCEDE is NEVER emitted by the adapter — every _select filters it out. An id
+  # whose preferred class is absent in the current phase falls back to another
+  # legal non-CONCEDE action, so the adapter never sends an illegal action.
+
+# VESTIGIAL — required by UgtConfig; UNUSED by the exploit-hunter/trial path.
+# DDD is tested by invariants + determinism, not rewards. Do not add reward
+# shaping here; if a reward-driven tier is ever wired, design it deliberately.
+reward_profiles:
+  _unused:
+    formula: "0"
+    win_bonus: 0
+    loss_penalty: 0
