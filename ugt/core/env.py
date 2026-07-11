@@ -81,6 +81,9 @@ class UniversalGameEnv(gym.Env):
             self.adapter = SubprocessAdapter(self.config)
         elif self.config.engine_type == "real_server":
             self.adapter = RealClientAdapter(self.config)
+        elif self.config.engine_type == "ddd":
+            from ugt.adapters.ddd import DDDSubprocessAdapter
+            self.adapter = DDDSubprocessAdapter(self.config)
         else:
             raise ValueError(f"Unknown engine type: {self.config.engine_type}")
 
