@@ -147,16 +147,29 @@ def inv_turn_monotonic(before, after, command, result):
 
 
 def inv_no_error_on_legal(before, after, command, result):
-    """The adapter only ever sends a LEGAL, self-selected, non-CONCEDE action, so
-    an `act` that comes back with ok:false (a RULES_ERROR) is a real defect — the
-    adapter picked a move the engine then rejected, or the engine mis-adjudicated a
-    legal move."""
+    """A RULES_ERROR on an action drawn from the engine's OWN legal list is a defect.
+
+    For every non-probe action id the adapter selects only from the legal list the
+    harness itself returned, so a refusal means either the enumerator offered a move
+    the adjudicator then rejected, or the adjudicator mis-handled a legal move.
+    Either way the two halves of the engine disagree, which is exactly what this
+    exists to catch.
+
+    SCOPED TO NON-PROBES: the `probe_illegal` / `probe_garbage` ids deliberately send
+    actions from OUTSIDE the legal list, so this invariant's premise does not hold
+    for them and a refusal there is the CORRECT outcome, not a defect. Probes are
+    covered by the opposite assertion (R3's `inv_probe_refused`: a probe that is
+    ACCEPTED is the finding). Skipping them here is a scoping fix, not a weakening —
+    without it the invariant fires on its own test fixture.
+    """
     if command != "act":
+        return None
+    if result.get("probe"):
         return None
     if result.get("ok") is False:
         err = result.get("error", {})
-        return (f"RULES_ERROR on a self-selected LEGAL action ({command!r}): "
-                f"{err.get('kind')} {err.get('rulesError')}")
+        return (f"RULES_ERROR on an action taken from the engine's own legal list "
+                f"({result.get('actionName')!r}): {err.get('kind')} {err.get('rulesError')}")
     return None
 
 

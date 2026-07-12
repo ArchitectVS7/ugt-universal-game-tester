@@ -153,6 +153,7 @@ class DddHarnessAdapter(BaseAdapter):
         self._applied_actions = []
         self._hash_stream = []
         self._step_count = 0
+        self._reset_count = 0
 
     # ── public read-only attributes (mirrors nexus/warzones shape) ───────────
     @property
@@ -218,11 +219,23 @@ class DddHarnessAdapter(BaseAdapter):
         return {"pid": self.process.pid}
 
     def reset(self, seed=None):
-        """Create a fresh match on `seed` and return the normalized initial state."""
+        """Create a fresh match on `seed` and return the normalized initial state.
+
+        A BARE `reset()` (no seed) derives a distinct per-episode seed
+        `"<self.seed>#<n>"` from a reset counter, because `ExploitHunter.run` resets
+        with no arguments between episodes — a fixed seed there would replay the
+        SAME match every episode and the whole hunt would be one trajectory wearing
+        N hats. This stays fully deterministic: a fresh adapter always starts at
+        n=0, so a same-seed re-run of episode k reproduces it byte for byte.
+        """
         if self.process is None or self.process.poll() is not None:
             self.connect()
 
-        seed_str = str(seed if seed is not None else self.seed)
+        if seed is None:
+            seed_str = f"{self.seed}#{self._reset_count}"
+        else:
+            seed_str = str(seed)
+        self._reset_count += 1
         resp = self._request({
             "op": "create",
             "config": {
