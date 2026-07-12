@@ -39,19 +39,50 @@ DEFAULTS = {
     "node_bin": "node",
     "decks": ["bb_competitive", "sw_competitive"],
     "format": "COMPETITIVE",
-    "enabledWaves": {"stanceEcho": True, "chainsPredictions": False},
+    # Every wave key MUST be present and explicit. enabledWaves lives inside the
+    # hashed GameState, so an omitted key is not a default — it is a different
+    # game (and a match the engine's own `replay` op will refuse as a
+    # MALFORMED_RECORD). All three on = the config apps/ladder and apps/play ship.
+    "enabledWaves": {"stanceEcho": True, "chainsPredictions": True, "typeTriangle": True},
     "maxTurns": 50,
     "seed": "ddd-r1",
 }
 
-# id -> name default, if the config doesn't carry action_mappings.
+# The exact wave key set the engine requires (engine WAVE_KEYS, matchRecord.ts).
+WAVE_KEYS = ("stanceEcho", "chainsPredictions", "typeTriangle")
+
+# id -> name default, if the config doesn't carry action_mappings. MUST stay in
+# lockstep with integrations/ddd/ugt.config.yaml (UgtConfig enforces
+# size == len(actions)) and with `_select` below.
+#
+# Every id is STRUCTURAL: it selects among the actions the HARNESS itself
+# enumerated (and, for targets, among the candidates the harness's own `targets`
+# op returned). None of them consults card costs, rules, or content — the adapter
+# has no game knowledge and must never grow any (the sim_bridge lesson).
 _DEFAULT_ACTION_NAMES = {
-    0: "commit_first",
-    1: "commit_random",
-    2: "pass",
-    3: "mulligan_keep",
-    4: "mulligan_full",
+    0: "commit_first",           # first legal COMMIT_SELECTION (deterministic)
+    1: "commit_random",          # a random legal COMMIT_SELECTION (adapter RNG)
+    2: "commit_last",            # last legal COMMIT_SELECTION (deterministic)
+    3: "commit_with_targets",    # a commit whose `targets` op offers candidates; FILL them
+    4: "commit_no_targets",      # a commit, targets left [] (the pre-`targets`-op control)
+    5: "commit_with_prediction", # a commit carrying prediction != null (RARE + chainsPredictions)
+    6: "commit_modal",           # a commit carrying modeIndex != null (modal card)
+    7: "pass",                   # COMMIT_PASS (legal only when nothing is affordable)
+    8: "mulligan_keep",          # MULLIGAN full:false
+    9: "mulligan_full",          # MULLIGAN full:true
+    10: "concede",               # CONCEDE — the ONLY route to a CONCESSION result
+    11: "probe_illegal",         # deliberately ILLEGAL action -> expect RULES_ERROR + inert
+    12: "probe_garbage",         # malformed action object -> expect refusal + inert
 }
+
+# Ids that deliberately send something the engine must REFUSE. `step` marks these
+# with info["probe"]=True so `inv_no_error_on_legal` does not misread an expected
+# refusal as a defect — and so a probe that is silently APPLIED is caught loudly.
+PROBE_ACTION_NAMES = frozenset({"probe_illegal", "probe_garbage"})
+
+# CONCEDE is filtered out of every selection EXCEPT the explicit `concede` id, so
+# a random/heuristic policy can never accidentally throw the match.
+_CONCEDE = "CONCEDE"
 
 
 class DddHarnessAdapter(BaseAdapter):
@@ -86,6 +117,18 @@ class DddHarnessAdapter(BaseAdapter):
         self.decks = list(eng.get("decks", DEFAULTS["decks"]))
         self.match_format = str(eng.get("format", DEFAULTS["format"]))
         self.enabled_waves = dict(eng.get("enabledWaves", DEFAULTS["enabledWaves"]))
+        # Fail LOUD on an under-specified wave set. The engine treats a missing
+        # key as `undefined` -> falsy, so an incomplete enabledWaves silently
+        # plays a DIFFERENT game (this is how D16's type triangle sat switched
+        # off through the whole 2026-07-11 R1 run). Never guess a default here.
+        missing = [k for k in WAVE_KEYS if k not in self.enabled_waves]
+        unknown = [k for k in self.enabled_waves if k not in WAVE_KEYS]
+        if missing or unknown:
+            raise ValueError(
+                "engine.enabledWaves must name EXACTLY "
+                f"{list(WAVE_KEYS)} — missing={missing} unknown={unknown}. "
+                "A missing wave key is not a default; it is a different game."
+            )
         self.max_turns = int(eng.get("maxTurns", DEFAULTS["maxTurns"]))
         self.seed = str(eng.get("seed", DEFAULTS["seed"]))
 
@@ -123,6 +166,27 @@ class DddHarnessAdapter(BaseAdapter):
     @property
     def step_count(self):
         return self._step_count
+
+    @property
+    def views(self):
+        """Both raw PlayerViews as the harness last returned them.
+
+        Read-only. Exposed so a gate script can resolve an action's `instanceId`
+        to its `defId` (content coverage) and so the fog-of-war invariant can
+        assert the OPPONENT view never carries hidden fields. The adapter itself
+        never interprets these — it only relays them.
+        """
+        return self._views
+
+    def defid_of(self, seat: int, instance_id: int):
+        """The `defId` of a card in `seat`'s own hand, or None. Pure view lookup."""
+        views = self._views or []
+        if seat is None or seat >= len(views):
+            return None
+        for card in (views[seat].get("me", {}).get("hand") or []):
+            if card.get("instanceId") == instance_id:
+                return card.get("defId")
+        return None
 
     # ── BaseAdapter lifecycle ────────────────────────────────────────────────
     def connect(self):
@@ -202,7 +266,16 @@ class DddHarnessAdapter(BaseAdapter):
             }
 
         actions, _lhash = self._legal(seat)
-        action = self._select(action_id, actions)
+        name = self.action_name(action_id)
+        is_probe = name in PROBE_ACTION_NAMES
+        action = self._select(action_id, actions, seat)
+        hash_before = self._hash_stream[-1] if self._hash_stream else None
+        # Resolve the card's defId NOW, while it is still in the seat's hand — after
+        # the act it has moved out of the view. Content-coverage gates need it.
+        committed_defid = (
+            self.defid_of(seat, action.get("instanceId"))
+            if action.get("t") == "COMMIT_SELECTION" else None
+        )
 
         resp = self._request({
             "op": "act",
@@ -211,16 +284,23 @@ class DddHarnessAdapter(BaseAdapter):
         })
 
         if resp.get("ok") is False:
-            # Canary: for ids 0-4 the adapter only ever sends a LEGAL action, so a
-            # RULES_ERROR here should never happen. Surface it in info without
-            # mutating cached views; the invariant sweep will flag it.
+            # For every NON-probe id the adapter only ever sends an action drawn
+            # from the harness's own legal list, so a RULES_ERROR here is a real
+            # defect (`inv_no_error_on_legal` flags it). For a probe id a refusal
+            # is the EXPECTED outcome — info["probe"] tells the invariants which
+            # is which. Cached views are not mutated: the state is unchanged.
             after = self._read_state()
             return after, False, False, {
                 "command": "act",
+                "actionName": name,
+                "defIdCommitted": committed_defid,
                 "action": action,
                 "seat": seat,
+                "probe": is_probe,
+                "hashBefore": hash_before,
                 "stateHash": resp.get("stateHash"),
-                "result": {**resp, "legalCount": len(actions)},
+                "result": {**resp, "legalCount": len(actions), "hashBefore": hash_before,
+                           "probe": is_probe, "actionName": name},
                 "legalCount": len(actions),
             }
 
@@ -234,10 +314,17 @@ class DddHarnessAdapter(BaseAdapter):
         truncated = False
         info = {
             "command": "act",
+            "actionName": name,
+                "defIdCommitted": committed_defid,
             "action": action,
             "seat": seat,
+            # A probe reaching HERE means the engine ACCEPTED an action it should
+            # have refused — `inv_probe_refused` turns that into a finding.
+            "probe": is_probe,
+            "hashBefore": hash_before,
             "stateHash": resp["stateHash"],
-            "result": {**resp, "legalCount": len(actions)},
+            "result": {**resp, "legalCount": len(actions), "hashBefore": hash_before,
+                           "probe": is_probe, "actionName": name},
             "legalCount": len(actions),
         }
         return after, terminated, truncated, info
@@ -317,6 +404,74 @@ class DddHarnessAdapter(BaseAdapter):
             raise RuntimeError(f"DDD harness legal failed for seat {seat}: {resp!r}")
         return resp.get("actions", []), resp.get("stateHash")
 
+    def _targets(self, seat: int, instance_id: int, mode_index):
+        """Ask the harness for the graveyard-target requirements of one commit.
+
+        The harness's `legal` op reports EVERY action with `targets: []` (engine
+        D-A — zero targets is legal, so the base move is legal, and richer sets
+        are enumerated on demand). This op is the on-demand half: without it a
+        wire client can play a graveyard-targeting card but never fill it, so the
+        effect is permanently inert. Returns the `TargetRequirement` list
+        (`[{effectIndex, maxCount, candidates}]`); `[]` = the card takes none.
+        """
+        resp = self._request({
+            "op": "targets",
+            "matchId": self._match_id,
+            "player": int(seat),
+            "instanceId": int(instance_id),
+            "modeIndex": mode_index,
+        })
+        if not resp.get("ok"):
+            raise RuntimeError(
+                f"DDD harness targets failed (seat={seat} instanceId={instance_id} "
+                f"modeIndex={mode_index}): {resp!r}"
+            )
+        return resp.get("requirements", [])
+
+    def fill_targets(self, seat: int, action: dict) -> dict:
+        """Return `action` with `targets` filled from the harness's own candidates.
+
+        Picks up to `maxCount` DISTINCT candidate ids from requirements[0] — the
+        contract the engine's `validateTargets` enforces. The GAME decides what is
+        eligible; the adapter only relays the answer. Non-commits and cards with
+        no requirement come back untouched.
+        """
+        if action.get("t") != "COMMIT_SELECTION":
+            return action
+        reqs = self._targets(seat, action["instanceId"], action.get("modeIndex"))
+        if not reqs:
+            return action
+        req = reqs[0]
+        candidates = list(req.get("candidates") or [])
+        max_count = int(req.get("maxCount", 0))
+        if not candidates or max_count <= 0:
+            return action
+        return {**action, "targets": candidates[:max_count]}
+
+    def send_raw_action(self, action) -> dict:
+        """Send an ARBITRARY action verbatim and return the raw `act` response.
+
+        The refusal-probe channel (R3): unlike `step`, this deliberately does NOT
+        restrict itself to the harness's legal list, so every RulesError arm can be
+        provoked and asserted STATE-INERT. State is advanced only if the engine
+        actually applied the action — a probe that unexpectedly applies is a real
+        finding, and this method makes that observable rather than silently
+        corrupting the run.
+        """
+        before = self._hash_stream[-1] if self._hash_stream else None
+        resp = self._request({
+            "op": "act",
+            "matchId": self._match_id,
+            "action": action,
+        })
+        if resp.get("ok") and resp.get("applied"):
+            self._views = resp["views"]
+            self._applied_actions.append(action)
+            self._hash_stream.append(resp["stateHash"])
+            self._step_count += 1
+        resp = {**resp, "hashBefore": before}
+        return resp
+
     def replay_current(self) -> dict:
         """Ask the harness to re-simulate the recorded action log and verify it."""
         return self._request({"op": "replay", "matchId": self._match_id})
@@ -363,34 +518,96 @@ class DddHarnessAdapter(BaseAdapter):
         actions, _ = self._legal(seat)
         return any(a.get("t") != "CONCEDE" for a in actions)
 
-    def _select(self, action_id: int, actions: list) -> dict:
-        """Choose a LEGAL action for `action_id`, NEVER CONCEDE, never illegal.
+    def action_name(self, action_id: int) -> str:
+        return self._action_names.get(
+            int(action_id), _DEFAULT_ACTION_NAMES.get(int(action_id), "commit_random")
+        )
 
-        Preferred class per id; if that class is absent in the current legal set,
-        fall back to another non-CONCEDE action (rng for the random id, first for
-        the deterministic ids). Only ever returns a member of `actions`.
+    def _probe_action(self, name: str, seat: int, actions: list) -> dict:
+        """Build a deliberately-REFUSABLE action (R3 refusal probes).
+
+        These are the only actions the adapter sends that are not drawn from the
+        harness's legal list. They exist so the engine's refusal paths can be
+        asserted state-inert — a game that silently ACCEPTS one of these has a
+        real defect, and `step` flags it via info["probe"].
         """
-        pool = [a for a in actions if a.get("t") != "CONCEDE"]
-        if not pool:
-            # Degenerate: the only legal move is CONCEDE. The adapter refuses to
-            # concede; fall back to the raw list so step() still sends something
-            # legal (in practice this branch is unreachable in normal DDD play).
-            pool = list(actions)
+        if name == "probe_garbage":
+            # Not a member of the Action union at all.
+            return {"t": "NOT_AN_ACTION", "player": int(seat)}
+        # probe_illegal: a well-formed COMMIT_SELECTION naming a card that cannot
+        # be in the seat's hand -> CARD_NOT_IN_HAND (or WRONG_PHASE in MULLIGAN).
+        return {
+            "t": "COMMIT_SELECTION",
+            "player": int(seat),
+            "instanceId": 999_999,
+            "modeIndex": None,
+            "targets": [],
+            "prediction": None,
+        }
 
+    def _select(self, action_id: int, actions: list, seat: int) -> dict:
+        """Choose an action for `action_id`.
+
+        Every non-probe id resolves to a member of `actions` — the harness's OWN
+        legal list — so the adapter can never send an illegal move by accident and
+        never invents a move the game did not offer. CONCEDE is filtered out of
+        every id except the explicit `concede` one, so a stochastic policy cannot
+        throw the match by chance. When an id's preferred class is absent in the
+        current phase it falls back to another legal non-CONCEDE action, so the
+        whole vocabulary stays driveable in every phase.
+        """
         aid = int(action_id)
-        name = self._action_names.get(aid, _DEFAULT_ACTION_NAMES.get(aid, "commit_random"))
+        name = self.action_name(aid)
+
+        if name in PROBE_ACTION_NAMES:
+            return self._probe_action(name, seat, actions)
+
+        if name == "concede":
+            concedes = [a for a in actions if a.get("t") == _CONCEDE]
+            if concedes:
+                return concedes[0]
+            # No CONCEDE offered (e.g. the match just ended) — fall through.
+
+        pool = [a for a in actions if a.get("t") != _CONCEDE]
+        if not pool:
+            # Degenerate: the only legal move is CONCEDE. Unreachable in normal
+            # DDD play; fall back so step() still sends something legal.
+            pool = list(actions)
 
         commit_sel = [a for a in pool if a.get("t") == "COMMIT_SELECTION"]
         commit_pass = [a for a in pool if a.get("t") == "COMMIT_PASS"]
-        mull_keep = [a for a in pool
-                     if a.get("t") == "MULLIGAN" and a.get("full") is False]
-        mull_full = [a for a in pool
-                     if a.get("t") == "MULLIGAN" and a.get("full") is True]
+        mull_keep = [a for a in pool if a.get("t") == "MULLIGAN" and a.get("full") is False]
+        mull_full = [a for a in pool if a.get("t") == "MULLIGAN" and a.get("full") is True]
 
         # commit_random is the only stochastic id.
         if name == "commit_random":
             return self._rng.choice(commit_sel) if commit_sel else self._rng.choice(pool)
         if name == "commit_first":
+            return commit_sel[0] if commit_sel else pool[0]
+        if name == "commit_last":
+            return commit_sel[-1] if commit_sel else pool[-1]
+        if name == "commit_no_targets":
+            # The pre-`targets`-op control: commit, leave targets []. Keeping this
+            # id makes the inert path an explicit, named choice rather than the
+            # silent default it used to be.
+            return commit_sel[0] if commit_sel else pool[0]
+        if name == "commit_with_prediction":
+            with_pred = [a for a in commit_sel if a.get("prediction") is not None]
+            if with_pred:
+                return self._rng.choice(with_pred)
+            return commit_sel[0] if commit_sel else pool[0]
+        if name == "commit_modal":
+            modal = [a for a in commit_sel if a.get("modeIndex") is not None]
+            if modal:
+                return self._rng.choice(modal)
+            return commit_sel[0] if commit_sel else pool[0]
+        if name == "commit_with_targets":
+            # Ask the GAME which commits actually have candidates, then fill them.
+            # Scanning in legal order keeps this deterministic for a given state.
+            for cand in commit_sel:
+                filled = self.fill_targets(seat, cand)
+                if filled.get("targets"):
+                    return filled
             return commit_sel[0] if commit_sel else pool[0]
         if name == "pass":
             return commit_pass[0] if commit_pass else pool[0]

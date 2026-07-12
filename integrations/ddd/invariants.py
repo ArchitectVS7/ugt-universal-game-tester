@@ -16,11 +16,14 @@ Nothing here re-implements game logic; every check reads observable state back a
 compares.
 
 DDD facts these encode (from the engine's own bounds):
-  * HP 0–30, focus 0–5, hand ≤7, exactly 3 zones (HAND/GRAVEYARD/DECK, no exile),
-    40 cards total per seat — so per seat
-    handCount + deckCount + graveyardCount + committedCard == 40, EXACTLY. The
-    committedCard term accounts for the single card lifted out of hand into the
-    pending committedSelection.
+  * HP 0–30, focus 0–5, hand ≤7, exactly 3 zones (HAND/GRAVEYARD/DECK, no exile) —
+    so per seat handCount + deckCount + graveyardCount + committedCard is CONSERVED
+    across every step. The committedCard term accounts for the single card lifted
+    out of hand into the pending committedSelection.
+    The ABSOLUTE total is format-relative (COMPETITIVE 40, TUTORIAL 25), so it is
+    NOT asserted here — `inv_card_conservation` asserts the conservation law, which
+    holds in every format, and scripts that know their format assert the absolute
+    figure themselves (`absolute_total`, used by verify_round1/verify_round2).
   * turn is monotonic non-decreasing.
   * The adapter only ever sends a LEGAL, self-selected action (never CONCEDE), so a
     RULES_ERROR on such an action (`result.ok is False` for an `act`) is a real
@@ -80,24 +83,56 @@ def inv_hand_cap(before, after, command, result):
     return None
 
 
+def _seat_total(seat_state):
+    """handCount + deckCount + graveyardCount + committedCard, or None if unknown.
+
+    Only 3 zones exist (HAND/GRAVEYARD/DECK — no exile), and the single card lifted
+    out of hand into a pending committedSelection is accounted for by committedCard.
+    """
+    hand = seat_state.get("handCount")
+    deck = seat_state.get("deckCount")
+    grave = seat_state.get("graveyardCount")
+    committed = seat_state.get("committedCard", 0)
+    if None in (hand, deck, grave):
+        return None
+    return hand + deck + grave + committed
+
+
 def inv_card_conservation(before, after, command, result):
-    """Per seat, cards are conserved EXACTLY: handCount + deckCount +
-    graveyardCount + committedCard == 40. Only 3 zones exist (no exile), and the
-    single committed card is accounted for by committedCard."""
+    """Per seat, cards are CONSERVED: the zone total never changes across a step.
+
+    Stated as a conservation LAW (total_after == total_before) rather than a
+    hard-coded `== 40`, because the absolute total is format-relative — COMPETITIVE
+    decks are 40 cards, TUTORIAL decks are 25 — while conservation holds in every
+    format. The literal-40 form was a real bug in this file: it reported a violation
+    on every step of every TUTORIAL match, where the true total is 25 and the game
+    was conserving it correctly.
+
+    This still catches everything the absolute form did (a card created, destroyed,
+    duplicated, or lost between zones), and it catches it in formats the absolute
+    form could not even run in. Scripts that KNOW their format additionally assert
+    the absolute total (see verify_round1/2) — that is where 40-vs-25 belongs.
+    """
     for seat in ("p0", "p1"):
-        s = after.get(seat, {})
-        hand = s.get("handCount")
-        deck = s.get("deckCount")
-        grave = s.get("graveyardCount")
-        committed = s.get("committedCard", 0)
-        if None in (hand, deck, grave):
+        t_after = _seat_total(after.get(seat, {}))
+        t_before = _seat_total(before.get(seat, {}))
+        if t_after is None or t_before is None:
             continue
-        total = hand + deck + grave + committed
-        if total != DECK_TOTAL:
-            return (f"{seat} card conservation broken after {command!r}: "
-                    f"hand{hand}+deck{deck}+grave{grave}+committed{committed} "
-                    f"= {total} != {DECK_TOTAL}")
+        if t_after != t_before:
+            a, b = after.get(seat, {}), before.get(seat, {})
+            return (f"{seat} card conservation broken across {command!r}: "
+                    f"total {t_before} -> {t_after} "
+                    f"(before hand{b.get('handCount')}+deck{b.get('deckCount')}"
+                    f"+grave{b.get('graveyardCount')}+committed{b.get('committedCard', 0)}; "
+                    f"after hand{a.get('handCount')}+deck{a.get('deckCount')}"
+                    f"+grave{a.get('graveyardCount')}+committed{a.get('committedCard', 0)})")
     return None
+
+
+def absolute_total(state, seat) -> int | None:
+    """The seat's zone total — for scripts that know the format's expected size
+    (COMPETITIVE 40 / TUTORIAL 25) and want to assert it explicitly."""
+    return _seat_total(state.get(seat, {}))
 
 
 def inv_turn_monotonic(before, after, command, result):

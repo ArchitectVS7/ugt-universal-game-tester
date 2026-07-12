@@ -30,9 +30,16 @@ engine:
   # is overridable with the DDD_HARNESS_PATH env var.
   decks: ["bb_competitive", "sw_competitive"]
   format: "COMPETITIVE"
+  # All three waves ON — this is the game DDD actually ships: apps/ladder (a CI
+  # gate) and apps/play (the human client) both enable all three. A config that
+  # omits a wave key is NOT a smaller game, it is a DIFFERENT one: enabledWaves
+  # lives inside the hashed GameState, and `legalActions` only enumerates
+  # `prediction` values when chainsPredictions is on.
   enabledWaves:
     stanceEcho: true
-    chainsPredictions: false
+    chainsPredictions: true
+    typeTriangle: true      # D16 — the card-type triangle. Omitting the key read
+                            # as `undefined` -> falsy -> triangle silently OFF.
   maxTurns: 50
   seed: "ddd-r1"
 
@@ -69,18 +76,31 @@ observation_space:
       min: 0
       max: 40
 
+# Every id is STRUCTURAL — it picks among the actions the HARNESS enumerated (and,
+# for targets, among the candidates the harness's own `targets` op returned). No id
+# consults card costs, rules or content: the adapter has no game knowledge.
 action_space:
   type: "discrete"
-  size: 5
+  size: 13
   actions:
-    0: { name: "commit_first" }    # first legal COMMIT_SELECTION (deterministic)
-    1: { name: "commit_random" }   # a random legal COMMIT_SELECTION (adapter RNG)
-    2: { name: "pass" }            # COMMIT_PASS (legal only when no card is affordable)
-    3: { name: "mulligan_keep" }   # MULLIGAN full:false
-    4: { name: "mulligan_full" }   # MULLIGAN full:true
-  # CONCEDE is NEVER emitted by the adapter — every _select filters it out. An id
-  # whose preferred class is absent in the current phase falls back to another
-  # legal non-CONCEDE action, so the adapter never sends an illegal action.
+    0:  { name: "commit_first" }           # first legal COMMIT_SELECTION (deterministic)
+    1:  { name: "commit_random" }          # a random legal COMMIT_SELECTION (adapter RNG)
+    2:  { name: "commit_last" }            # last legal COMMIT_SELECTION (deterministic)
+    3:  { name: "commit_with_targets" }    # a commit whose `targets` op offers candidates; FILL them
+    4:  { name: "commit_no_targets" }      # a commit, targets left [] — the pre-`targets`-op control
+    5:  { name: "commit_with_prediction" } # prediction != null (RARE cards, chainsPredictions on)
+    6:  { name: "commit_modal" }           # modeIndex != null (modal card)
+    7:  { name: "pass" }                   # COMMIT_PASS (legal only when nothing is affordable)
+    8:  { name: "mulligan_keep" }          # MULLIGAN full:false
+    9:  { name: "mulligan_full" }          # MULLIGAN full:true
+    10: { name: "concede" }                # CONCEDE — the ONLY route to a CONCESSION result
+    11: { name: "probe_illegal" }          # R3: deliberately illegal -> expect RULES_ERROR + inert
+    12: { name: "probe_garbage" }          # R3: malformed action -> expect refusal + inert
+  # CONCEDE is filtered out of every id EXCEPT id 10, so a stochastic policy can
+  # never throw the match by chance. Ids 11/12 are the ONLY ones that send
+  # something outside the harness's legal list — deliberately, so the engine's
+  # refusal paths can be asserted state-inert. Every other id is drawn from the
+  # legal list, so the adapter cannot send an illegal action by accident.
 
 # VESTIGIAL — required by UgtConfig; UNUSED by the exploit-hunter/trial path.
 # DDD is tested by invariants + determinism, not rewards. Do not add reward
