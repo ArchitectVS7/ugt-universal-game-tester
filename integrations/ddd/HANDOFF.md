@@ -35,9 +35,12 @@ refuses one too.
    so a playtester would drive `legal`/`act` directly rather than a screen.
 2. **DDD T6.3's conformance audit #2** (fresh read-only rulebook-vs-engine pass). The
    R1 half of that task is met; the audit half is untouched.
-3. **DDD T6.0(c)** — `@ddd/ai` and `@ddd/sim` still never call `legalTargets`, so the
-   AI ladder and balance sim keep playing 7 Swarm cards blank. Filed in DDD's
-   `TASKS.md`; not fixed here because it moves published balance numbers.
+3. **DDD T6.0(b)/(c)** — *(corrected 2026-07-12; original text claimed `@ddd/ai` and
+   `@ddd/sim` never call `legalTargets` — REFUTED, see RESULTS.md D-C2)*. AI tiers 2/3
+   DO fill graveyard targets (`packages/ai/src/eval/candidate.ts`); the blank-play
+   defect is confined to `@ddd/sim`'s `randomPolicy` and tier-1 random, i.e. the
+   random-vs-random balance gate. Re-filed accurately in DDD's `TASKS.md` T6.0(c);
+   not fixed here because it moves published balance numbers.
 
 ## Open findings against DDD
 

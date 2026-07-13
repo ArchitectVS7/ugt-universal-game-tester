@@ -76,21 +76,43 @@ Balanced-stance regen puts a seat at focus **3 on turn 1** and at the cap (**5**
 turn 4 — while the most expensive card in the entire 36-card pack costs **3**.
 
 Consequences: cost is never a real decision, and the `INSUFFICIENT_FOCUS` rules arm is
-**unreachable in normal play** (dead code against shipped content).
+~~unreachable in normal play (dead code against shipped content)~~.
+
+**Caveat (2026-07-12, DDD-side re-measurement):** the 26-state sample was too small
+for the "unreachable/dead code" claim. Over ~1,700 live selection states per pairing
+(60 games, skilled play), **6–10% of states contain at least one unaffordable card**
+— the arm is *rare*, not dead. The headline conclusion stands and is confirmed at
+scale: **90–94% of states can afford the entire hand and 40–51% sit at the focus
+cap**, so cost is not a decision.
 
 This is DDD's own open **T6.5** ("The Focus economy — make cost a real decision"), so
 it is ratified design debt, not a robustness defect. R3 records it and does **not**
 fail on it.
 
-### D-C2 · The in-process instruments still never fill targets
-`@ddd/ai` and `@ddd/sim` never call `legalTargets` (verified: zero references). So
-even after D-F1, the AI tiers and the Monte-Carlo balance sim still play all four
-graveyard-return cards inert. **The AI-ladder numbers in CI are measured on a Swarm
-deck with 7 dead cards.**
+### D-C2 · ~~The in-process instruments still never fill targets~~ **REFUTED IN PART (2026-07-12, DDD-side re-measurement)**
+Original claim: `@ddd/ai` and `@ddd/sim` never call `legalTargets` (verified: zero
+references), so even after D-F1 the AI tiers and the Monte-Carlo balance sim still
+play all four graveyard-return cards inert, and the AI-ladder numbers in CI are
+measured on a Swarm deck with 7 dead cards.
 
-Owned by DDD **T6.0** ("Fix the balance instruments"). Deliberately *not* fixed here:
-it would move published balance numbers, which is a game-design decision, not a
-tester's call.
+**Correction.** The "zero references" verification was wrong — a grep at DDD HEAD
+(`e89e4abe`, same commit range this round ran against) finds `legalTargets` called at
+`packages/ai/src/eval/candidate.ts:45` (`chooseTargets`), present since T5.1/T5.2 and
+used by BOTH tier 2 (greedy) and tier 3 (one-ply). Confirmed empirically (60
+games/pairing, real pack): greedy filled targets on **131/136** grave-card plays
+(242 `CARD_RETURNED`), one-ply **140/144** (211). **The AI-ladder CI numbers are
+measured with the subject tier fully armed and stand.**
+
+What the claim got right: `@ddd/sim`'s `randomPolicy` and tier-1
+`uniformRandomStrategy` never fill targets (**0/121** grave-card plays, 0 returns), so
+the random-vs-random *balance gate* does blank 7 of `sw_competitive`'s 40 cards —
+that half remains owned by DDD **T6.0** (b)/(c), and was deliberately not fixed here
+because it moves published balance numbers.
+
+**Method lesson for UGT:** a static-reference claim ("zero references, verified") must
+be pinned by the actual search command + commit hash in the results log, exactly as
+dynamic claims are pinned by scripts. This one wasn't, and it shipped a false finding
+into DDD's task ledger (since corrected in DDD `TASKS.md` T6.0(c)).
 
 ### D-C3 · Some RulesError arms are shadowed by earlier checks
 The battery provokes 9 of the 14 arms. The rest are not unreachable bugs — they are
@@ -99,7 +121,8 @@ The battery provokes 9 of the 14 arms. The rest are not unreachable bugs — the
   `WRONG_PHASE`, not `CARD_NOT_IN_HAND` (both reachable; just probe in the right phase);
 - shape is checked before semantics → a non-`CardType` prediction returns
   `MALFORMED_ACTION`, not `INVALID_PREDICTION`;
-- `INSUFFICIENT_FOCUS` — see D-C1, unreachable by content, not by code.
+- `INSUFFICIENT_FOCUS` — see D-C1: rare against shipped content (~6–10% of skilled-play
+  states have an unaffordable card), not unreachable; the 26-state battery just never hit it.
 `NOT_YOUR_ACTION` / `UNSUPPORTED_ACTION` remain defensive arms with no wire route found.
 
 ## How to re-run
