@@ -21,6 +21,34 @@ Driver: `ugt/adapters/ddd_harness.py::DddHarnessAdapter` → `packages/harness/b
 but against the **wrong game**. See D-F2 below. Its hashes and its 44-ply/turn-21
 match shape are void; the re-baselined match resolves in 24 plies / turn 11.
 
+## Re-run vs DDD `0eb0df83` (2026-07-12, evening — T6.0 instruments + T6.5 economy + D17)
+
+DDD moved three commits past the ladder baseline (`fe493a4a`, `7a246d74` "T6.0: Fix the
+balance instruments", `0eb0df83` "playability fixes"): the Focus economy was re-priced
+to bind (costs now 0–4), **D17 re-ratified `TYPE_ADVANTAGE_POWER` 4 → 5**, Chaos
+Master's +2 Focus payoff was zeroed, and the sim/tier-1 random choosers now fill
+targets. The full ladder was re-run against it:
+
+| Round | Result (live) | Notes |
+|---|---|---|
+| Spike | **10/10** | wire contract unchanged |
+| Smoke | **5/5** | |
+| R1 | **11/11** | match shape moved (WIN/KNOCKOUT turn 14 / 30 plies — economy re-price); sweep clean, determinism byte-identical |
+| R2 | **26/26** | after re-pinning the D16 differential to D17's ratified **+5** (first run correctly went red at the stale +4: `power 4->9 (+5, expected +4)` — the pin did its job, then was moved to the newly ratified constant, not weakened); 12 matches / 344 plies, 36/36 cards, 23 `CARD_RETURNED` w/ zero control |
+| R3 | **32/32** — zero findings | **`INSUFFICIENT_FOCUS` provoked for the first time** (10th refusal arm, 15/15 probes state-inert) — the economy now BINDS over the wire; hunt 8 ep × 165 steps, 51 combats, 26 returns, fog-of-war clean, episode-0 replay byte-identical |
+
+Two artifacts of this re-run, both in the tester, both fixed here:
+1. **Stale pin:** `verify_round2.py` hard-coded `TYPE_ADVANTAGE_POWER = 4`; D17
+   re-ratified 5. Updated with a D17 citation.
+2. **Tester defect (stitching):** `verify_round3.py`'s INSUFFICIENT_FOCUS seed search
+   could find an unaffordable-card state N plies deep, but the battery `reset()` to the
+   seed and probed only **turn 1** — so the probe silently never ran and the report
+   printed the *opposite* of the measurement ("zero cards ever unaffordable") using the
+   search's own counter. Invisible pre-T6.5 (nothing was ever unaffordable anywhere);
+   exposed the moment the economy bound. Fixed: the battery re-walks to the found
+   depth, and a found-but-not-reproduced state is now a **failing check**, not a silent
+   skip. D-C1 is **closed** by this run — see below.
+
 ## Game fixes (each pinned by a test in DDD's own suite)
 
 ### D-F1 · `legalTargets` was unreachable over the wire — graveyard cards were inert
@@ -69,7 +97,14 @@ Rare predictions at all (`chainsPredictions: false`). Found by re-running the sp
 
 ## Characterizations (by design — recorded, not defects)
 
-### D-C1 · The Focus economy never binds
+### D-C1 · ~~The Focus economy never binds~~ **CLOSED (2026-07-12, DDD T6.5/D17)**
+**Closed by the re-run vs DDD `0eb0df83`:** the pack was re-priced (costs 0–4, six
+cost-4 cards), the seed search found an unaffordable held card within one seed, and
+the battery provoked a real **`INSUFFICIENT_FOCUS`** refusal, state-inert, over the
+wire (R3 32/32). The economy now binds. Whether it binds *enough* to make cost an
+interesting decision is the LLM-playtest tier's question (T8.2), not R3's.
+Original record below, kept for the method trail:
+
 Measured by `verify_round3.py`: across **26 probed turn-states over 20 seeds, zero
 cards were ever unaffordable**. `STARTING_FOCUS` is 1, but resource regen plus
 Balanced-stance regen puts a seat at focus **3 on turn 1** and at the cap (**5**) by
@@ -108,6 +143,9 @@ What the claim got right: `@ddd/sim`'s `randomPolicy` and tier-1
 the random-vs-random *balance gate* does blank 7 of `sw_competitive`'s 40 cards —
 that half remains owned by DDD **T6.0** (b)/(c), and was deliberately not fixed here
 because it moves published balance numbers.
+*(Since resolved upstream: DDD `7a246d74` (T6.0 DONE) arms both random choosers via
+`legalTargets` and re-pins the ladder floors; the honest skilled-play matchup —
+Blitzblade ~36% — is owned by DDD T6.2.)*
 
 **Method lesson for UGT:** a static-reference claim ("zero references, verified") must
 be pinned by the actual search command + commit hash in the results log, exactly as
@@ -115,14 +153,13 @@ dynamic claims are pinned by scripts. This one wasn't, and it shipped a false fi
 into DDD's task ledger (since corrected in DDD `TASKS.md` T6.0(c)).
 
 ### D-C3 · Some RulesError arms are shadowed by earlier checks
-The battery provokes 9 of the 14 arms. The rest are not unreachable bugs — they are
+The battery provokes 10 of the 14 arms (`INSUFFICIENT_FOCUS` joined in the
+`0eb0df83` re-run — see D-C1 closure). The rest are not unreachable bugs — they are
 *shadowed* by validation ordering, which is correct behavior:
 - phase is checked before card ownership → a bad commit in MULLIGAN returns
   `WRONG_PHASE`, not `CARD_NOT_IN_HAND` (both reachable; just probe in the right phase);
 - shape is checked before semantics → a non-`CardType` prediction returns
-  `MALFORMED_ACTION`, not `INVALID_PREDICTION`;
-- `INSUFFICIENT_FOCUS` — see D-C1: rare against shipped content (~6–10% of skilled-play
-  states have an unaffordable card), not unreachable; the 26-state battery just never hit it.
+  `MALFORMED_ACTION`, not `INVALID_PREDICTION`.
 `NOT_YOUR_ACTION` / `UNSUPPORTED_ACTION` remain defensive arms with no wire route found.
 
 ## How to re-run
@@ -136,7 +173,7 @@ python3 integrations/ddd/spike_ddd.py           # 10/10 raw protocol (incl. the 
 python3 integrations/ddd/smoke_ddd_adapter.py   #  5/5 BaseAdapter contract
 python3 integrations/ddd/verify_round1.py       # 11/11 one match + determinism
 python3 integrations/ddd/verify_round2.py       # 26/26 full content spine
-python3 integrations/ddd/verify_round3.py       # 31/31 ExploitHunter + refusal battery
+python3 integrations/ddd/verify_round3.py       # 32/32 ExploitHunter + refusal battery
 
 # DDD's own gate (from /Users/vs7/Dev/Games/DDD)
 pnpm typecheck && pnpm lint && pnpm test && pnpm smoke && pnpm bench

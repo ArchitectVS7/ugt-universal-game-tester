@@ -231,16 +231,18 @@ def refusal_battery(ad, gate):
     # with numbers, rather than skipping quietly.
     battery_seed = "battery"
     turns_probed = 0
+    unaff_depth = 0  # step(1) pairs from post-mulligan SELECTION to the found state
     for s in range(20):
         cand = f"battery-{s}"
         ad.reset(cand)
         for _ in range(2):
             ad.step(8)  # mulligan_keep -> SELECTION
         # Look across several turns, not just the opening hand.
-        for _ in range(6):
+        for depth in range(6):
             _seat, unaff = unaffordable_in_hand()
             turns_probed += 1
             if unaff is not None:
+                unaff_depth = depth
                 break
             if ad._pending_seat() is None:
                 break
@@ -311,6 +313,15 @@ def refusal_battery(ad, gate):
     for _ in range(2):
         ad.step(8)  # mulligan_keep
 
+    # Re-walk to the depth where the seed search found the unaffordable card —
+    # the search may have found it turns deep, not on the opening hand, and a
+    # reset() forgets that. (Stitching bug found 2026-07-12: the search FOUND an
+    # unaffordable card, the battery re-checked only turn 1, missed it, and the
+    # report claimed the opposite of the measurement.)
+    for _ in range(unaff_depth):
+        ad.step(1)
+        ad.step(1)
+
     seat, unaffordable = unaffordable_in_hand()
     legal_now, _ = ad._legal(seat)
     a_legal = next(a for a in legal_now if a.get("t") == "COMMIT_SELECTION")
@@ -339,23 +350,32 @@ def refusal_battery(ad, gate):
             {"t": "COMMIT_SELECTION", "player": seat, "instanceId": unaffordable,
              "modeIndex": None, "targets": [], "prediction": None},
         ))
+    elif focus_binds:
+        # The seed search FOUND an unaffordable card but the re-walk did not land
+        # on it — a tester defect (the probe silently didn't run), not a game fact.
+        ck("INSUFFICIENT_FOCUS probe runs at the state the seed search found",
+           False,
+           f"found at seed={battery_seed} depth={unaff_depth} but the battery "
+           f"re-walk did not reproduce it — the probe silently did NOT run")
+        finding(
+            f"TESTER: INSUFFICIENT_FOCUS state found in the seed search "
+            f"(seed={battery_seed}, depth={unaff_depth}) but not reproduced by the "
+            f"battery re-walk — the probe did NOT run. Fix the re-walk; do not "
+            f"read this as 'the economy never binds'."
+        )
     else:
         # NOT a tester gap — a measured property of the shipped game, reported.
-        # STARTING_FOCUS 1 + resource regen + Balanced-stance regen puts a seat at
-        # focus 3 on turn 1 and at the cap (5) by turn 4, while the most expensive
-        # card in the whole 36-card pack costs 3. So no card is EVER unaffordable
-        # after turn 1: the Focus economy does not bind, cost is not a decision, and
-        # the INSUFFICIENT_FOCUS rules arm is unreachable in normal play.
-        # This is DDD's own open T6.5 ("The Focus economy — make cost a real
-        # decision"). It is a design finding, not a robustness defect, so it does
-        # NOT fail this tier — it is recorded.
+        # (Pre-T6.5 this was DDD's D-C1: focus regen outran every cost in the pack,
+        # so cost was never a decision. T6.5 re-priced the pack to make it bind —
+        # if this fires again, that regression is the finding.)
+        # A design finding, not a robustness defect, so it does NOT fail this
+        # tier — it is recorded.
         finding(
-            f"CHARACTERIZATION (design, DDD T6.5): the Focus economy never binds — "
-            f"across {turns_probed} probed turn-states over 20 seeds, ZERO cards were "
-            f"ever unaffordable. Turn-1 focus is already 3 (start 1 + regen + Balanced "
-            f"stance) and caps at 5 by turn 4, while the pack's most expensive card "
-            f"costs 3. Cost is therefore not a real decision, and the "
-            f"INSUFFICIENT_FOCUS rules arm cannot be reached in normal play."
+            f"CHARACTERIZATION (design, DDD T6.5): the Focus economy never bound — "
+            f"across {turns_probed} probed turn-states over 20 seeds, ZERO held cards "
+            f"were ever missing from the engine's legal list for affordability. Cost "
+            f"is therefore not a real decision, and the INSUFFICIENT_FOCUS rules arm "
+            f"cannot be reached in normal play."
         )
     for label, action in sel_probes:
         before = hash_now()

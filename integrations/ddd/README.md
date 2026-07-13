@@ -137,11 +137,11 @@ Full commit-traceable log, with every finding and its pinning test: **[RESULTS.m
 
 | Round | Script(s) | Gate |
 |---|---|---|
-| Spike | `spike_ddd.py` | **PASSED (2026-07-12): 10/10** raw-protocol checks (incl. the new `targets` op). |
-| Smoke | `smoke_ddd_adapter.py` | **PASSED (2026-07-12): 5/5** through the BaseAdapter contract. |
-| R1 | `verify_round1.py` · `invariants.py` | **PASSED (2026-07-12): 11/11** live. One full `commit_random` match to a **WIN via KNOCKOUT** (24 plies / turn 11); sweep CLEAN both runs; 40-card conservation; same-seed replay byte-identical; harness self-replay re-verifies. |
-| R2 | `verify_round2.py` | **PASSED (2026-07-12): 26/26** live. 12-match corpus / 348 plies: every wave config, both formats, all four decks (mirrors + crosses), 4 terminal arms, **36/36 shipped cards played**, graveyard targets fire (19 `CARD_RETURNED`) with a zero-firing control, D16 asserted differentially (+4 exactly), D2 in all 20 combats, both determinism oracles. |
-| R3 | `verify_round3.py` | **PASSED (2026-07-12): 31/31** live, **zero findings**. Real `ExploitHunter`, 8 ep × 60 steps over the full 13-id vocabulary; 9 RulesError arms provoked and **14/14 probes state-inert**; hash-moves-iff-applied; fog-of-war clean over the wire; no soft-lock; same-seed episode-0 replay byte-identical. |
+| Spike | `spike_ddd.py` | **PASSED (2026-07-12 re-run vs DDD `0eb0df83`): 10/10** raw-protocol checks (incl. the `targets` op). |
+| Smoke | `smoke_ddd_adapter.py` | **PASSED (2026-07-12 re-run): 5/5** through the BaseAdapter contract. |
+| R1 | `verify_round1.py` · `invariants.py` | **PASSED (2026-07-12 re-run): 11/11** live. One full `commit_random` match to a **WIN via KNOCKOUT** (30 plies / turn 14 under the T6.5 economy); sweep CLEAN both runs; 40-card conservation; same-seed replay byte-identical; harness self-replay re-verifies. |
+| R2 | `verify_round2.py` | **PASSED (2026-07-12 re-run): 26/26** live. 12-match corpus / 344 plies: every wave config, both formats, all four decks (mirrors + crosses), 4 terminal arms, **36/36 shipped cards played**, graveyard targets fire (23 `CARD_RETURNED`) with a zero-firing control, D16 asserted differentially (**+5 exactly** — D17 re-ratified the constant 4 → 5; the stale +4 pin correctly went red first), D2 in all combats, both determinism oracles. |
+| R3 | `verify_round3.py` | **PASSED (2026-07-12 re-run): 32/32** live, **zero findings**. Real `ExploitHunter`, 8 ep × 60 steps over the full 13-id vocabulary; **10 RulesError arms** provoked — incl. `INSUFFICIENT_FOCUS` for the first time, the T6.5 economy now binds — and **15/15 probes state-inert**; hash-moves-iff-applied; fog-of-war clean over the wire; no soft-lock; same-seed episode-0 replay byte-identical. |
 
 ⚠️ **The 2026-07-11 R1 run is SUPERSEDED.** It was green against the *wrong game*: the
 config named two of the three `enabledWaves` keys, so D16's type triangle was silently

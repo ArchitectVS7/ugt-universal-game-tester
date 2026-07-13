@@ -40,7 +40,7 @@ Gate (fail-closed; ~40 checks):
   6. D16, DIFFERENTIALLY — the same seed run with typeTriangle ON and OFF: with it
      OFF, `advantage` is null in EVERY combat; with it ON, >=1 combat has an
      advantage, and at the FIRST combat the countering seat's power is EXACTLY
-     TYPE_ADVANTAGE_POWER (4) higher than in the OFF run while the other seat's is
+     TYPE_ADVANTAGE_POWER (5, D17) higher than in the OFF run while the other seat's is
      unchanged. Also D2 everywhere: damage == |power0 - power1|.
   7. DETERMINISM, TWO INDEPENDENT ORACLES — every match in the corpus replays
      byte-identically on its own seed (UGT's own hash stream), AND the harness's
@@ -84,7 +84,8 @@ MULLIGAN_KEEP = 8
 CONCEDE = 10
 
 # D16: the counterer's power bonus (engine state/matchup.ts TYPE_ADVANTAGE_POWER).
-TYPE_ADVANTAGE_POWER = 4
+# D17 (2026-07-12) re-ratified 4 -> 5 alongside the T6.5 focus-economy fix.
+TYPE_ADVANTAGE_POWER = 5
 
 ALL_WAVES = {"stanceEcho": True, "chainsPredictions": True, "typeTriangle": True}
 NO_WAVES = {"stanceEcho": False, "chainsPredictions": False, "typeTriangle": False}
@@ -354,7 +355,7 @@ def main() -> int:
 
     # Seek a seed whose FIRST combat is an actual COUNTER. If the first combat is
     # type-neutral the differential degenerates to "nothing changed", which would
-    # pass without ever testing the +4 — a vacuous green. Search until the +4 is
+    # pass without ever testing the bonus — a vacuous green. Search until it is
     # genuinely on the line; if no seed in the band produces one, say so and FAIL
     # rather than accept the neutral branch as proof.
     on = off = None
@@ -395,7 +396,8 @@ def main() -> int:
         finding(f"D2 violated: {c}")
 
     # The differential: at the first combat the SAME seed plays the same cards, so
-    # the ONLY difference the triangle may introduce is +4 power to the counterer.
+    # the ONLY difference the triangle may introduce is the TYPE_ADVANTAGE_POWER
+    # bonus to the counterer.
     c_on = on["combats"][0] if on["combats"] else None
     c_off = off["combats"][0] if off["combats"] else None
     adv = c_on.get("advantage") if c_on else None
@@ -403,9 +405,9 @@ def main() -> int:
     if c_on is None or c_off is None:
         ok, detail = False, "no combats to compare"
     elif adv is None:
-        # Refuse the neutral branch: it would pass without ever exercising the +4.
+        # Refuse the neutral branch: it would pass without ever exercising the bonus.
         ok = False
-        detail = ("first combat is type-NEUTRAL — the +4 was never on the line; "
+        detail = ("first combat is type-NEUTRAL — the bonus was never on the line; "
                   "no seed in the band produced a countered first combat")
     else:
         other = 1 - adv
@@ -416,8 +418,8 @@ def main() -> int:
                   f"(+{gained}, expected +{TYPE_ADVANTAGE_POWER}); "
                   f"p{other} power {c_off[f'power{other}']} unchanged={unchanged}; "
                   f"damage {c_off['damage']}->{c_on['damage']}")
-    ck("D16 differential: on a COUNTERED first combat the triangle adds EXACTLY +4 "
-       "power to the counterer and moves nothing else", ok, detail)
+    ck(f"D16 differential: on a COUNTERED first combat the triangle adds EXACTLY "
+       f"+{TYPE_ADVANTAGE_POWER} power to the counterer and moves nothing else", ok, detail)
     if not ok:
         finding(f"D16 differential failed — ON={c_on} OFF={c_off}")
 
@@ -453,7 +455,7 @@ def main() -> int:
         "configuration, both formats, all four decks (mirrors and crosses), every "
         "terminal arm the wire can reach, and every shipped card actually played. "
         "Graveyard targets fire over the wire (with a zero-firing control proving "
-        "the check is not vacuous), the D16 triangle adds exactly +4 to the "
+        "the check is not vacuous), the D16 triangle adds exactly its ratified bonus to the "
         "counterer and nothing else, D2 holds in every combat, the invariant sweep "
         "is clean on every step of every match, and both determinism oracles agree. "
         "Ready for Round 3.",

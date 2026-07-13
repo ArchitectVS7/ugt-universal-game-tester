@@ -1,12 +1,16 @@
 # DDD × UGT — resume here
 
-**Status (2026-07-12): the ladder is COMPLETE and green.**
-`spike 10/10 · smoke 5/5 · R1 11/11 · R2 26/26 · R3 31/31` — zero open findings.
+**Status (2026-07-12, evening re-run vs DDD `0eb0df83`): the ladder is COMPLETE and green.**
+`spike 10/10 · smoke 5/5 · R1 11/11 · R2 26/26 · R3 32/32` — zero open findings.
+The re-run absorbed DDD's T6.0/T6.5/D17 changes: R2's D16 pin moved to the re-ratified
+**+5** (D17), and R3 provoked **`INSUFFICIENT_FOCUS`** for the first time — the Focus
+economy now binds, closing D-C1. One tester stitching defect found + fixed in
+`verify_round3.py` (see RESULTS.md, re-run section).
 
 - What it does + how to run it: **[README.md](README.md)**
 - What was found, fixed and pinned: **[RESULTS.md](RESULTS.md)**
 - Game: `/Users/vs7/Dev/Games/DDD`, branch `feat/d16-type-triangle`
-- UGT commits `00aaa33` (re-baseline + R2), `9ff38b1` (R3) · DDD commit `61125b64` (both fixes)
+- UGT commits `00aaa33` (re-baseline + R2), `9ff38b1` (R3), this session (re-run) · DDD commits `61125b64` (D-F1/D-F2), `0eb0df83` (re-run baseline)
 
 ## Re-run everything (no server to start — the adapter spawns the harness)
 
@@ -35,15 +39,15 @@ refuses one too.
    so a playtester would drive `legal`/`act` directly rather than a screen.
 2. **DDD T6.3's conformance audit #2** (fresh read-only rulebook-vs-engine pass). The
    R1 half of that task is met; the audit half is untouched.
-3. **DDD T6.0(b)/(c)** — *(corrected 2026-07-12; original text claimed `@ddd/ai` and
-   `@ddd/sim` never call `legalTargets` — REFUTED, see RESULTS.md D-C2)*. AI tiers 2/3
-   DO fill graveyard targets (`packages/ai/src/eval/candidate.ts`); the blank-play
-   defect is confined to `@ddd/sim`'s `randomPolicy` and tier-1 random, i.e. the
-   random-vs-random balance gate. Re-filed accurately in DDD's `TASKS.md` T6.0(c);
-   not fixed here because it moves published balance numbers.
+3. ~~**DDD T6.0(b)/(c)**~~ **RESOLVED upstream** (DDD `7a246d74`, T6.0 DONE):
+   `randomPolicy` and tier-1 random now fill a random legal target subset, the
+   balance instruments were re-priced (`effectValue` reachability discount), and the
+   ladder floors re-pinned against the armed baseline. The honest skilled-play
+   matchup is Blitzblade ~36% — still red, owned by DDD T6.2.
 
 ## Open findings against DDD
 
-None blocking. One recorded characterization: **the Focus economy never binds**
-(RESULTS.md D-C1) — turn-1 focus already covers the most expensive card in the pack,
-so cost is not a decision. That is DDD's own open **T6.5**.
+None. D-C1 (**the Focus economy never binds**) is **CLOSED** as of the `0eb0df83`
+re-run — T6.5 re-priced the pack (costs 0–4) and R3 provoked a live, state-inert
+`INSUFFICIENT_FOCUS` refusal over the wire. Whether cost is now an *interesting*
+decision (not merely a reachable constraint) is the LLM-playtest tier's question.
