@@ -1,5 +1,14 @@
 # Nexus Dominion — UGT Integration Feasibility Study
 
+> **OUTCOME (2026-07-16): GO was correct — trial COMPLETE the same day.** Full ladder green
+> (spike 11/11 · smoke 6/6 · R1 12/12 · R2 17/17 · R3 43/43), **10 defects fixed upstream**,
+> game suite 1109→1137. The "zero game-side retrofit" hope did NOT hold: the game-side needed a
+> thin harness *and* 10 real fixes (incl. one critical — the game was inert for its first 10
+> cycles). See `RESULTS.md` / `HANDOFF.md`. The study below is the original pre-build analysis,
+> preserved for reference.
+
+---
+
 **Date:** 2026-07-16 · **Verdict: GO — highest-feasibility candidate UGT has evaluated.**
 Recommended path: **engine-first JSON-lines subprocess harness** (the DDD pattern), runnable
 today, independent of the pending human UAT retest.
