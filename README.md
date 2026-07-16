@@ -8,39 +8,64 @@ playtester** (strategy & balance). UGT does two jobs at once — it validates *t
 
 > **⚠️ Start with [`PLAN-FORWARD.md`](PLAN-FORWARD.md).** Core principle learned the hard way: **the tester must
 > drive the real running game, never a re-implementation of it.** Early SpacerQuest work used a headless "bridge"
-> that drifted into a partial copy of the game (it had no combat) — so agents learned the wrong game. The current
-> direction drives the real game server directly. RL as a pure balance oracle was tried and demoted; see
-> `PLAN-FORWARD.md` for the honest history (older assessments are in `archive/`).
+> that drifted into a partial copy of the game (it had no combat) — so agents learned the wrong game. Every
+> adapter since drives the real game (live server, real browser, or the game's own subprocess harness). RL as a
+> pure balance oracle was tried and demoted to exploit-hunting; see `PLAN-FORWARD.md` for the honest history
+> (older assessments are in `archive/`).
+
+## Track record
+
+Five games have been taken through UGT's **trial ladder** (spike → smoke → R1 playability → R2 full spine →
+R3 exploit-hunter; scaffold in `ugt/core/trial.py`), across three transport paradigms — and every one of them
+yielded real, fixed-upstream game bugs, including wire-only defects that the games' own green in-process test
+suites could not see:
+
+| Game | Transport | Result |
+|---|---|---|
+| SpacerQuest | Socket.IO + HTTP real server | 9 findings fixed & re-verified live (integration archived — game on hold) |
+| Warzones | Browser (Playwright) | Ladder green; 2 criticals fixed; same-seed replay byte-identical |
+| Tarot-war | Browser (Playwright) | Ladder green; 8 findings all closed |
+| NEXUS | Live HTTP test routes | Ladder green; 5 fixes pinned |
+| DDD | Subprocess JSON-lines harness | Ladder green; 2 wire-only defects fixed |
+
+Per-game detail: `integrations/<game>/{HANDOFF,README,RESULTS}.md`.
 
 ## Architecture
 
 ```
-                    ┌─────────────────────────────────┐
-                    │     Global CLI: ugt             │
-                    │   init | smoke-test | train     │
-                    │   evaluate | dashboard          │
-                    └──────────┬──────────────────────┘
-                               │
-                    ┌──────────▼──────────────────────┐
-                    │   Core Trainer / Orchestrator    │
-                    │   PPO · DQN · A2C via SB3       │
-                    │   SubprocVecEnv (parallel)       │
-                    └──────────┬──────────────────────┘
-                               │
-                    ┌──────────▼──────────────────────┐
-                    │   Universal Gymnasium Env        │
-                    │   Dynamic spaces from YAML       │
-                    │   Safe AST reward formulas       │
-                    └──────────┬──────────────────────┘
-                               │
-              ┌────────────────┼────────────────┐
-              │                                 │
-   ┌──────────▼──────────┐          ┌──────────▼──────────┐
-   │  Playwright Bridge  │          │  Subprocess Bridge  │
-   │  Browser games      │          │  Headless sims      │
-   │  React/Phaser/Vue   │          │  Python/Node/WASM   │
-   └─────────────────────┘          └─────────────────────┘
+                 ┌────────────────────────────────────────┐
+                 │     Global CLI: ugt                    │
+                 │   init | verify | smoke-test | train   │
+                 │   evaluate | playtest | dashboard      │
+                 └──────────┬─────────────────────────────┘
+                            │
+                 ┌──────────▼─────────────────────────────┐
+                 │  Testing tiers (ugt/core/)             │
+                 │  verifier · exploit_hunter + trial     │
+                 │  (ladder) · playtester (LLM) ·         │
+                 │  trainer/evaluator (PPO·DQN·A2C, SB3)  │
+                 └──────────┬─────────────────────────────┘
+                            │
+                 ┌──────────▼─────────────────────────────┐
+                 │   Universal Gymnasium Env              │
+                 │   Dynamic spaces from YAML             │
+                 │   Safe AST reward formulas             │
+                 └──────────┬─────────────────────────────┘
+                            │  engine.type picks the adapter
+        ┌───────────────────┼───────────────────┐
+        │                   │                   │
+┌───────▼────────┐ ┌────────▼────────┐ ┌────────▼────────┐
+│ "browser"      │ │ "simulation"    │ │ "real_server"   │
+│ Playwright     │ │ Subprocess      │ │ RealClient      │
+│ Browser games  │ │ JSON over       │ │ Socket.IO+HTTP  │
+│ React/Phaser   │ │ stdin/stdout    │ │ vs a LIVE game  │
+│                │ │ to a headless   │ │ server          │
+│                │ │ sim/harness     │ │                 │
+└────────────────┘ └─────────────────┘ └─────────────────┘
 ```
+
+Integration ladder scripts may also construct game-specific adapters directly (`ugt/adapters/nexus_http.py`,
+`ugt/adapters/ddd_harness.py`) — thin transports with zero game logic, like every adapter here.
 
 ## Installation
 
@@ -48,8 +73,10 @@ playtester** (strategy & balance). UGT does two jobs at once — it validates *t
 cd "/Users/vs7/Dev/Games/_UGT Universal Game Tester"
 pip install -e .
 
-# For dashboard support (TensorBoard):
-pip install -e ".[dashboard]"
+# Optional extras:
+pip install -e ".[dashboard]"    # TensorBoard
+pip install -e ".[playtest]"     # Anthropic SDK, for `ugt playtest`
+pip install -e ".[realclient]"   # requests/python-socketio/websocket-client, for `real_server`
 ```
 
 ## Quick Start
@@ -90,8 +117,10 @@ Launches TensorBoard against the training log directory.
 |---|---|
 | `ugt init` | Create a template `ugt.config.yaml` in the current directory |
 | `ugt smoke-test` | Verify game adapter connection and state mapping |
+| `ugt verify` | Drive a `feature-map.yaml` of state-delta assertions; write `results/coverage-report.json` |
 | `ugt train` | Train an RL agent using a reward profile from config |
 | `ugt evaluate` | Run N-episode statistical evaluation with a frozen model |
+| `ugt playtest` | LLM plays the game via keys/text (Anthropic or Ollama); write `results/playtest-report.json` |
 | `ugt dashboard` | Launch TensorBoard to view training metrics |
 
 ## Configuration (`ugt.config.yaml`)
@@ -100,7 +129,8 @@ Each game project contains a `ugt.config.yaml` that maps game-specific structure
 
 ### Key Sections
 
-- **`engine`** — Connection type (`browser` or `simulation`) and entry point
+- **`engine`** — Connection type (`browser`, `simulation`, or `real_server`) and entry point (`entry` is
+  optional only for `real_server`, which uses `base_url`/`server_cmd` instead)
 - **`observation_space`** — Maps JSON state fields to numerical observation vectors
 - **`action_space`** — Defines the discrete action set
 - **`reward_profiles`** — Declarative reward formulas evaluated via safe AST parsing
@@ -115,7 +145,9 @@ Each game project contains a `ugt.config.yaml` that maps game-specific structure
 3. Create a `ugt.config.yaml` mapping your game's state fields
 4. Run `ugt smoke-test` to verify
 
-See [examples/warzones/](examples/warzones/) for a complete reference implementation using the Warzones game engine.
+See [examples/mock-game/](examples/mock-game/) for a minimal reference implementation, and
+[integrations/ddd/](integrations/ddd/) for a real one (the game's own JSON-lines harness as the subprocess —
+the bridge wraps transport only, never game rules).
 
 ### Browser Games
 
@@ -134,4 +166,7 @@ See [examples/browser-game/](examples/browser-game/) for a minimal working examp
 |---|---|---|
 | `examples/mock-game/` | Simulation | Minimal Python simulator for testing UGT core |
 | `examples/browser-game/` | Browser | HTML/JS game demonstrating the Playwright adapter |
-| `examples/warzones/` | Simulation | Full game port — bridges to the Warzones game engine |
+| `examples/spacerquest/` | Simulation | ⚠️ **Retired anti-pattern** — the `sim_bridge.ts` that reimplemented the game and drifted from it. Kept as a cautionary example; do not extend. |
+
+Real integrations (the trial-ladder runs against live games) live in [`integrations/`](integrations/), not
+`examples/`.

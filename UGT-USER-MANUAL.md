@@ -10,8 +10,9 @@
 
 ## Methodology & Hard-Won Lessons (read before onboarding a new game)
 
-These are the reusable principles distilled from wiring up the first game (SpacerQuest). They apply to **every**
-game you plug into UGT — internalize them before writing a single adapter line.
+These are the reusable principles distilled from wiring up the first five games (SpacerQuest, Warzones,
+Tarot-war, NEXUS, DDD). They apply to **every** game you plug into UGT — internalize them before writing a
+single adapter line.
 
 1. **Drive the REAL game, never a re-implementation.** The single biggest failure mode: building an adapter/bridge
    that reimplements game logic (travel, combat, economy) instead of calling the running game. Whatever the bridge
@@ -38,6 +39,15 @@ game you plug into UGT — internalize them before writing a single adapter line
 7. **Right tool per question.** *Correctness* → verify. *Robustness / does-it-break* → a cheap random/RL
    exploit-hunter (no reward engineering). *Balance / is-it-good* → an LLM playtester (competent play beats
    volume). Don't force one agent to answer all three.
+8. **Test over the wire — a green in-process suite cannot see serialization-boundary bugs.** The game's own
+   client and tests route around the wire, so defects on it are invisible to them: DDD had 1,251 in-process
+   tests green while 7 of 40 cards played blank for every wire client (a field never exposed) and `create`
+   accepted a config `replay` would refuse (a missing config key silently played a *different game*). Demand
+   exact-config-key sets, treat a refusal as different from silent inertness, kill vacuous greens, and when
+   an invariant never fires, suspect your own invariant first.
+9. **Audit your own findings before citing them.** UGT itself has over-claimed from small samples and misread
+   cumulative counters. Investigate before *confirming*, not just before dismissing — and record corrections
+   in the integration's `RESULTS.md` rather than deleting the mistake.
 
 > The tier model below is the current shape. Note: on SpacerQuest, RL as a *balance oracle* was tried and
 > demoted to exploit-hunting (see `PLAN-FORWARD.md`); the LLM tier carries strategy/balance. Keep the phase
@@ -59,6 +69,32 @@ game you plug into UGT — internalize them before writing a single adapter line
 > Playtesting a broken game generates noise. Phase 1 is cheap (minutes); do it first.
 >
 > Use `ugt smoke-test` before Phase 1 as a quick sanity check that the bridge is responding.
+
+### The trial ladder (how integrations actually run Phases 1–2)
+
+In practice, every real integration (see `integrations/<game>/` — warzones, tarot-war, NEXUS, DDD) climbs a
+standardized **trial ladder** of fail-closed gate scripts rather than the bare CLI commands:
+
+1. **Spike** (`spike_<game>.py`) — prove the raw protocol round-trips headlessly (create/auth → act → read
+   state back). This is where you empirically pin protocol quirks before they bite.
+2. **Smoke** (`smoke_<game>_adapter.py`) — the same path through the `BaseAdapter` contract.
+3. **R1 — playability gate** (`verify_round1.py`) — one scripted full loop of the core game, with
+   per-command invariants checked after every command.
+4. **R2 — full spine** (`verify_round2.py`) — every major mode/system driven to a real outcome (e.g. an
+   actual win), still under invariants.
+5. **R3 — exploit-hunter** (`verify_round3.py`) — random/heuristic walks (`ugt/core/exploit_hunter.py`)
+   asserting the SAME invariants after every step, plus determinism: a same-seed replay must be
+   byte-identical.
+
+The game-agnostic skeleton lives in `ugt/core/trial.py`: `GateRunner` (the `[PASS]`/`[FAIL]` accumulator,
+`[FINDING]` registry, and the fail-closed "ROUND N MET — p/t" footer), `InvariantSuite` (one predicate
+definition reused by both the scripted rounds and the exploit-hunter, so the tiers can't drift apart), and
+`first_divergence` (replay compare). Everything game-specific — predicates, probes, policies, state
+normalization — stays in the game's `integrations/<game>/` files. A failed check is DATA: findings print
+inline, fail the gate, and get fixed upstream in the game.
+
+Only after the ladder is green does Phase 3 (the LLM playtester) make sense — balance verdicts on a game
+that crashes are noise.
 
 ---
 

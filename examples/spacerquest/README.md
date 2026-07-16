@@ -1,4 +1,11 @@
-# SpacerQuest → UGT IPC Simulator Bridge
+# SpacerQuest → UGT IPC Simulator Bridge (⚠️ RETIRED — cautionary example)
+
+> **Do not extend or imitate this.** This bridge reimplemented SpacerQuest's game logic and silently drifted
+> from the real game (it had no combat and broken upgrades) — every agent trained against it learned a
+> different game. It is the failure mode UGT's #1 rule ("drive the real running game, never a
+> re-implementation") exists to prevent. See `../../PLAN-FORWARD.md` and
+> `../../archive/PLAN-FORWARD-spacerquest.md`. The pitch below is preserved unedited as the record of how
+> reasonable the wrong approach sounded.
 
 This example integrates **SpacerQuest v4.0** with the **Universal Game Tester (UGT)** framework. 
 
