@@ -18,7 +18,7 @@ setup(
     ],
     extras_require={
         "dashboard": ["tensorboard"],
-        "playtest":  ["anthropic>=0.25.0"],
+        "playtest":  ["anthropic>=0.25.0", "python-dotenv>=1.0.0"],
         # Real-server adapter (drives the live spacerquest-web game over HTTP + Socket.IO).
         "realclient": ["requests", "python-socketio[client]>=5", "websocket-client"],
     },

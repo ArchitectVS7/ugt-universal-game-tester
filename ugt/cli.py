@@ -199,6 +199,14 @@ def handle_verify(config_path, feature_map_path, max_turns, output):
 def handle_playtest(config_path, strategy_guide_path, max_actions, output, provider="anthropic",
                     model=None, runs=1):
     from ugt.core.playtester import playtest_game
+    # Load a repo-local .env so ANTHROPIC_API_KEY (anthropic provider) is picked up
+    # without the caller having to export it. Optional dep — the [playtest] extra
+    # pulls it in; if absent, fall back to the ambient environment.
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
     try:
         config = UgtConfig(config_path)
     except ConfigError as e:
