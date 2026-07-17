@@ -1,0 +1,152 @@
+# UGT config for SpacerQuest — RIMWARD REDESIGN (T-1604).
+#
+# This points UGT at the Rimward game through the T-1003 stdio protocol
+# (packages/sim/dist/protocol-stdio.js): line-delimited JSON requests
+# (new-game / start-day / legal-actions / apply-action / end-day) in, one JSON
+# response per line out. See the SpacerQuest repo `packages/sim/PROTOCOL.md`.
+#
+# This SUPERSEDES integrations/spacerquest_old/, which drove the retired
+# Museum-Edition `spacerquest-web` Socket.IO server + rank ladder (LIEUTENANT…
+# GIGA_HERO) via realclient.py. That server is the quarantined legacy game, NOT
+# Rimward. Do not edit spacerquest_old/ — it is history.
+#
+# WIRE NOTE: the Rimward protocol is a DAY-LOOP message set (state-summary /
+# legal-actions / action-result), not the Gym-style command/step/action_id wire
+# the generic ugt/adapters/subprocess.py speaks. rimward_gym_bridge.py is the
+# transport shim between the two: UGT's SubprocessAdapter spawns IT (engine.entry
+# below), and it spawns/speaks to the node protocol bin. Every action id below is
+# STRUCTURAL — the bridge only ever picks among the LegalActionSpecs the engine's
+# own `legal-actions` enumerator advertises (the ddd_harness lesson: no game
+# logic in the transport). This makes ALL of UGT's phases run against Rimward:
+#
+#   python3 -m ugt.cli smoke-test --config integrations/spacerquest/ugt.config.yaml
+#   python3 -m ugt.cli verify     --config integrations/spacerquest/ugt.config.yaml \
+#       --feature-map integrations/spacerquest/feature-map.yaml
+#   python3 -m ugt.cli train      --config integrations/spacerquest/ugt.config.yaml --profile rimward
+#   python3 -m ugt.cli evaluate   --config integrations/spacerquest/ugt.config.yaml \
+#       --profile rimward --model integrations/spacerquest/models/ppo_rimward_final
+#
+# Build the protocol bin in the SpacerQuest repo first:
+#   npm run build -w @spacerquest/sim   (or npx tsc -b)
+# Override the bin with SPACERQUEST_STDIO_BIN; set SPACERQUEST_UGT_LOG to a file
+# path to capture the per-action JSONL evidence trail.
+
+project:
+  name: "SpacerQuest (Rimward)"
+  version: "0.2.0"
+
+engine:
+  type: "simulation"
+  # The Gym-wire bridge (this directory). SubprocessAdapter runs .py entries with
+  # the current interpreter, cwd = this config's directory.
+  entry: "rimward_gym_bridge.py"
+
+# Observation paths index into the bridge's normalized state dict
+# (rimward_gym_bridge.Bridge._state) — flat numeric views of the engine's own
+# StateSummary. shape MUST equal len(mappings) (UgtConfig cross-checks).
+observation_space:
+  type: "box"
+  shape: 14
+  mappings:
+    - path: "day"
+      min: 0
+      max: 100
+    - path: "phaseDay"
+      min: 0
+      max: 1
+    - path: "credits"
+      min: 0
+      max: 1000000
+    - path: "debt"
+      min: 0
+      max: 1000000
+    - path: "fuel"
+      min: 0
+      max: 2000
+    - path: "maxFuel"
+      min: 0
+      max: 2000
+    - path: "systemId"
+      min: 0
+      max: 40
+    - path: "diceLeft"
+      min: 0
+      max: 8
+    - path: "hasContract"
+      min: 0
+      max: 1
+    - path: "contractPayment"
+      min: 0
+      max: 100000
+    - path: "inEncounter"
+      min: 0
+      max: 1
+    - path: "enemyHull"
+      min: 0
+      max: 1000
+    - path: "boardCount"
+      min: 0
+      max: 10
+    - path: "localFuelPrice"
+      min: 0
+      max: 100
+
+# Every id is STRUCTURAL — it picks among the actions the ENGINE's legal-actions
+# enumerator advertised, filling parameters only from the domains each spec
+# declares. Ids whose preferred class is absent fall back to the first legal
+# spec, so the whole vocabulary stays driveable in every state and the bridge
+# can never send an illegal action. MUST stay in lockstep with
+# rimward_gym_bridge.ACTION_NAMES.
+action_space:
+  type: "discrete"
+  size: 20
+  actions:
+    0: { name: "wait" } # bare Wait — no-op tick (forced rollover past the per-day cap)
+    1: { name: "first_legal" } # first advertised spec, first domain values (deterministic)
+    2: { name: "random_legal" } # random spec + random params (seeded bridge RNG) — the fuzz id
+    3: { name: "travel_random" } # Travel to a random advertised destination
+    4: { name: "travel_contract" } # Travel; prefer the carried contract's destination if advertised
+    5: { name: "buy_fuel_max" } # Trade/buy-fuel at the advertised max
+    6: { name: "sign_contract" } # Trade/sign-contract, first board index
+    7: { name: "haggle" } # Trade/haggle, first un-haggled index
+    8: { name: "pay_debt" } # Trade/pay-debt at the advertised domain minimum (die-free)
+    9: { name: "forfeit_cargo" } # Trade/forfeit-cargo — the T-1604 escape hatch
+    10: { name: "explore" } # Explore (die + fuel gated by the enumerator)
+    11: { name: "shipyard_repair" } # Shipyard/repair, repairMode 'all'
+    12: { name: "shipyard_buy" } # first non-repair Shipyard spec
+    13: { name: "visit_hangout" } # VisitHangout, first venue/params
+    14: { name: "crew_hire" } # Crew/hire, first advertised role
+    15: { name: "storylet_first" } # first eligible storylet choice
+    16: { name: "combat_talk" } # Combat, stance 'talk' if advertised
+    17: { name: "combat_run" } # Combat, stance 'run' if advertised
+    18: { name: "combat_fight" } # Combat, stance 'fight' if advertised
+    19: { name: "end_day" } # force the day-loop rollover (end-day + start-day)
+
+# Reward: credit growth net of Guild-marker growth, small per-day time pressure.
+# `before` is the previous step's state (env.py passes it for delta formulas).
+# win = Tour One resolved with the marker paid off (bridge sets state.victory).
+reward_profiles:
+  rimward:
+    formula: "(state.credits - before.credits) * 0.01 - (state.debt - before.debt) * 0.005 - (state.day - before.day) * 0.2 - 0.01"
+    win_bonus: 200
+    loss_penalty: 0
+  # Alias so bare `ugt smoke-test` (default --profile aggro) runs unmodified.
+  aggro:
+    formula: "(state.credits - before.credits) * 0.01 - (state.debt - before.debt) * 0.005 - (state.day - before.day) * 0.2 - 0.01"
+    win_bonus: 200
+    loss_penalty: 0
+
+training:
+  seed: 42 # base seed; the bridge derives per-episode seeds (seed + episode index)
+  algorithm: "PPO"
+  total_timesteps: 32768 # 16 PPO rollouts of n_steps=2048 — ≥32k real wire actions
+  parallel_envs: 1
+  checkpoint_freq: 2048
+  # Gate 1 (UGT env.py): the RL agent sees only the trader macro-vocabulary —
+  # travel_contract / buy_fuel_max / sign_contract / pay_debt / end_day. The
+  # full 20-id table stays available to smoke-test/verify (which bypass the
+  # subset); inside an encounter every id structurally resolves to the only
+  # advertised spec (Combat), so the subset never strands the agent. Without
+  # this gate the 20-action table at 32k steps collapses to all-wait (UGT's
+  # collapse detector correctly flagged that run INVALID — see RESULTS).
+  action_subset: [4, 5, 6, 8, 19]

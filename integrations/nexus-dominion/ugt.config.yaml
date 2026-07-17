@@ -1,0 +1,122 @@
+# UGT config for Nexus Dominion (single-player space-empire boardgame) — REAL
+# engine via the JSON-lines subprocess HARNESS (harness/ugt-harness.mjs in the
+# game repo), never a re-implementation (the sim_bridge lesson).
+#
+# The harness wraps the game's pure TS engine (createNewCampaign + atomic
+# processCycle) as a line protocol: create / commit / state / save / load.
+# NexusDominionHarnessAdapter (ugt/adapters/nexus_dominion_harness.py) spawns
+# it and composes ORDERS from structural reads of the game's own state.
+# See integrations/nexus-dominion/README.md for the run recipe.
+#
+# NOTE: like DDD, this game is tested by INVARIANTS + determinism, NOT reward
+# shaping — reward_profiles below is VESTIGIAL (UgtConfig requires the block).
+# The trial scripts import the adapter directly and drive it by hand.
+#
+# Action ids MUST stay in lockstep with NexusDominionHarnessAdapter._orders_for.
+
+project:
+  name: "Nexus Dominion (space-empire boardgame, real engine via harness)"
+  version: "0.1.0"
+
+engine:
+  # "simulation": a JSON-lines stdin/stdout subprocess. The adapter spawns it
+  # directly (Popen) and also reads the game-specific keys below.
+  type: "simulation"
+  entry: "harness/ugt-harness.mjs"
+  harness_entry: "/Users/vs7/Dev/Games/nexus-dominion/harness/ugt-harness.mjs"
+  node_bin: "node"
+  # harness_cwd defaults (in the adapter) to the game repo root inferred from
+  # harness_entry; override with NEXUS_DOMINION_HARNESS_CWD / _PATH env vars.
+  #
+  # PRD-scale galaxy — the game Nexus Dominion actually ships (App.tsx passes
+  # 250/10/25/100). A shrunken galaxy is a DIFFERENT game; ladder scripts that
+  # shrink for speed must say so explicitly in their output.
+  galaxy:
+    totalSystems: 250
+    sectorCount: 10
+    systemsPerSector: 25
+    empireCount: 100
+  seed: 20260716
+  # Episode truncation only — the game has NO terminal win/loss state by
+  # design (achievements are milestones; docs/systems/TURN-MANAGEMENT §"the
+  # game does not end").
+  max_cycles: 50
+  tutorial: false
+
+# Observation paths index into the adapter's NORMALIZED state dict
+# (_read_state): cycle/player_* flat fields. These exist for UgtConfig
+# validity + a future env.py path; the trial scripts read the dict directly.
+observation_space:
+  type: "box"
+  shape: 10
+  mappings:
+    - path: "cycle"
+      min: 0
+      max: 1000
+    - path: "player_credits"
+      min: 0
+      max: 1000000
+    - path: "player_food"
+      min: 0
+      max: 1000000
+    - path: "player_ore"
+      min: 0
+      max: 1000000
+    - path: "player_fuelCells"
+      min: 0
+      max: 1000000
+    - path: "player_population"
+      min: 0
+      max: 10000000
+    - path: "player_systemsOwned"
+      min: 0
+      max: 250
+    - path: "player_powerScore"
+      min: 0
+      max: 1000000
+    - path: "player_researchTier"
+      min: 0
+      max: 8
+    - path: "unclaimedSystems"
+      min: 0
+      max: 250
+
+# Every id composes an ORDER from structural reads of the game's own state
+# (ownership, adjacency, registries) — no id consults costs, probabilities, or
+# rules. The engine is authoritative: orders it does not accept are refused by
+# ITS code (silently, per its current switch/`break` contract — an observed
+# behavior of the trial, not something the adapter compensates for).
+action_space:
+  type: "discrete"
+  size: 20
+  actions:
+    0:  { name: "pass" }                     # commit an empty order list
+    1:  { name: "claim_adjacent" }           # claim-system: unclaimed adjacent to owned
+    2:  { name: "build_unit_first" }         # build-unit: first registry unit type
+    3:  { name: "build_unit_random" }        # build-unit: random unit type
+    4:  { name: "build_installation" }       # build-installation: random type, owned system
+    5:  { name: "build_wormhole" }           # build-wormhole: random non-home target
+    6:  { name: "trade_buy" }                # trade buy: random resource, qty 1-5
+    7:  { name: "trade_sell" }               # trade sell: random resource, qty 1-5
+    8:  { name: "research" }                 # research (consumes researchPoints)
+    9:  { name: "select_doctrine" }          # select-doctrine: random of 3 paths
+    10: { name: "select_specialization" }    # select-specialization: random spec
+    11: { name: "propose_pact" }             # propose-pact: random bot + pact type
+    12: { name: "break_pact" }               # break-pact: first player pact
+    13: { name: "fund_syndicate" }           # fund-syndicate: 100 credits
+    14: { name: "purchase_black_register" }  # purchase-black-register: first item
+    15: { name: "launch_covert_op" }         # launch-covert-op: random bot + op
+    16: { name: "attack_adjacent" }          # attack: adjacent enemy system, own units
+    17: { name: "move_fleet" }               # move-fleet: player fleet -> adjacent
+    18: { name: "probe_unknown_type" }       # R3: unknown order type -> expect inert
+    19: { name: "probe_malformed" }          # R3: claim-system with no details -> inert
+  # Ids 18/19 are the ONLY ones that deliberately send something outside the
+  # engine's order vocabulary; step() marks them info["probe"]=True so the
+  # invariants can tell an expected refusal from a defect.
+
+# VESTIGIAL — required by UgtConfig; UNUSED by the exploit-hunter/trial path.
+reward_profiles:
+  _unused:
+    formula: "0"
+    win_bonus: 0
+    loss_penalty: 0

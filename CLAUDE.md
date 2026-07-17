@@ -87,10 +87,12 @@ All adapters implement `ugt/adapters/base.py::BaseAdapter`: `connect()`, `reset(
 `step(action_id) -> (state, terminated, truncated, info)`, `close()`, plus optional
 `press_key`/`type_text`/`get_terminal_text` for UI-driving tiers (playtest, exploit-hunter transport).
 
-Two further adapters live alongside those three but are constructed directly by their integration's ladder
+Three further adapters live alongside those three but are constructed directly by their integration's ladder
 scripts rather than registered under an `engine.type` in `env.py`: `nexus_http.py` (NexusHttpAdapter — plain
-HTTP against NEXUS's live Next.js test routes) and `ddd_harness.py` (DddHarnessAdapter — JSON-lines subprocess
-harness around DDD's deterministic engine).
+HTTP against NEXUS's live Next.js test routes), `ddd_harness.py` (DddHarnessAdapter — JSON-lines subprocess
+harness around DDD's deterministic engine), and `nexus_dominion_harness.py` (NexusDominionHarnessAdapter —
+JSON-lines subprocess harness around Nexus Dominion's pure-TS cycle engine; composes per-cycle order lists
+from structural state reads).
 
 **`RealClientAdapter` (`ugt/adapters/realclient.py`) contains NO game logic** — it is a thin transport layer
 (screen navigation, key input, HTTP calls) plus an `ACTION_HANDLERS` registry mapping config action names to
@@ -149,9 +151,9 @@ for s in spike_ddd smoke_ddd_adapter verify_round1 verify_round2 verify_round3; 
 done
 ```
 
-Current integrations: `ddd` (subprocess harness), `nexus` (live HTTP), `tarot-war` and `warzones` (browser),
-`spacerquest_old` (Socket.IO+HTTP real server — **archived**, game on hold; its infra/run commands are in
-`archive/PLAN-FORWARD-spacerquest.md`).
+Current integrations: `ddd` and `nexus-dominion` (subprocess harness), `nexus` (live HTTP), `tarot-war` and
+`warzones` (browser), `spacerquest_old` (Socket.IO+HTTP real server — **archived**, game on hold; its
+infra/run commands are in `archive/PLAN-FORWARD-spacerquest.md`).
 
 There is no `ugt.config.yaml`-driven CLI path for the ladder yet — the scripts construct a minimal config
 shim and call the adapter/`ExploitHunter`/`ugt/core/trial.py` pieces directly.

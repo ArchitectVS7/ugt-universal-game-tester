@@ -54,6 +54,7 @@ Exit 0 + "ROUND 3 MET — N/N" means the gate passed.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 
@@ -69,6 +70,16 @@ from ugt.utils.config_parser import UgtConfig  # noqa: E402
 
 CONFIG_PATH = "integrations/ddd/ugt.config.yaml"
 DEFAULT_SEED = "ddd-r3"
+
+
+def _stable_seed(s: object) -> int:
+    # Process-stable derivation. Python's built-in hash() of a str is randomized
+    # per process (PYTHONHASHSEED), which made the ExploitHunter explore a
+    # different action sequence every run — an unreproducible "32/32" that could
+    # flake to 31/32 and could not replay a red run. sha256 fixes the seed.
+    return int(hashlib.sha256(str(s).encode()).hexdigest(), 16) % (2 ** 31)
+
+
 EPISODES = 8
 STEPS = 60
 
@@ -505,7 +516,7 @@ def main() -> int:
                 [ad.action_name(i) for i in ALL_IDS]
             )),
             policy=hunting_policy,
-            seed=abs(hash(seed)) % (2 ** 31),
+            seed=_stable_seed(seed),
         )
         report = hunter.run(episodes=episodes, steps_per_episode=steps,
                             log=lambda m: None)
@@ -580,7 +591,7 @@ def main() -> int:
                 action_ids=ALL_IDS,
                 action_names=dict(enumerate([a.action_name(i) for i in ALL_IDS])),
                 policy=hunting_policy,
-                seed=abs(hash(seed)) % (2 ** 31),
+                seed=_stable_seed(seed),
             )
             h.run(episodes=1, steps_per_episode=steps, log=lambda m: None)
             return list(a.hash_stream), [x.get("t") for x in a.applied_actions]
