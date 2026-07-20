@@ -339,3 +339,130 @@ already; the remaining unseeded island is PC-1.
 - Arena selection derives from the persisted run number, so with a virgin meta state every
   `create` picks the same arena. R2's all-3-arenas gate will need to drive run count (or the
   selection input) explicitly.
+
+---
+
+## Open-items round — 2026-07-20 (the-pond `a1fb390`)
+
+Cleared everything the R1 round left open, before starting R2. No new UGT-side code: this
+round was entirely upstream game fixes plus their regression tests, re-validated by re-running
+the ladder against the live game.
+
+**Ladder re-run after the fixes: spike 13/13 · smoke 8/8 · R1 18/18 — unchanged, all green.**
+**Game gate: PASS, ratcheted 27 → 21 failing** (was 25 before this round; 2 of the 3 open
+test failures fixed, plus the third which turned out to be a real product bug).
+
+### PC-1 CLOSED — tongue crit RNG now derives from the global seed
+
+`tongue_attack.gd` called `_rng.randomize()` in `_ready()`. It now does `_rng.seed = randi()`,
+drawing from the global stream the harness seeds at `create`. Shipping behaviour is unchanged
+(Godot randomizes the global RNG at startup); replay behaviour is now defined.
+
+Two tests added upstream (`test_tongue_attack.gd`): same global seed → same crit seed, and
+different global seed → different crit seed. The second is the anti-vacuity guard — a hardcoded
+constant seed would pass the first test while making every run's crits identical. **The
+reproducibility test was confirmed to FAIL against the old `randomize()` code** before being
+accepted, per the "kill vacuous greens" rule.
+
+*(First attempt at that confirmation was itself vacuous: BSD `sed` treats `\t` in a pattern as
+a literal `t`, so the revert silently no-op'd and the test "passed" against code I thought I
+had reverted. The printed grep of the supposedly-reverted line is what caught it. Verify the
+patch applied, not just that the command exited 0 — the same lesson that bit the baseline
+instrumentation below.)*
+
+**R3 same-seed replay is now unblocked.**
+
+### PC-2 CLOSED — headless runs no longer touch the real save files
+
+Worse than filed. The finding was "headless runs write the real meta save"; the truth was that
+a full suite run also **deleted** `user://meta_progression.save` (test_main_menu `_delete_save`
+on every test) and **overwrote** `user://savegame.json` (three save suites cleaning hardcoded
+paths). A developer running `gate.sh` was destroying their own player progression, and
+`runs.total_runs` is a difficulty input (T-040) and arena selector (T-042).
+
+Fix upstream: new `core/scripts/save_paths.gd` redirects any *default* `user://` path to a
+`headless_` sibling under the headless display driver. `SaveManager`'s three paths became
+instance vars (consts kept as the documented shipping locations); it and `MetaProgression`
+redirect only a path still at its default, **so the UGT harness's explicit pre-`_ready()`
+`MetaProgression.save_path` override still wins** — verified by the spike's save-hygiene check
+still reporting `user://ugt_harness_meta.save`.
+
+Note `OS.has_feature("headless")` is NOT the right probe — it reports *false* under
+`--headless` (it means a headless export template). `DisplayServer.get_name() == "headless"` is
+the signal that tracks the flag; verified empirically on Godot 4.7.1.
+
+**Verified, not assumed:** both real save files are byte-identical by md5 before and after a
+full 988-test suite run, and again after `gate.sh`.
+
+### ObjectPool hardening CLOSED
+
+`_available`/`_active` now store instance IDs instead of references, so an entry freed behind
+the pool's back resolves to null via `instance_from_id()` rather than going dangling — the
+exact PC-8 failure mode (BossArena freed the whole dormant pool; every later pop cost an engine
+SCRIPT ERROR, 74 in one run). Discarding dead entries is now a loop rather than recursion;
+`acquire()` used to add one stack frame per dead entry, so a 500-deep pool meant a 500-deep
+stack at the moment the game was already in trouble. Two tests reproduce the external-free
+scenario directly.
+
+### The 3 `test_object_pool.gd` failures — all three were real, none were "just old"
+
+Filed as "pre-existing, not mine". Two were broken tests; the third was a product bug.
+
+- **"Reset callback" / "Deactivate callback" could never pass.** A GDScript lambda captures
+  locals **by value**, so `var called := false; object_pool.on_release = func(o): called = true`
+  mutates the lambda's private copy and the assertion reads the untouched original. The tests
+  now record into an Array (captured by reference). The HANDOFF called these "suspicious given
+  prewarm now runs on_release" — that hunch was wrong; the pool was innocent both before and
+  after PC-8.
+- **"Should track reuse count" was a genuine product bug in `ObjectPool`.** `reuse_count`
+  incremented on *every* pool hit, so `prewarm(N)` followed by N acquires reported N reuses
+  against N creations — while every object had been used exactly once. The statistic exists to
+  show pooling is working (COMBAT-014); reporting reuse for an object on its first life makes
+  it useless for that. A reuse now means an object acquired again *after a release*, tracked by
+  a `_returned` id set. **The test was right and the code was wrong** — worth stating, because
+  the tempting move was to relax the assertion to 2.
+
+### A fourth broken test found while verifying (not on the open list)
+
+`test_main_menu.test_new_run_persists_and_increments_menu_run_count` called
+`RunManager.start_run()` twice back-to-back and asserted the counter rose by one. `start_run()`
+has a deliberate re-entry guard (the combat scene's `_ready()` calls it again after
+SceneRouter's swap), so the second call emits nothing at all. It only ever passed on
+accumulated cross-file state in full-suite order — **run alone it failed at HEAD too**. It now
+ends the run before starting the next, as a player must, and passes both alone and in suite.
+
+This surfaced as an apparent regression from the PC-2 work. Chasing it produced the round's
+sharpest process lesson (below).
+
+### Still open
+
+- **The tongue/spawner/particles/shake failure cluster (21 tests).** Untouched by this round
+  and present at every commit checked. The interesting ones are combat-critical and adjacent to
+  PC-5: `test_hit_detection_at_3_tile_range` ("should hit enemy at exactly 3-tile range (144px)"
+  — fails), `test_tongue_settles_at_max_range` (settles at **11–28px**, expects 144),
+  `test_overshoot_extends_effective_range`. PC-5 fixed *close* range; these say **max** range
+  may still be broken, which would line up with the human-UAT note that the tongue never
+  visually animates outward. Worth a PC-9 investigation before R2 leans on tongue reach.
+  Part of the cluster is also **flaky** — `test_attack_emits_signal_on_hit` fails
+  intermittently at HEAD (3 vs 4 failures across two identical isolated runs).
+- **Human UAT** — tongue extend animation, colorblind modes (ND U-110 precedent).
+- **PC-3** — benign BulletUpHell teardown noise, whitelisted.
+
+### Process lessons from this round
+
+- **Diff failing test NAMES against a baseline, never counts — and normalize the values.**
+  Two tests fixed and one exposed nets out to "24 → 24", which reads as "no effect". Only a
+  name-and-message diff showed 2 fixed, 1 new. Several messages differ only in a float or a
+  Vector2 that jitters run to run, so they must be normalized before comparing or they all look
+  like regressions.
+- **Verify your instrumentation applied.** The first baseline comparison ran a `str.replace`
+  against a worktree whose source text had since changed. The patch silently didn't apply, the
+  debug print never fired, and the absence of output looked like real evidence about the game.
+  Two wrong conclusions came out of it before an `assert` on the patch target caught it. Same
+  class as the BSD `sed` failure above — a no-op edit and a successful edit look identical
+  unless you check.
+- **Compare against the right baseline.** The first comparison used the commit *before* the
+  PC-5/PC-6 work rather than HEAD, which attributed pre-existing failures to this round.
+- **"Pre-existing" is a hypothesis, not a verdict.** All three "pre-existing" pool failures
+  were real and fixable, and one was a product bug hiding behind two broken tests. The label
+  was doing the work of an investigation.

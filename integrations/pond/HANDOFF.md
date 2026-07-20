@@ -1,6 +1,7 @@
 # Pond Conspiracy (the-pond) — UGT Integration Plan
 
-**Status: R1 MET 18/18, seed-independent (2026-07-20). Next: R2 full spine.**
+**Status: R1 MET 18/18, seed-independent; all R1-round open items CLOSED (2026-07-20).
+Next: R2 full spine.** PC-1 is fixed, so R3 same-seed replay is no longer blocked.
 Spike 13/13, smoke 8/8×3. `verify_round1.py` drives one full run loop: waves -> 10 real tongue
 kills -> damage -> provoked dodge i-frames -> level-up -> mutation applied by a real CLICK ->
 death -> `run_ended` -> epilogue -> visible RunEndScreen, with 0 invariant violations over 85
@@ -37,38 +38,51 @@ input-macro actions, `choose_mutation`); invariants: `integrations/pond/invarian
 scripts: `spike_pond.py`, `smoke_pond_adapter.py`, `verify_round1.py`. Findings + lessons:
 `RESULTS.md`.
 
-## OPEN ITEMS (as of 2026-07-20) — nothing here blocks R2
+## OPEN ITEMS — updated 2026-07-20 after the open-items round (the-pond `a1fb390`)
 
-Blocking a later rung:
-- **PC-1 — blocks R3 replay.** `tongue_attack.gd` owns a private `RandomNumberGenerator` that
-  calls `randomize()` in `_ready()`. Every other combat draw uses the global RNG the harness
-  seeds, and the determinism probe was identical twice, so this is the last known unseeded
-  island before same-seed replay is real. Fix: seed `_rng` from the global RNG / a
-  RunManager-owned seed.
+**All four items the R1 round left open are CLOSED.** Ladder re-run after the fixes: spike
+13/13 · smoke 8/8 · R1 18/18, unchanged. Game gate PASS, **ratcheted 27 → 21 failing**. Full
+write-up in `RESULTS.md` ("Open-items round").
 
-Game-side, not blocking:
-- **PC-2 — headless runs write the REAL settings save.** `MetaProgression.save_path` is
-  redirected by the harness, but `SaveManager.SAVE_PATH` is a `const` and is not. The
-  persistent run counter is already test-polluted past #13500, and run count is a difficulty
-  input (T-040), so the shipped curve is fed a polluted number. Fix: make the path
-  redirectable and/or add a headless guard; consider resetting the counter.
+- **PC-1 CLOSED** — `tongue_attack.gd` now seeds `_rng` from the global RNG (`_rng.seed =
+  randi()`) instead of `randomize()`. **R3 same-seed replay is unblocked.** Covered by two new
+  upstream tests, incl. an anti-vacuity guard; the reproducibility test was confirmed to fail
+  against the old code.
+- **PC-2 CLOSED** — new `core/scripts/save_paths.gd` redirects default `user://` paths to a
+  `headless_` sibling under the headless display driver. Worse than filed: a suite run was also
+  *deleting* the real meta save and *overwriting* the real `savegame.json`, so `gate.sh` was
+  destroying real player progression. Verified by md5: both real save files are byte-identical
+  after a full suite run. The harness's explicit `MetaProgression.save_path` override still
+  wins (only *default* paths get redirected).
+- **ObjectPool hardening CLOSED** — `_available`/`_active` hold instance IDs; a freed entry
+  resolves to null instead of dangling, and dead entries are discarded in a loop rather than by
+  recursion. Two tests reproduce the external-free scenario.
+- **The 3 `test_object_pool.gd` failures CLOSED — all three were real.** Two tests could never
+  pass (a GDScript lambda captures locals **by value**, so the recorded bool never reached the
+  assertion). The third, "Should track reuse count", was a genuine **product bug**:
+  `reuse_count` counted every pool hit, so `prewarm(N)` + N acquires reported N reuses while
+  each object had lived once. The test was right; the code was wrong. The HANDOFF's hunch that
+  prewarm/`on_release` was implicated was wrong — the pool was innocent there.
+- Also fixed: `test_main_menu`'s run-count test called `start_run()` twice back-to-back, which
+  the deliberate re-entry guard makes a no-op. It passed only on cross-file suite state and
+  failed when run alone **at HEAD too**.
+
+### Still open
+
+- **PC-9 (new, investigate before R2 leans on tongue reach): max-range tongue hit detection
+  may still be broken.** Part of the 21-test pre-existing cluster, but combat-critical and
+  adjacent to PC-5: `test_hit_detection_at_3_tile_range` fails ("should hit enemy at exactly
+  144px"), and `test_tongue_settles_at_max_range` measures the tongue settling at **11–28px**
+  when it expects 144. PC-5 fixed *close* range; this says **max** range may not work — which
+  matches the UAT note that the tongue never visually animates outward. Part of the cluster is
+  also flaky (`test_attack_emits_signal_on_hit` differs across identical isolated runs at HEAD).
+  Remaining cluster: enemy spawner, particles, screen shake.
 - **PC-3 (benign)** — BulletUpHell `BuHSpawner._exit_tree` throws 3 "Thread must have been
   started" errors on every headless exit. Whitelisted in the ladder's stderr checks.
-- **ObjectPool hardening (follow-up from PC-8, NOT a live bug).** Nothing frees the pool now,
-  but the pool is still structurally fragile to an external free: a freed entry in
-  `_available` costs one engine SCRIPT ERROR per pop, and `acquire()` retries by RECURSION
-  (`return acquire(scene)`, `shared/scripts/object_pool.gd:133`). Holding `instance_id`s and
-  resolving via `instance_from_id()` would make it immune. Note `test_object_pool.gd` covers
-  this file — keep it green.
-- **3 pre-existing `test_object_pool.gd` failures**, part of the repo's ~25-test failing
-  baseline and NOT caused by the PC-8 work (verified identical before and after): "Should
-  track reuse count", "Reset callback should be called", "Deactivate callback should be
-  called". Worth their own look — the last two are suspicious given prewarm now runs
-  `on_release`.
 
 Human UAT only (an engine trial cannot sign these off):
 - The tongue never visually animates outward — it snaps to full length on frame 1 and wobbles.
-  The PC-5 hit-detection fix does not address this.
+  The PC-5 hit-detection fix does not address this; see PC-9, they may share a root cause.
 - Colorblind modes and visual polish generally (the ND U-110 precedent).
 Game repo: `/Users/vs7/Dev/Games/the-pond/` · Godot 4.7.1 (`/opt/homebrew/bin/godot`) · GDScript ·
 real-time top-down bullet-hell roguelike ("Pond Conspiracy", v0.1.0).
@@ -142,7 +156,8 @@ aim always at nearest enemy via structural read of the harness's own enemy list)
 5. **R3 exploit-hunter** — `ExploitHunter` with invariants: hp ∈ [0, max]; no NaN/inf positions;
    player inside arena bounds; bullet count bounded (pool leak detector); run/evidence state machine
    consistent (no dupe unlocks); no `SCRIPT ERROR` on the subprocess stderr; soft-lock detection
-   (state hash frozen across varied inputs). Plus same-seed replay — **blocked on PC-1 below**.
+   (state hash frozen across varied inputs). Plus same-seed replay — **PC-1 is now fixed, so
+   this is unblocked**; the pre-filed note below is kept as the original diagnosis.
 
 **LLM playtest tier: DEFERRED.** Real-time dodging is the wrong granularity for an LLM. A later
 macro-layer playtest (mutation build choices + conspiracy-board connections) is plausible via the
@@ -150,13 +165,13 @@ same pause-step harness, but is not part of this trial.
 
 ## Pre-filed game-side findings (from the evaluation alone)
 
-- **PC-1 (blocker for R3 replay): RNG is globally unseeded.** `randi()/randf()` in
+- **PC-1 (FIXED 2026-07-20 — original diagnosis kept for the record): RNG is globally unseeded.** `randi()/randf()` in
   `enemy_spawner.gd`, `enemy_base.gd`, `boss_ceo.gd`; `_rng.randomize()` in `tongue_attack.gd`.
   No seed plumbing exists anywhere. Deterministic replay needs a RunManager-owned seeded RNG (the
   same fix NEXUS and nexus-dominion took). Beyond seeding, Godot-physics float determinism on one
   machine/binary is expected-but-unproven — R3 falls back to a quantized-state hash if byte-exact
   fails, with the gap documented.
-- **PC-2: headless test/tool runs write the REAL meta save.** The probe alone bumped the persistent
+- **PC-2 (FIXED 2026-07-20 — original diagnosis kept for the record): headless test/tool runs write the REAL meta save.** The probe alone bumped the persistent
   run counter to #12865 — and run count drives difficulty scaling (T-040), so thousands of test
   runs have already polluted the shipped difficulty curve input. T-047 redirects `save_path`; the
   arena boot path doesn't. Harness must redirect; game should consider a `--test-save` guard.
