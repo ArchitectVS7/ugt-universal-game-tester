@@ -29,8 +29,21 @@ meta state (run #1 — run count is a difficulty input).
 ## Run the ladder (from the UGT repo root)
 
 ```bash
-python3 integrations/pond/spike_pond.py        # raw protocol round-trip (13 checks) — DONE 13/13
-# smoke_pond_adapter.py / verify_round1..3.py — not yet written
+python3 integrations/pond/spike_pond.py          # raw protocol round-trip (13 checks) — DONE 13/13
+python3 integrations/pond/smoke_pond_adapter.py  # BaseAdapter path (8 checks) — DONE 8/8 ×3
+python3 integrations/pond/verify_round1.py [seed] # playability gate (18 checks) — DONE 18/18
+# verify_round2..3.py — not yet written
 ```
+
+R1 drives one full run loop: waves -> real tongue kills -> damage -> provoked dodge i-frames
+-> level-up -> a mutation picked by a REAL mouse click on its card -> death -> `run_ended` ->
+epilogue -> visible RunEndScreen, asserting `integrations/pond/invariants.py` after every
+step. It defaults to seed 20260719; **seed 777001 currently gives 17/18** on the stderr check
+because of open finding PC-8 (see `RESULTS.md`) — that is a real game defect, so do not re-pin
+the gate to a friendlier seed to make it green.
+
+The adapter is `ugt/adapters/pond_harness.py` (`PondHarnessAdapter`, engine keys +
+14-action input-macro vocabulary in `ugt.config.yaml`). One episode per subprocess:
+`reset()` reboots the game (~2s) so every episode starts from a virgin meta state.
 
 Needs `godot` on PATH (or `UGT_GODOT_BIN`); game repo location overridable via `POND_ROOT`.

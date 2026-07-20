@@ -1,10 +1,38 @@
 # Pond Conspiracy (the-pond) — UGT Integration Plan
 
-**Status: SPIKE MET 13/13 (2026-07-19, same day as evaluation). Next: smoke via a
-`PondHarnessAdapter` (BaseAdapter), then R1.** Harness: `the-pond/tests/harness/ugt_harness.gd`
-(uncommitted in the game repo). Spike: `spike_pond.py`. Findings + harness lessons: `RESULTS.md` —
-note the determinism probe came back IDENTICAL twice (global RNG is seedable today; only PC-1's
+**Status: R1 MET 18/18 on the pinned seed (2026-07-20); PC-8 open. Next: R2 full spine.**
+Spike 13/13, smoke 8/8×3. `verify_round1.py` drives one full run loop: waves -> 10 real tongue
+kills -> damage -> provoked dodge i-frames -> level-up -> mutation applied by a real CLICK ->
+death -> `run_ended` -> epilogue -> visible RunEndScreen, with 0 invariant violations over 85
+steps and 0 SCRIPT ERRORs, reproduced twice on seed 20260719.
+
+⚠️ **Seed 777001 gives 17/18** — the run itself plays fine, but the stderr check trips on 74
+`SCRIPT ERROR: Trying to return a previously freed instance` lines from the enemy ObjectPool
+(**PC-8**, open, diagnosed in `RESULTS.md`). Playability is signed off; that one robustness
+check is seed-dependent. Fix PC-8 before calling R1 unconditionally green — and don't re-pin
+the gate to a friendlier seed to dodge it.
+
+**Two game defects found by R1 and FIXED upstream this round:**
+- **PC-5 (CRITICAL):** the tongue's tip-only hitbox left everything inside ~119px unhittable,
+  so the player could never kill anything (24 swings, 0 hits, 0 kills). `_check_hits()` now
+  sweeps a capsule from the player to the tip, unioned with the original tip area (which still
+  owns the overshoot reach COMBAT-004 specifies). 8 swings -> 8 kills after.
+- **PC-6:** `NarrativeState` computed the epilogue off `EventBus.run_ended` while
+  `EvidenceManager` granted the run's evidence off the same signal, NarrativeState first — so a
+  run's own reward could never appear in its own ending. Added `EventBus.run_rewards_due`,
+  emitted by `RunManager.end_run()` immediately before `run_ended`; EvidenceManager listens
+  there now. RunManager also settles its own state *before* emitting, so a consumer can no
+  longer strand it mid-`end_run`.
+
+Game gate after both: **1032 passing / 25 failing vs baseline 27 — two better than baseline,
+zero regressions.** PC-4 (run-start double-fire) was fixed the previous round. Determinism probe IDENTICAL twice (global RNG seedable today; only PC-1's
 tongue-crit RNG island remains), so R3 replay is closer than the plan below assumed.
+
+Harness: `the-pond/tests/harness/ugt_harness.gd` (now also `choose` + level-up/narrative/
+run-end/tongue state); adapter: `ugt/adapters/pond_harness.py` (+ `ugt.config.yaml`, 14
+input-macro actions, `choose_mutation`); invariants: `integrations/pond/invariants.py`;
+scripts: `spike_pond.py`, `smoke_pond_adapter.py`, `verify_round1.py`. Findings + lessons:
+`RESULTS.md`.
 Game repo: `/Users/vs7/Dev/Games/the-pond/` · Godot 4.7.1 (`/opt/homebrew/bin/godot`) · GDScript ·
 real-time top-down bullet-hell roguelike ("Pond Conspiracy", v0.1.0).
 

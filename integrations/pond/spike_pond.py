@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import json
 import os
-import select
+import queue
 import subprocess
 import sys
 import threading
@@ -94,6 +94,8 @@ class Harness:
     noise and is kept (not swallowed) for post-mortems.
     """
 
+    _EOF = object()
+
     def __init__(self, godot: str):
         self.p = subprocess.Popen(
             [godot, "--headless", "--fixed-fps", "60",
@@ -103,8 +105,19 @@ class Harness:
         )
         self.noise: list[str] = []
         self.stderr_lines: list[str] = []
+        # Dedicated reader thread + queue — NEVER select() on the buffered
+        # stdout object (readline() can buffer coalesced lines Python-side and
+        # select() then starves on an empty kernel pipe; timing-dependent).
+        self._lines: queue.Queue = queue.Queue()
+        self._stdout_thread = threading.Thread(target=self._drain_stdout, daemon=True)
+        self._stdout_thread.start()
         self._stderr_thread = threading.Thread(target=self._drain_stderr, daemon=True)
         self._stderr_thread.start()
+
+    def _drain_stdout(self) -> None:
+        for line in self.p.stdout:
+            self._lines.put(line.rstrip("\n"))
+        self._lines.put(self._EOF)
 
     def _drain_stderr(self) -> None:
         for line in self.p.stderr:
@@ -112,21 +125,22 @@ class Harness:
 
     def read_msg(self, timeout: float = 60.0) -> dict:
         deadline = time.time() + timeout
-        while time.time() < deadline:
-            ready, _, _ = select.select([self.p.stdout], [], [], 0.5)
-            if not ready:
-                if self.p.poll() is not None:
-                    raise RuntimeError(
-                        "harness died (exit %s); stderr tail:\n%s"
-                        % (self.p.returncode, "\n".join(self.stderr_lines[-15:])))
+        while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                raise TimeoutError("no protocol line within %.0fs" % timeout)
+            try:
+                line = self._lines.get(timeout=min(remaining, 0.5))
+            except queue.Empty:
                 continue
-            line = self.p.stdout.readline()
-            if line == "":
+            if line is self._EOF:
                 raise RuntimeError(
-                    "EOF from harness; stderr tail:\n" + "\n".join(self.stderr_lines[-15:]))
+                    "EOF from harness (exit %s); stderr tail:\n%s"
+                    % (self.p.poll(), "\n".join(self.stderr_lines[-15:])))
             line = line.strip()
             if not line.startswith("{"):
-                self.noise.append(line)
+                if line:
+                    self.noise.append(line)
                 continue
             try:
                 msg = json.loads(line)
@@ -136,7 +150,6 @@ class Harness:
             if msg.get("ugt") is True:
                 return msg
             self.noise.append(line)
-        raise TimeoutError("no protocol line within %.0fs" % timeout)
 
     def send(self, req: dict) -> None:
         self.p.stdin.write(json.dumps(req) + "\n")
