@@ -588,3 +588,87 @@ before `after_each` would stall `await`-based tests suite-wide.
 - `HitStop` drives `Engine.time_scale` to 0.0 on hit, which stretches a swing across more
   physics frames — any fixed-frame-count sampling of tongue state will land differently once
   hits start landing.
+
+---
+
+## Cluster remediation — 2026-07-20 (the-pond `d83d932`)
+
+**The game's suite is now fully green: 1063/1063, gate PASS.** Baseline this session was
+25 failing; it went 25 → 21 → 2 → 0. Ladder re-run against the live game after every stage:
+spike 13/13 · smoke 8/8 · R1 18/18, unchanged throughout. Real save files byte-identical by
+md5 across every gate run (PC-2 holding).
+
+The headline: **"21 pre-existing failures" was not one problem.** It was ~11 structurally
+unpassable tests *hiding six genuine product bugs*. Every one of those bugs was invisible
+precisely because the test that would have caught it could never run.
+
+### Product bugs found and fixed (6)
+
+- **`screen_shake`: the `duration` argument did nothing.** `_shake_duration` was written in two
+  places and read in none, so trauma always decayed at the fixed `trauma_decay_rate` and every
+  shake lasted 0.67s regardless of what the caller asked for — including the `hit_duration` /
+  `kill_duration` presets. Decay rate is now derived from the requested duration, captured at
+  `shake()` time (recomputing per frame from live trauma is exponential decay: it approaches
+  zero without reaching it, so `is_shaking()` would never go false).
+- **`particle_manager`: every new particle system was `add_child()`ed twice**
+  (`_create_particle_system` already parents it), raising an engine error per spawn. This, not
+  the lifetime logic, is what actually broke the three particle-limit tests.
+- **The Pollution Immune synergy did nothing in the real game.** Bonuses were applied with
+  `if key in current_stats`, but the shipped `pollution_immune.tres` declares
+  `bonus_effects = {"hp": 1}` while the stat is `max_hp`. Key never matched, bonus silently
+  dropped. A synergy the player earns by stacking three mutations had zero effect.
+- **`hit_stop` discarded the delta it was handed** when `time_scale == 0`, hardcoding 0.016, so
+  a large frame skip could not unfreeze. Verified empirically that Godot 4.7.1 really does
+  report delta as exactly 0.0 at `time_scale 0` — so an estimate IS needed there; it is now a
+  floor (`maxf(0.016, delta)`), not a replacement.
+- **`enemy_spawner` tests were VACUOUSLY GREEN.** The spawner never spawned (see below), so
+  "should not exceed max_enemies" was passing against zero enemies. Fixing the setup made five
+  tests fail — all of them the PC-8 trap again: `group("enemies")` includes the ~125 dormant
+  pooled instances, so the tests counted 125 "enemies" for a wave of 3, and the "707px spawn
+  radius" was the distance from the spawner to a pooled instance parked at the origin.
+- **`gate.sh` could not pass a green suite.** GUT omits the `Failing Tests` line entirely when
+  nothing fails, and the gate treated an unparseable count as "GUT crashed" — so the quality
+  gate failed at the exact moment the last test was fixed. It now falls back to the
+  `Passing Tests` line. Nobody could have found this without first getting to zero.
+
+### Test-harness defects fixed (no behaviour change)
+
+- **Manual `_physics_process()` does not step the PhysicsServer.** Every tongue hit assertion
+  was structurally incapable of passing. Now driven through real physics frames, per
+  `test_tongue_damage.gd`.
+- **Lambda by-value capture**, again — several tests recorded hits into a captured bool/int that
+  the lambda copies. Third file this session with this defect (after `test_object_pool.gd`).
+- **Frame-count errors** — the settle test sampled 3 frames past the end of extend; the overshoot
+  test opened its sampling loop after the peak frame was already consumed.
+- **Engine double-drive** — tests called `_physics_process` manually while the engine did too, so
+  results depended on how many engine ticks happened to land. Critically, the disable must
+  happen BEFORE the awaited frame in `before_each`: `is_action_just_pressed` survives until a
+  real frame consumes it, so a leaked press starts a swing early. This is what made the elastic
+  file pass test-by-test but fail in file order.
+- **`@export` set after `add_child()`** — `enemy_spawner._ready()` snapshots `base_spawn_interval`,
+  so configuring it post-`add_child` did nothing and the spawner sat at the 2.0s default while
+  tests advanced 0.6–1.6s.
+- **A test asserting the opposite of the API contract** — `trigger_hit_stop(-1.0)` was expected to
+  refuse, but `-1.0` is that function's DEFAULT PARAMETER, i.e. the "unspecified" sentinel every
+  no-argument call uses. Making the old assertion pass would have broken hit-stop entirely.
+
+### Flakes, root-caused rather than retried
+
+- `_orbit_angle` is seeded **randomly**, so an orbiting enemy is legitimately crossing the circle
+  toward its slot on early frames. Two tests assumed the slot matched the spawn position and
+  read 0.30 / 0.38 / 0.89 on three consecutive runs.
+- A **5% crit flake** appeared only once real hits started landing: `crit_chance` defaults to
+  0.05, so ~1 run in 20 resolved 2 damage against a `base_damage` 1 assertion.
+- `test_separation_when_close` deterministically reached 14.907px against a `> 15.0` bound in its
+  10-frame window. Separation worked; the window was too small.
+
+### Lessons
+
+- **A vacuous green is worse than a red.** The spawner suite reported success for a spawner that
+  never spawned; `max_enemies` enforcement was "verified" against zero enemies. Fixing the setup
+  turned 3 failures into 5 before it turned into 0 — going temporarily *more* red was the signal
+  that real assertions had started running.
+- **Fixing tests finds product bugs.** Six real defects were sitting behind unpassable tests. The
+  instinct to treat a long-standing failure list as cosmetic debt would have shipped every one.
+- **The last test is the hardest.** Reaching zero exposed a gate that had never executed its own
+  green path. Any "N failures tolerated" ratchet has this blind spot.

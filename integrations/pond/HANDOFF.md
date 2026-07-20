@@ -67,9 +67,18 @@ write-up in `RESULTS.md` ("Open-items round").
   the deliberate re-entry guard makes a no-op. It passed only on cross-file suite state and
   failed when run alone **at HEAD too**.
 
+**Cluster remediation DONE (the-pond `d83d932`): the game suite is FULLY GREEN, 1063/1063,
+gate PASS** (was 25 failing at session start: 25 → 21 → 2 → 0). The "21 pre-existing failures"
+turned out to be ~11 unpassable tests hiding **six real product bugs** — screen-shake `duration`
+ignored entirely, particle systems double-parented, the Pollution Immune synergy silently doing
+nothing, hit-stop discarding its delta, spawner tests vacuously green (asserting `max_enemies`
+against zero enemies), and `gate.sh` unable to pass a green suite at all. Details in RESULTS.md
+("Cluster remediation").
+
 ### Still open
 
-- **PC-9 — REFUTED as filed. I was wrong; max-range hit detection works.** See RESULTS.md
+- **PC-9 — REFUTED as filed. I was wrong; max-range hit detection works.** (Tests since fixed
+  and green.) See RESULTS.md
   "PC-9 investigation" for the full correction. The 11–28px I read as "the tongue never reaches
   144" is the **retract tail**: the tongue reaches 165.6px on extend frame 1 and is hard-set to
   exactly 144.0 on frame 10, then snaps back. `test_tongue_settles_at_max_range` advances 13
