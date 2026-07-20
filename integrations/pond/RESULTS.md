@@ -672,3 +672,125 @@ precisely because the test that would have caught it could never run.
   instinct to treat a long-standing failure list as cosmetic debt would have shipped every one.
 - **The last test is the hardest.** Reaching zero exposed a gate that had never executed its own
   green path. Any "N failures tolerated" ratchet has this blind spot.
+
+---
+
+## R2 — full spine, 2026-07-20 (the-pond `8852b19`)
+
+**ROUND 2 NOT MET — 21/26 checks.** Five blocked, and the blocks are the result:
+four of the six modes R2 requires have **no code path at all**, and the fifth (defeating the
+boss) could not be achieved under competent automated play. Script:
+`integrations/pond/verify_round2.py`. Ladder below R2 unaffected: spike 13/13 · smoke 8/8 ·
+R1 18/18, game gate 1063/1063, real saves byte-identical throughout.
+
+R2 exists to ask "does every mode reach a real outcome?", and a gate that quietly skipped what
+the game cannot do would report a meaningless green. So unreachable modes FAIL with their
+evidence attached.
+
+### What passed (21)
+
+- **All three arenas, selected the way the game selects them.** `create` now takes a
+  `run_number` config key; runs 1 / 5 / 10 load Polluted Wetland / Chemical Plant / Corporate
+  HQ Lobby, each with its own hazard type live as real nodes (3 puddles, 2 conveyor walls, 2
+  security cameras), and per-wave enemy counts scale 8 / 16 / 20 exactly per FR-08.
+- **The boss is reached by real proximity, spawns, and becomes vulnerable after its intro**, and
+  takes real damage from real input (100 → 38 hp in the gate run).
+- **The run-end spine**: `player_died` → `run_rewards_due` → `run_ended` → epilogue →
+  RunEndScreen presented, with rewards settled before narration (the PC-6 ordering, still holding).
+
+### PC-11 (CRITICAL) — two of three bosses are unreachable, and the true ending with them
+
+`BossArena.boss_scene` is an `@export` set in exactly ONE place: `TestArena.tscn` →
+`BossLobbyist`. `BossCEO.tscn` and `BossForeman.tscn` are referenced **only by unit tests** —
+no production code instantiates either, and the three arena scenes carry hazards only.
+
+The consequences are not cosmetic:
+- `MetaProgression.check_ending_unlock()` requires `ceo_defeated`, so the **TRUE ENDING can
+  never unlock** — the game's headline narrative payoff.
+- `unlocks.all_bosses_defeated` can never become true.
+- The CEO-gated informant (`informant_manager.gd:198`) and CEO hints (`hint_system.gd:116`) are
+  dead content.
+- `docs/prd.md:198` specifies a boss **per arena** (Wetland → The Foreman, Chemical Plant → The
+  Inspector, Corporate HQ → The Executive). That mapping was never implemented.
+
+Both bosses are fully built — scripts, bullet patterns, their own unit tests — and simply never
+wired. This is the exact wire-only class UGT exists for: every in-process test passes.
+
+### PC-12 — the victory run-end path has no caller
+
+`end_run("victory")` is never called by production code. The only production caller is
+`run_manager.gd:157` `end_run("death")` from `_on_player_died`. Boss defeat routes to
+`enter_investigation_phase()`, never to a win. So `MetaProgression.end_run_victory()` (150%
+rewards) is called only by tests, `runs.successful_runs` can never increment, `best_time` can
+never be set, and `RunEndScreen`'s entire victory branch (`run_end_screen.gd:77/120/157`) is
+unreachable. R1 exercised death because death is the only ending that exists.
+
+### PC-13 — there is no pause; ESC quits the game outright
+
+The `pause` action (bound to ESCAPE, `input_manager.gd:142`) is consumed at
+`test_arena_controller.gd:84` by `get_tree().quit()`. Pressing it mid-run terminates the
+application with no menu and no confirmation, destroying the run. No PauseMenu scene or script
+exists anywhere in the project.
+
+Deliberately not driven from the harness: wiring that action into the generic input path would
+let R3's random-input tier kill the process. The harness's existing comment warned about this
+and was right — I added it, then reverted it before it could do damage.
+
+### PC-14 — the "locked" boss arena refills with adds
+
+`BossArena.trigger_boss()` locks the arena and calls `_clear_regular_enemies()`, but nothing
+stops `EnemySpawner` — it is only paused for INVESTIGATION (`test_arena_controller.gd:113`).
+So the arena refills within seconds and the clear is pointless. The gate observed 3 regular
+enemies (Polluted Tadpole, Toxic Minnow) inside the locked arena during the boss fight.
+Clearing the arena and then immediately refilling it is incoherent either way — one of the two
+behaviours is wrong.
+
+### PC-15 (balance) — the wave-5 boss could not be defeated
+
+Across **4 seeds and ~20 driver configurations** the Lobbyist survived with **2–52 hp**
+remaining; the player died every time. Best single result: 2 hp. The driver kites at tongue
+range, evades real bullet positions, spends dodge i-frames on cooldown, culls adds, and takes
+level-up cards.
+
+The arithmetic is the finding:
+- tongue `base_damage` is **1** against **100** boss hp — ~100 landed hits at ~1.8 swings/sec;
+- one boss bullet costs the player **10** of 100 hp, so ~10 mistakes is death;
+- **mutations cannot close the gap.** `damage_modifier` is fractional (Mercury Blood +0.5,
+  Strong Legs +0.1) against an **int** base of 1, so `round()` sends almost every damage
+  mutation to no change at all — only Mercury Blood reaches 2;
+- meanwhile `hp_scale_per_mutation` adds a full **+5% boss hp per mutation taken**.
+
+So taking mutations makes the fight strictly HARDER: measured 100 hp unscaled vs **130 hp**
+after six mutations that produced `damage 1.1` → still 1. That inverts the roguelike loop — the
+optimal play is to refuse upgrades. This is a balance signal, not a proof of impossibility: a
+skilled human may well win. But an agent that plays the mechanics correctly should not need 20
+configurations to fail.
+
+### Two findings I filed and then REFUTED — both were my own instrument
+
+Recording these because the false versions were persuasive:
+
+- **"The boss fight soft-locks."** The world froze mid-swing: tongue stuck EXTENDING, i-frames
+  never expiring, dodge cooldown not ticking, boss and player hp static for 300 cycles while
+  physics frames advanced. It was a **pending level-up**: `LevelUpUI` pauses the whole tree, and
+  my fight loop never picked a card. Any driving loop must check `level_up.pending` every
+  iteration.
+- **"The level-up pool is broken — it re-offers taken mutations and never surfaces Mercury
+  Blood."** The same triple really was returned three times running, with the trigger's own
+  `_taken_ids` showing the pick had registered. The cause was `choose` advancing only 8 frames
+  while `LevelUpUI._animate_out()` is a **0.3s tween (18 frames)** during which the cards stay
+  clickable — so the driver returned mid-fade and clicked again. With 40 frames, offers are
+  fresh every time and mutations accumulate correctly.
+
+The second one leaves a real but minor game-side note: cards remain clickable throughout the
+fade-out, and each extra click re-emits `EventBus.mutation_selected`, which increments
+`BossArena._active_mutation_count` and inflates boss hp for a mutation the player never gained.
+A double-clicking human hits this.
+
+### Lesson
+
+Three times this session a "game bug" was my own instrument (PC-9's retract tail, the soft-lock,
+the level-up pool). The tell is the same each time: the anomaly is at the boundary I built, not
+in the code I'm accusing. Reproduce the number from the production math or instrument the
+boundary before filing — and note that the two refuted findings here cost far less to check than
+they would have cost the game team to chase.

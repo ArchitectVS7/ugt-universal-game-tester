@@ -166,13 +166,20 @@ class PondHarnessAdapter(BaseAdapter):
             raise RuntimeError(f"harness script not found: {script_fs}")
         return True
 
-    def reset(self, seed=None):
+    def reset(self, seed=None, run_number=None):
         """Fresh episode: restart the headless game and create the arena.
 
         Returns the normalized flat state dict. A bare reset() derives a
         distinct per-episode seed (base seed + episode index) so consecutive
         exploit-hunter episodes explore different randomness; pass `seed` for
         an exact replay.
+
+        `run_number` pins the lifetime run count the game boots with. It is a
+        real config key, not a convenience: run count selects the ARENA
+        (LevelGenerator thresholds 1-3 / 4-8 / 9+), the per-wave enemy count and
+        the bullet-speed tier (T-040/T-042). Without it every episode starts
+        from a virgin meta save and only ever sees run 1's Polluted Wetland, so
+        two of the three arenas are unreachable through the wire.
         """
         self._kill_process()
         self._reset_count += 1
@@ -196,8 +203,11 @@ class PondHarnessAdapter(BaseAdapter):
         ready = self._read_msg(timeout=120)
         if ready.get("op") != "ready":
             raise RuntimeError(f"harness did not become ready: {ready}")
-        created = self._rpc({"op": "create", "seed": self.last_seed},
-                            timeout=120)
+        create_req = {"op": "create", "seed": self.last_seed}
+        if run_number is not None:
+            create_req["run_number"] = int(run_number)
+        self.last_run_number = run_number
+        created = self._rpc(create_req, timeout=120)
         if created.get("ok") is not True:
             raise RuntimeError(f"create failed: {created}")
         self.last_snapshot = created

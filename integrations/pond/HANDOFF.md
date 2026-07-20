@@ -1,7 +1,29 @@
 # Pond Conspiracy (the-pond) — UGT Integration Plan
 
-**Status: R1 MET 18/18, seed-independent; all R1-round open items CLOSED (2026-07-20).
-Next: R2 full spine.** PC-1 is fixed, so R3 same-seed replay is no longer blocked.
+**Status: R2 NOT MET — 21/26 (2026-07-20). Five blocked: four modes the game has NO code
+path for, plus a boss that cannot be beaten. Next: fix PC-11/12/13 upstream, then re-run R2.**
+R1 MET 18/18 seed-independent; all R1-round open items CLOSED; game suite fully green
+1063/1063. PC-1 is fixed, so R3 same-seed replay is no longer blocked.
+
+**R2 headline findings** (full diagnosis in RESULTS.md "R2 — full spine"):
+- **PC-11 CRITICAL** — `BossArena.boss_scene` is set in ONE place (TestArena -> BossLobbyist).
+  BossCEO/BossForeman are referenced only by unit tests, so the **TRUE ENDING can never
+  unlock** (`check_ending_unlock` requires `ceo_defeated`), `all_bosses_defeated` is
+  unreachable, and the CEO-gated informant + hints are dead. `docs/prd.md:198` specifies a boss
+  per arena; that mapping was never implemented.
+- **PC-12** — `end_run("victory")` has no production caller. Victory, 150% rewards,
+  `successful_runs`, `best_time` and RunEndScreen's victory branch are all unreachable. Death
+  is the only ending that exists.
+- **PC-13** — there is no pause. The `pause` action calls `get_tree().quit()`: ESC destroys the
+  run with no confirmation. (Not driven from the harness on purpose — it would let R3's random
+  input kill the process.)
+- **PC-14** — the "locked" boss arena clears regular enemies then leaves the spawner running,
+  so it refills within seconds.
+- **PC-15 balance** — the wave-5 boss survived with 2-52 hp across 4 seeds and ~20 driver
+  configurations. Tongue damage 1 vs 100 boss hp; boss bullets cost 10 of the player's 100;
+  and `damage_modifier` is fractional against an INT base of 1 so damage mutations round away
+  to nothing while `hp_scale_per_mutation` adds a full +5% boss hp each — **taking upgrades
+  makes the fight harder**, which inverts the roguelike loop.
 Spike 13/13, smoke 8/8×3. `verify_round1.py` drives one full run loop: waves -> 10 real tongue
 kills -> damage -> provoked dodge i-frames -> level-up -> mutation applied by a real CLICK ->
 death -> `run_ended` -> epilogue -> visible RunEndScreen, with 0 invariant violations over 85
