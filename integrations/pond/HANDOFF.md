@@ -36,6 +36,40 @@ run-end/tongue state); adapter: `ugt/adapters/pond_harness.py` (+ `ugt.config.ya
 input-macro actions, `choose_mutation`); invariants: `integrations/pond/invariants.py`;
 scripts: `spike_pond.py`, `smoke_pond_adapter.py`, `verify_round1.py`. Findings + lessons:
 `RESULTS.md`.
+
+## OPEN ITEMS (as of 2026-07-20) — nothing here blocks R2
+
+Blocking a later rung:
+- **PC-1 — blocks R3 replay.** `tongue_attack.gd` owns a private `RandomNumberGenerator` that
+  calls `randomize()` in `_ready()`. Every other combat draw uses the global RNG the harness
+  seeds, and the determinism probe was identical twice, so this is the last known unseeded
+  island before same-seed replay is real. Fix: seed `_rng` from the global RNG / a
+  RunManager-owned seed.
+
+Game-side, not blocking:
+- **PC-2 — headless runs write the REAL settings save.** `MetaProgression.save_path` is
+  redirected by the harness, but `SaveManager.SAVE_PATH` is a `const` and is not. The
+  persistent run counter is already test-polluted past #13500, and run count is a difficulty
+  input (T-040), so the shipped curve is fed a polluted number. Fix: make the path
+  redirectable and/or add a headless guard; consider resetting the counter.
+- **PC-3 (benign)** — BulletUpHell `BuHSpawner._exit_tree` throws 3 "Thread must have been
+  started" errors on every headless exit. Whitelisted in the ladder's stderr checks.
+- **ObjectPool hardening (follow-up from PC-8, NOT a live bug).** Nothing frees the pool now,
+  but the pool is still structurally fragile to an external free: a freed entry in
+  `_available` costs one engine SCRIPT ERROR per pop, and `acquire()` retries by RECURSION
+  (`return acquire(scene)`, `shared/scripts/object_pool.gd:133`). Holding `instance_id`s and
+  resolving via `instance_from_id()` would make it immune. Note `test_object_pool.gd` covers
+  this file — keep it green.
+- **3 pre-existing `test_object_pool.gd` failures**, part of the repo's ~25-test failing
+  baseline and NOT caused by the PC-8 work (verified identical before and after): "Should
+  track reuse count", "Reset callback should be called", "Deactivate callback should be
+  called". Worth their own look — the last two are suspicious given prewarm now runs
+  `on_release`.
+
+Human UAT only (an engine trial cannot sign these off):
+- The tongue never visually animates outward — it snaps to full length on frame 1 and wobbles.
+  The PC-5 hit-detection fix does not address this.
+- Colorblind modes and visual polish generally (the ND U-110 precedent).
 Game repo: `/Users/vs7/Dev/Games/the-pond/` · Godot 4.7.1 (`/opt/homebrew/bin/godot`) · GDScript ·
 real-time top-down bullet-hell roguelike ("Pond Conspiracy", v0.1.0).
 
