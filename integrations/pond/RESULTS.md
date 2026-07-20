@@ -466,3 +466,125 @@ sharpest process lesson (below).
 - **"Pre-existing" is a hypothesis, not a verdict.** All three "pre-existing" pool failures
   were real and fixable, and one was a product bug hiding behind two broken tests. The label
   was doing the work of an investigation.
+
+---
+
+## PC-9 investigation — 2026-07-20 (four explore agents + independent verification)
+
+**PC-9 as I filed it is REFUTED. Max-range tongue hit detection is not broken.** Recording the
+correction prominently, per the D-C1/D-C2 precedent: a wrong finding left standing in a findings
+log is worse than no finding.
+
+### What I got wrong, and why
+
+I filed PC-9 off two symptoms: `test_hit_detection_at_3_tile_range` failing, and
+`test_tongue_settles_at_max_range` measuring 11–28px where 144 was expected. I read "the tongue
+never reaches its stated range" and connected it to the UAT note about the tongue not animating.
+
+The 11–28px is the **retract tail**. Simulating the production easing (`FRAME_DELTA = 0.016`,
+`extend_duration = 0.15`, `retract_snap = 2.5`) reproduces my measurements to two decimals:
+
+| frame | phase | length |
+|---|---|---|
+| 1 | EXTEND | **165.60** (clamped to max×1.15) |
+| 2–9 | EXTEND | 153.13 · 127.54 · 151.60 · 143.29 · 142.69 · 144.93 · 143.75 · 143.93 |
+| 10 | EXTEND | **144.00** — hard-set, then → RETRACTING |
+| 11–14 | RETRACT | 93.12 · 54.91 · **28.08** · **11.20** |
+
+`test_tongue_settles_at_max_range` does `_simulate_attack(1)` + `_process_frames(12)` = 13
+frames, landing on 28.08; my two observed readings were **28.07 and 11.19** — frames 13 and 14.
+The ±1 frame is the engine driving `_physics_process` on the in-tree player *in addition to* the
+test's manual calls. Likewise `test_overshoot_is_configurable` expects the 172.8 peak but
+`_simulate_attack(1)` consumes extend frame 1 before the sampling loop opens, so it samples
+frame 2 = 153.13 — matching my observed 152–153.
+
+The tongue reaches and exceeds 144px on **every** extend frame. Hit detection uses
+`current_length` in both the tip area and the PC-5 shaft sweep, and `current_length` is 127–166px
+throughout EXTENDING. Max-range hits are the case that works *most* reliably.
+
+**Lesson:** I treated a test's measurement as a measurement of the game. It was a measurement of
+the game *at a frame the test chose badly*. Before believing a number that contradicts the spec,
+reproduce it from the production math — that took one short script and would have prevented the
+bad finding.
+
+### Why the "0 hits" tests fail — harness, with a known-good reference in the repo
+
+`test/unit/test_tongue_damage.gd:13-19` already documents the cause in its own header: the GUT
+cmdln runner does not advance the PhysicsServer on manual `_physics_process()` calls. So:
+
+- The PC-5 shaft sweep is correctly gated behind `Engine.is_in_physics_frame()`
+  (`tongue_attack.gd:391`) — a space-state query outside a physics step is illegal — and returns
+  `[]` every time in these tests.
+- The tip `Area2D` path calls `get_overlapping_bodies()` right after moving the area
+  (`tongue_attack.gd:345,352`); overlap lists are refreshed by the server during a step, so with
+  no step the list is stale.
+
+Several of these tests *also* carry the by-value lambda-capture bug (the same defect fixed in
+`test_object_pool.gd` this round), so they were doubly unpassable. `test_tongue_damage.gd`
+passes because it does the three things the others don't: awaits real `physics_frame`s, calls
+`player.set_physics_process(false)` to stop the double-drive, and records into an object rather
+than a captured bool.
+
+### PC-10 (new, REAL — but a design decision)
+
+The tongue reaches **165.6px on frame 1** (16ms) and then wobbles down to settle. It never
+travels outward. That is precisely the human-UAT observation, now with a mechanism.
+
+Caveat that keeps this out of "just fix it": the implementation **matches the GUIDE's own
+pseudocode** (`lerp(0, effective_range, ease_out_elastic(progress))`,
+`GUIDE/02-combat-system/tongue-attack.md:59-61`), and "ease-out" genuinely means fast-start. But
+it contradicts the same GUIDE's prose ("extends over `extend_duration` 0.15s") and the art
+checklist's "4–6 frames, tongue extends". This is the tongue feel decision already parked at
+the-pond `TASKS.md:342` — it wants a playtest, not a unilateral easing swap by the test harness
+author.
+
+### Design-intent conflicts found (for the record, not for UGT to resolve)
+
+- **Range: 144px (GUIDE ×5 docs) vs 120px (PRD FR-01, `docs/prd.md:134`).**
+- **Cooldown: 0.3s (GUIDE) vs 0.4s (PRD FR-01).**
+- **Shape: elastic point-whip along one ray (GUIDE) vs a 180° arc (PRD FR-01).** If the arc were
+  authoritative, hit detection should be a cone — worth knowing against the PC-5 sweep.
+- The GUIDE's claim "The PRD specifies 3-tile range" is **not supported** by the current
+  `docs/prd.md` (which says 120px); the 3-tile figure traces to PRD-v0.2.
+- The GUIDE calls overshoot "purely visual, not gameplay-affecting" while sizing the hitbox to
+  `current_length`, which includes the overshoot. Unresolved in the docs.
+
+All three numeric conflicts are already logged as deferred at the-pond `TASKS.md:342`.
+
+### The rest of the 21-test cluster — four distinct causes, not one
+
+Verified directly in the source, not just reported:
+
+- **Enemy spawner (3 tests) — TEST bug.** `test_enemy_spawner.gd:39` adds the spawner to the
+  tree *before* assigning `base_spawn_interval` at `:43-47`, but `_ready()` snapshots
+  `current_spawn_interval = base_spawn_interval` (`enemy_spawner.gd:148`) and never re-derives
+  it. Tests advance 0.6–1.6s against a captured 2.0s interval → 0 spawns.
+  `test_player_target_found` is a downstream symptom of the same thing, not a separate defect
+  (the group lookup itself works fine under GUT).
+- **Particle manager (1 test) — TEST bug.** Cleanup keys off `CPUParticles2D.emitting`, which
+  the *engine* flips after `lifetime`. 120 synthetic `_process()` calls inside one real frame
+  advance zero engine time.
+- **Screen shake (2 tests) — GENUINE PRODUCT BUG, verified.** `_shake_duration` is written at
+  `screen_shake.gd:154` and `:188` and **never read anywhere**; trauma decays at a fixed
+  `trauma_decay_rate = 1.5`/s, so a requested duration is ignored entirely and full decay always
+  takes 0.67s. The tests encode the intended contract; the code doesn't implement it.
+- **Hit stop (2 tests) — one GENUINE PRODUCT BUG, verified, plus one contract disagreement.**
+  `hit_stop.gd:87-88` discards the passed delta when `Engine.time_scale == 0` and hardcodes
+  `0.016`, so a large frame delta cannot unfreeze — a real robustness bug on frame skips.
+  Separately, `trigger_hit_stop(-1.0)` is the API's "use default" sentinel while the test expects
+  rejection; code is self-consistent, so this is a spec question.
+
+No shared root cause with the tongue cluster; no shared helper, base class or autoload links
+them. One global worth watching: `Engine.time_scale` leaking at 0.0 if a hit-stop test aborts
+before `after_each` would stall `await`-based tests suite-wide.
+
+### UGT-side notes for R2 (from the implementation read)
+
+- The harness snapshots at the **top** of a physics frame and it is an autoload, so it runs
+  before the arena's nodes: `{"op":"step","frames":N}` reports tongue state after **N−1** tongue
+  updates. Worth accounting for in any R2 assertion that reads `current_length`.
+- `_set_action` presses only on transitions, so holding `attack:true` across steps fires exactly
+  **one** swing. R2 must toggle attack off/on to swing repeatedly.
+- `HitStop` drives `Engine.time_scale` to 0.0 on hit, which stretches a swing across more
+  physics frames — any fixed-frame-count sampling of tongue state will land differently once
+  hits start landing.

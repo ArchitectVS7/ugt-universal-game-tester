@@ -69,14 +69,21 @@ write-up in `RESULTS.md` ("Open-items round").
 
 ### Still open
 
-- **PC-9 (new, investigate before R2 leans on tongue reach): max-range tongue hit detection
-  may still be broken.** Part of the 21-test pre-existing cluster, but combat-critical and
-  adjacent to PC-5: `test_hit_detection_at_3_tile_range` fails ("should hit enemy at exactly
-  144px"), and `test_tongue_settles_at_max_range` measures the tongue settling at **11–28px**
-  when it expects 144. PC-5 fixed *close* range; this says **max** range may not work — which
-  matches the UAT note that the tongue never visually animates outward. Part of the cluster is
-  also flaky (`test_attack_emits_signal_on_hit` differs across identical isolated runs at HEAD).
-  Remaining cluster: enemy spawner, particles, screen shake.
+- **PC-9 — REFUTED as filed. I was wrong; max-range hit detection works.** See RESULTS.md
+  "PC-9 investigation" for the full correction. The 11–28px I read as "the tongue never reaches
+  144" is the **retract tail**: the tongue reaches 165.6px on extend frame 1 and is hard-set to
+  exactly 144.0 on frame 10, then snaps back. `test_tongue_settles_at_max_range` advances 13
+  frames and samples mid-retract. Reproduced the observed values to 2dp from the production
+  easing (frame 13 = 28.08, frame 14 = 11.20 vs my measured 28.07/11.19), so this is settled,
+  not argued. The ±1 frame is the engine double-driving `_physics_process` on the in-tree player.
+- **PC-10 (real, but a DESIGN decision — do not fix unilaterally): the tongue reaches full
+  extension in ONE frame.** `_ease_out_elastic` puts the tongue at 165.6px (max+overshoot,
+  clamped) after 16ms, then wobbles 153 → 127 → 152 → 143 → settle. It never travels outward.
+  This is exactly the human-UAT note ("snaps to full length on frame 1 and wobbles"), now with
+  a mechanism. Note the implementation **matches the GUIDE's pseudocode** (`ease_out_elastic`),
+  and "ease-out" legitimately means fast-start — but it contradicts the GUIDE's own prose
+  ("extends over `extend_duration` 0.15s", 4–6 animation frames in the art checklist). This is
+  the feel decision already parked at the-pond `TASKS.md:342`; it wants a playtest, not a guess.
 - **PC-3 (benign)** — BulletUpHell `BuHSpawner._exit_tree` throws 3 "Thread must have been
   started" errors on every headless exit. Whitelisted in the ladder's stderr checks.
 
