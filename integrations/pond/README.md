@@ -1,0 +1,36 @@
+# Pond Conspiracy (the-pond) — UGT trial ladder
+
+First real-time / first Godot integration. Game repo: `~/Dev/Games/the-pond/` (Godot 4.7.1,
+GDScript bullet-hell roguelike). Direction + feasibility evidence: `HANDOFF.md`. Findings log:
+`RESULTS.md`.
+
+## How it works
+
+No server. The ladder scripts spawn the REAL game headless through a JSON-lines harness that
+lives in the game repo (`the-pond/tests/harness/ugt_harness.gd`, a `SceneTree` script):
+
+```
+godot --headless --fixed-fps 60 --path ~/Dev/Games/the-pond -s res://tests/harness/ugt_harness.gd
+```
+
+One JSON request per stdin line, one response per stdout line (protocol lines carry
+`"ugt": true`; everything else is game log noise). Ops: `create` (seed) / `step`
+(exactly N physics frames of held named-action input + aim override) / `state` / `quit`.
+Between commands the harness blocks on stdin **inside** `_physics_process`, freezing the
+engine — a driver can think for minutes and zero game frames elapse. `--fixed-fps 60`
+decouples frames from wall clock (deterministic delta, runs at CPU speed).
+
+The harness contains no game logic: named input actions, the player's own
+`aim_target_override` hook, structural state reads, and a tap that drains every EventBus
+signal into each step response. It also redirects `MetaProgression.save_path` before the
+autoload's `_ready()`, so runs never touch the real user save and always start from a virgin
+meta state (run #1 — run count is a difficulty input).
+
+## Run the ladder (from the UGT repo root)
+
+```bash
+python3 integrations/pond/spike_pond.py        # raw protocol round-trip (13 checks) — DONE 13/13
+# smoke_pond_adapter.py / verify_round1..3.py — not yet written
+```
+
+Needs `godot` on PATH (or `UGT_GODOT_BIN`); game repo location overridable via `POND_ROOT`.
