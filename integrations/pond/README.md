@@ -38,9 +38,7 @@ python3 integrations/pond/verify_round1.py [seed] # playability gate (18 checks)
 R1 drives one full run loop: waves -> real tongue kills -> damage -> provoked dodge i-frames
 -> level-up -> a mutation picked by a REAL mouse click on its card -> death -> `run_ended` ->
 epilogue -> visible RunEndScreen, asserting `integrations/pond/invariants.py` after every
-step. It defaults to seed 20260719; **seed 777001 currently gives 17/18** on the stderr check
-because of open finding PC-8 (see `RESULTS.md`) — that is a real game defect, so do not re-pin
-the gate to a friendlier seed to make it green.
+step. It defaults to seed 20260719 and is 18/18 on every seed tried (20260719, 777001, 424242, 90210).
 
 The adapter is `ugt/adapters/pond_harness.py` (`PondHarnessAdapter`, engine keys +
 14-action input-macro vocabulary in `ugt.config.yaml`). One episode per subprocess:

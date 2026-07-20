@@ -1,18 +1,13 @@
 # Pond Conspiracy (the-pond) — UGT Integration Plan
 
-**Status: R1 MET 18/18 on the pinned seed (2026-07-20); PC-8 open. Next: R2 full spine.**
+**Status: R1 MET 18/18, seed-independent (2026-07-20). Next: R2 full spine.**
 Spike 13/13, smoke 8/8×3. `verify_round1.py` drives one full run loop: waves -> 10 real tongue
 kills -> damage -> provoked dodge i-frames -> level-up -> mutation applied by a real CLICK ->
 death -> `run_ended` -> epilogue -> visible RunEndScreen, with 0 invariant violations over 85
-steps and 0 SCRIPT ERRORs, reproduced twice on seed 20260719.
+steps and 0 SCRIPT ERRORs. Verified on seeds 20260719, 777001, 424242 and 90210 — 18/18 on all
+four, so the gate is no longer seed-fragile.
 
-⚠️ **Seed 777001 gives 17/18** — the run itself plays fine, but the stderr check trips on 74
-`SCRIPT ERROR: Trying to return a previously freed instance` lines from the enemy ObjectPool
-(**PC-8**, open, diagnosed in `RESULTS.md`). Playability is signed off; that one robustness
-check is seed-dependent. Fix PC-8 before calling R1 unconditionally green — and don't re-pin
-the gate to a friendlier seed to dodge it.
-
-**Two game defects found by R1 and FIXED upstream this round:**
+**Three game defects found by R1 and FIXED upstream this round:**
 - **PC-5 (CRITICAL):** the tongue's tip-only hitbox left everything inside ~119px unhittable,
   so the player could never kill anything (24 swings, 0 hits, 0 kills). `_check_hits()` now
   sweeps a capsule from the player to the tip, unioned with the original tip area (which still
@@ -23,9 +18,17 @@ the gate to a friendlier seed to dodge it.
   emitted by `RunManager.end_run()` immediately before `run_ended`; EvidenceManager listens
   there now. RunManager also settles its own state *before* emitting, so a consumer can no
   longer strand it mid-`end_run`.
+- **PC-8:** `BossArena._clear_regular_enemies()` freed every non-boss node in
+  `group("enemies")` — which includes the ~122 DORMANT pre-warmed pool instances, so
+  triggering the boss destroyed the whole pool and every later spawn popped a freed instance
+  (74 SCRIPT ERRORs). Root cause was `ObjectPool.prewarm()` never running the release-side
+  hook, so a pre-warmed enemy kept `is_active == true` and looked live to any group scan.
+  Fixed in both places, plus `EnemySpawner.despawn_enemy()` to remove an enemy from play
+  without firing `died`/`enemy_killed`. The boss triggers by PROXIMITY, not only at wave 5 —
+  which is why this bit at wave 2 and misled the first diagnosis.
 
-Game gate after both: **1032 passing / 25 failing vs baseline 27 — two better than baseline,
-zero regressions.** PC-4 (run-start double-fire) was fixed the previous round. Determinism probe IDENTICAL twice (global RNG seedable today; only PC-1's
+Game gate after all three: **1032 passing / 25 failing vs baseline 27 — two better than
+baseline, zero regressions.** PC-4 (run-start double-fire) was fixed the previous round. Determinism probe IDENTICAL twice (global RNG seedable today; only PC-1's
 tongue-crit RNG island remains), so R3 replay is closer than the plan below assumed.
 
 Harness: `the-pond/tests/harness/ugt_harness.gd` (now also `choose` + level-up/narrative/

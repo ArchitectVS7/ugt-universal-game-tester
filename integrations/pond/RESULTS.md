@@ -12,14 +12,12 @@ baseline, zero regressions.** Ladder re-run end to end: spike 13/13, smoke 8/8, 
 Two real game defects were found by this gate and fixed upstream (PC-5 critical, PC-6
 medium), plus three harness/driver defects of my own. R1 reached MET only after all five.
 
-⚠️ **MET on the pinned seed, not on every seed.** A second seed (777001) reaches 17/18: the
-run plays fine (10 kills, level-up, mutation, death, epilogue) but the stderr check fails on
-**74 SCRIPT ERROR lines** from a NEW game finding, PC-8 below. So R1's *playability* claim
-holds, and one robustness check is seed-dependent. Do not treat R1 as fully green until PC-8
-lands — and do not re-pin the gate to a friendlier seed to make it pass.
+**Seed-independent as of the PC-8 fix:** 18/18 on seeds 20260719, 777001, 424242 and 90210.
+(Before PC-8, seed 777001 gave 17/18 — the run played fine but the stderr check tripped on 74
+SCRIPT ERROR lines. The gate was deliberately not re-pinned to a friendlier seed.)
 
-### PC-8 (OPEN, MEDIUM — fails R1 on seed 777001): the enemy ObjectPool floods stderr with
-### "Trying to return a previously freed instance"
+### PC-8 (MEDIUM, FIXED upstream — was failing R1 on seed 777001): the boss arena freed the
+### entire dormant enemy pool, then every later spawn popped a freed instance
 
 74 SCRIPT ERROR lines in one run, first at step 57, all with the same backtrace:
 
@@ -32,27 +30,49 @@ SCRIPT ERROR: Trying to return a previously freed instance.
   [4] _physics_process   (enemy_spawner.gd:185)
 ```
 
-Not caused by the PC-5 tongue change (different subsystem; the sweep guards
-`is_instance_valid` and the trace never enters combat code).
+Not caused by the PC-5 tongue change (different subsystem; the trace never enters combat code).
 
-The pool's *logic* is actually correct — `acquire()` pops, checks `is_instance_valid(obj)`,
-and retries on a freed entry. The bug is that it lets freed objects accumulate in
-`_available` and only validates AFTER popping: reading a freed Object out of an Array is
-itself what the engine logs as a SCRIPT ERROR. So every stale entry costs one error line even
-though the code recovers.
+**Root cause.** `BossArena._clear_regular_enemies()` frees every non-boss node in
+`group("enemies")` — but that group is NOT the set of live combatants. COMBAT-014 pre-warms
+~50 DORMANT pooled instances per enemy type into the same group. Triggering the boss therefore
+`queue_free()`d the **entire pool in one frame** (measured: 122 objects at frame 1686), while
+`ObjectPool._available` still held every one of them. Each later spawn popped a corpse.
 
-Why it matters beyond noise:
-1. **It defeats error monitoring.** A flood of benign SCRIPT ERRORs is exactly what hides a
-   real one — this gate's stderr check exists to catch real ones, and PC-8 drowns it.
-2. **`acquire()` retries by RECURSION** (`return acquire(scene)`, object_pool.gd:133). A long
-   run of stale entries recurses once per entry; 74 in one run is uncomfortably close to a
-   stack risk under a heavier swarm.
+Two things made this hard to see, and both cost me a wrong fix:
+1. The boss is triggered by **proximity**, not only by reaching wave 5 — the player wandered
+   into the BossArena trigger at **wave 2**. I first checked the wave, saw 2 vs boss_wave 5,
+   and wrongly concluded the boss path was not involved.
+2. My first fix skipped enemies with `is_active == false` — which skipped nothing, because
+   `EnemyBase.is_active` defaults to **true** and `prewarm()` never ran the release-side hook,
+   so a pre-warmed enemy that had never been in play still looked live. The error count barely
+   moved (74 → 72), which is what exposed the bad assumption.
 
-Root cause to fix upstream: pooled enemies are being freed without being removed from the
-pool's `_available` list. Options: have the pool hold `instance_id`s and resolve via
-`instance_from_id()` (which returns null for a dead id without logging), or purge on release/
-free so a freed node never sits in the free list. Either way `_pop_available` should stop
-being the place a freed instance is first touched.
+Only instrumenting found it: a `tree_exiting` hook printing the physics frame showed all 122
+leaving the tree in a single frame. (The stack was useless — `queue_free` is deferred, so the
+caller is long gone by then.) Same lesson as PC-5: instrument the boundary, don't reason about it.
+
+**Fixes (both upstream):**
+- `ObjectPool.prewarm()` now runs the same `on_release` hook a returned object gets, so a
+  pre-warmed instance is dormant in the *game's* eyes (`is_active == false`), not merely
+  hidden at engine level. This is the real defect: prewarm and release produced different
+  states for objects that are supposed to be interchangeable.
+- `BossArena._clear_regular_enemies()` skips dormant instances and RELEASES live pooled ones
+  via the new `EnemySpawner.despawn_enemy()` (removes from play without firing
+  `died`/`enemy_killed`, which would have inflated the kill count and fed the level-up
+  trigger) instead of freeing them.
+
+Result: 0 error lines, and R1 is 18/18 on all four seeds tried.
+
+**Still worth doing (not done here):** the pool remains fragile to an external free — a freed
+entry in `_available` costs one engine error per pop, and `acquire()` retries by RECURSION
+(`return acquire(scene)`, object_pool.gd:133). Holding `instance_id`s and resolving via
+`instance_from_id()` would make it structurally immune. Filed as a hardening follow-up, not a
+live bug now that nothing frees the pool.
+
+**Separately open:** `test_object_pool.gd` has 3 failures that PRE-DATE all of this work
+("Should track reuse count", "Reset callback should be called", "Deactivate callback should be
+called") — verified identical before and after the PC-8 change. They are part of the repo's
+~25-test failing baseline and deserve their own look.
 
 Everything the playability gate asks for is now reachable through real input: waves spawn,
 10 enemies die to real tongue swings, 100 `player_damaged` events land, dodge i-frames
