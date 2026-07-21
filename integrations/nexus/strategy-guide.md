@@ -14,8 +14,12 @@ a hacker at a shell would.
   - `discoveredServers` — IP addresses you can `connect` to (populate it with `scan`
     first if empty).
   - `compromisedServers` — hosts you already own.
-  - `missions[]` — each has a `missionId` and a `status`; `accept` the one whose
-    status is `active`.
+  - `missions[]` — each has a `missionId` and a `status`. A mission starts out
+    NOT in this list at all; `accept <missionId>` is what PUTS it here with
+    `status: "active"` in one shot. Once you see a mission with `status: "active"`,
+    it is ALREADY accepted — do NOT `accept` it again (that call does nothing the
+    second time). Move on to `scan`/`connect`/`exploit`/`cat` to make its
+    `objectivesCompleted` count go up instead.
 - Do NOT invent commands or files — an unknown command replies "Command not found"
   and does nothing (that is a wasted step, not a bug).
 
@@ -29,12 +33,16 @@ a hacker at a shell would.
 - Hack chain (on a connected server): `exploit <vuln>` (e.g.
   `exploit weak_password` — seeded roll → compromise host), `crack <file>` (guess a
   password), `escalate`, `backdoor`, `download <file>`.
-- Missions: `accept <missionId>` (take the active mission so its rewards can pay out).
+- Missions: `accept <missionId>` — issue this ONCE per mission, the moment it first
+  appears (this is what makes it active). Never repeat it once the mission already
+  shows `status: "active"` in Current State — that call is a no-op the second time.
 - Narrative: `talk <npc>` (contact an NPC), `choose <path>` (Act-3 climax choice,
   e.g. `choose liberation`).
 
 ## Core loop (accept → scan → connect → exploit → cat)
-1. `accept <missionId>` for the active mission — rewards only pay out once accepted.
+1. `accept <missionId>` — ONCE, the moment the mission first appears. If Current
+   State already shows it with `status: "active"`, this step is DONE; skip straight
+   to step 2, do not re-issue `accept`.
 2. `scan`, then `connect <ip>` to a discovered target server.
 3. `exploit <vuln>` to COMPROMISE the host. If it refuses, RETRY — the roll is seeded
    and re-rolls (hardcore fails ~70%, so expect several retries).

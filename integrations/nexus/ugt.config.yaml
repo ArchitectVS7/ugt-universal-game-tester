@@ -115,3 +115,10 @@ playtest:
     - { path: "compromisedServersCount", label: "servers_compromised" }
     - { path: "missionsCompletedCount", label: "missions_completed" }
   win_path: "gameStatus.isComplete"
+  # rngCounter advances on EVERY command by design (NX-OBS-1), including a refused/
+  # no-op one — without excluding it, the playtester's contradiction detector never
+  # sees an "empty" delta for this game and can never auto-flag a stuck loop. Found
+  # 2026-07-21 when a real Haiku playtest re-issued `accept the_breadcrumb` 11 times
+  # after its first (and only) real effect, with the detector silently never firing.
+  ignore_delta_fields:
+    - "rngCounter"

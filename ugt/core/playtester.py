@@ -323,14 +323,17 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
                     continue
             terminal_text = ""
             prompt = _build_legal_prompt(config, strategy_guide, current_state,
-                                         legal_list, action_log, playtest_cfg)
+                                         legal_list, action_log, playtest_cfg,
+                                         noop_streaks=noop_streaks)
         else:
             terminal_text = adapter.get_terminal_text(terminal_budget)
             if action_mode == "text":
                 prompt = _build_terminal_prompt(config, strategy_guide, current_state,
-                                                terminal_text, action_log, playtest_cfg)
+                                                terminal_text, action_log, playtest_cfg,
+                                                noop_streaks=noop_streaks)
             else:
-                prompt = _build_prompt(config, strategy_guide, current_state, terminal_text, action_log)
+                prompt = _build_prompt(config, strategy_guide, current_state, terminal_text, action_log,
+                                       noop_streaks=noop_streaks)
 
         try:
             llm_action = llm.choose_action(prompt)
@@ -523,7 +526,19 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         # action keeps producing no material state change while the agent keeps expecting
         # one, that's either a silent game refusal (e.g. a hidden precondition) or the
         # agent stuck in a loop — both are auto-flag-worthy without LLM cooperation.
-        material_delta = {k: v for k, v in delta.items() if k != "turn_number"}
+        #
+        # "turn_number" is excluded by default, but a game may have its OWN administrative
+        # field that ticks on every command regardless of whether the command had any real
+        # effect (e.g. NEXUS's rngCounter, which advances even on a refused/no-op command by
+        # design — NX-OBS-1). Without excluding that field too, EVERY action in such a game
+        # always has a "non-empty" delta and this whole detector goes permanently inert for
+        # that game. Games declare extra fields to ignore via playtest.ignore_delta_fields
+        # in their ugt.config.yaml (matched on the full dotted key or its leaf name).
+        _ignore_delta_fields = {"turn_number"} | set(playtest_cfg.get("ignore_delta_fields") or [])
+        material_delta = {
+            k: v for k, v in delta.items()
+            if k not in _ignore_delta_fields and k.rsplit(".", 1)[-1] not in _ignore_delta_fields
+        }
         noop_key = f"{action_type}:{value}"
         if not material_delta and action_type in ("action_id", "press_key", "type_text", "end_turn", "legal_action"):
             noop_streaks[noop_key] = noop_streaks.get(noop_key, 0) + 1
@@ -910,7 +925,29 @@ def _make_bug_report(step, source, description, action_log, current_action,
     return report
 
 
-def _build_prompt(config, strategy_guide, current_state, terminal_text, action_log):
+def _noop_warning_block(noop_streaks, threshold=2):
+    """Render a '## Warnings' section for any action whose last `threshold`+ attempts
+    produced no material state change — the SAME counter the contradiction detector
+    uses to auto-flag a bug at 3 repeats, surfaced one step earlier so the agent gets
+    a chance to notice and change course itself, rather than only being scored on it
+    after the fact. Without this, that count exists in memory the whole time but was
+    never shown back to the agent — the 5-step 'Recent Actions' window alone is too
+    short to reveal a pattern that repeats every 6+ steps (see NEXUS the_breadcrumb
+    2026-07-21: 'accept' repeated 11 times, each one scrolled out of view before the
+    next attempt, with no signal that it had ever been tried before)."""
+    if not noop_streaks:
+        return ""
+    lines = [
+        f"  '{key.split(':', 1)[-1]}' has produced NO material change the last {count} "
+        f"time{'s' if count != 1 else ''} you tried it — do NOT just repeat it, try something else"
+        for key, count in noop_streaks.items() if count >= threshold
+    ]
+    if not lines:
+        return ""
+    return "## Warnings\n" + "\n".join(lines) + "\n\n"
+
+
+def _build_prompt(config, strategy_guide, current_state, terminal_text, action_log, noop_streaks=None):
     playtest_cfg = config.data.get("playtest", {}) if isinstance(config.data, dict) else {}
     guide_budget = int(playtest_cfg.get("guide_char_budget", 2000))
     terminal_budget = int(playtest_cfg.get("terminal_char_budget", 400))
@@ -942,13 +979,14 @@ def _build_prompt(config, strategy_guide, current_state, terminal_text, action_l
         + _key_values_line(playtest_cfg, current_state)
         + f"```json\n{json.dumps(current_state, indent=2, default=str)}\n```\n\n"
         f"## Recent Actions\n{recent_summary}\n\n"
-        f"## Terminal Output\n```\n{terminal_text[-terminal_budget:]}\n```\n\n"
+        + _noop_warning_block(noop_streaks)
+        + f"## Terminal Output\n```\n{terminal_text[-terminal_budget:]}\n```\n\n"
         f"## Strategy Guide\n{strategy_guide[:guide_budget]}\n\n"
         f"Respond JSON only. Use action_type=\"action_id\" and value=<one of the action names above>."
     )
 
 
-def _build_legal_prompt(config, strategy_guide, current_state, legal_list, action_log, playtest_cfg):
+def _build_legal_prompt(config, strategy_guide, current_state, legal_list, action_log, playtest_cfg, noop_streaks=None):
     """Prompt for legal_action mode: the adapter's own structured state (serialized
     JSON — the exact shape the game's ladder scripts read) plus its live legal-action
     list. Game-agnostic: each legal action is dumped as its raw JSON, with no
@@ -978,12 +1016,13 @@ def _build_legal_prompt(config, strategy_guide, current_state, legal_list, actio
         f"## LEGAL ACTIONS (respond with action_type=\"legal_action\", value=<the NUMBER>)\n"
         f"{legal_lines}\n\n"
         f"## Recent Actions\n{recent_summary}\n\n"
-        f"## Strategy Guide\n{strategy_guide[:guide_budget]}\n\n"
+        + _noop_warning_block(noop_streaks)
+        + f"## Strategy Guide\n{strategy_guide[:guide_budget]}\n\n"
         f"Respond JSON only. action_type=\"legal_action\", value=\"<index 0..{upper}>\"."
     )
 
 
-def _build_terminal_prompt(config, strategy_guide, current_state, terminal_text, action_log, playtest_cfg):
+def _build_terminal_prompt(config, strategy_guide, current_state, terminal_text, action_log, playtest_cfg, noop_streaks=None):
     """Prompt for "text" mode: the LLM drives the game by TYPING a raw command line
     (action_type="type_text"), exactly as a human at the terminal would. The adapter's
     own get_terminal_text output and structured state are shown; the command vocabulary
@@ -1020,7 +1059,8 @@ def _build_terminal_prompt(config, strategy_guide, current_state, terminal_text,
         + _key_values_line(playtest_cfg, current_state)
         + f"```json\n{json.dumps(current_state, indent=2, default=str)}\n```\n\n"
         f"## Recent Actions\n{recent_summary}\n\n"
-        f"## Terminal Output\n```\n{terminal_text[-terminal_budget:]}\n```\n\n"
+        + _noop_warning_block(noop_streaks)
+        + f"## Terminal Output\n```\n{terminal_text[-terminal_budget:]}\n```\n\n"
         f"## Strategy Guide\n{strategy_guide[:guide_budget]}\n\n"
         f"Respond JSON only. Use action_type=\"type_text\" and "
         f"value=\"<the full command line to type>\"."
