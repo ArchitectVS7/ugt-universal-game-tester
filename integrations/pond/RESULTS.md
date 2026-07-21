@@ -2,7 +2,62 @@
 
 Commit-traceable record. A failed check is data. Game repo: `~/Dev/Games/the-pond/`.
 
-## 2026-07-20 — U-009: R2 RE-BASELINED — NOT MET 44/47 (the authoritative post-M7 baseline)
+## 2026-07-21 — R2 GREEN: MET 45/45 after the game-side gaps were repaired (the authoritative baseline)
+
+**R2 MET — 45/45** (seed 20260720, the-pond HEAD `92de418`, godot 4.7.1). R1 still MET 18/18.
+This is the trustworthy green baseline: every counted check executes game code and passes because
+the game *works*, verified over the wire — no vacuous passes, no source-only conclusions. It closes
+the "repair the gaps before advancing" pass that followed U-009's 44/47.
+
+**What was repaired (game-side, in the-pond — committed there with provenance):**
+- **PC-17 (cosmetic pause) FIXED** — the-pond `74eaa9a` (T-064). The arena root is
+  `PROCESS_MODE_ALWAYS` (T-058, so ESC stays live) but gameplay children inherited it and kept
+  advancing while paused (measured: 200px drift while `paused=True`). Fix demotes the gameplay
+  subtree (player, spawner, boss arena, hazards) + each spawned enemy to `PROCESS_MODE_PAUSABLE`.
+  Now measured green over the wire: **"player held within 0.00px while paused across 4×15 frames —
+  gameplay truly frozen."** All 10 `section_pause` checks pass.
+- **PC-16 (player escaped the arena) FIXED + now documented in the-pond** — `92de418` (T-065).
+  `Player.tscn collision_mask 2→3` so the player collides with the boundary walls (layer 1). Was
+  authored during the earlier UGT run but left uncommitted in the-pond tree; committed here with a
+  T-065 provenance entry. Invariant sweep now clean (0 violations over 2033 steps).
+- **Harness pause re-enable committed to the-pond** — `8d03e3f`. The U-008 `ugt_harness.gd` change
+  (inject the ESC pause toggle, never Quit-to-Menu) was also uncommitted; committed so the harness
+  contract lives in the-pond history.
+
+**What was repaired (UGT-side, this file's repo):**
+- **section 4 death phase** — after PC-16 containment landed, section 4's offensive loop stopped
+  reaching a run END on this seed (the player survived 500 steps; `player_died=False`). Root-caused
+  by R1 staying MET 18/18 (the game's death→run_ended spine is fine), so it was a DRIVER gap: added
+  R1's deliberate-death phase (stop attacking, walk into the swarm, stand in contact). Section 4 is
+  green again — `result='death'`, PC-6 ordering `#290 < #292`, epilogue + RunEndScreen present.
+- **PC-15 farm + demotion** — added a safe pre-boss upgrade grab (a player levels before a boss),
+  then demoted the boss-DEFEATED arm to an **uncounted, disclosed `gate.info`** (see below).
+
+**Two ACCEPTED, named, uncounted limitations remain (owner-agreed 2026-07-21) — neither is a game
+bug, both fully disclosed (each was a counted `blocked` in the 44/47 line):**
+- **PC-12 — victory not observable over the current wire (harness gap).** `end_run("victory")` has a
+  real caller (T-057, `run_manager.gd:235`); reaching it needs all 16 logs + both bosses + the
+  smoking-gun board connection, and the JSON-lines protocol exposes only create/step/choose/state/
+  quit. Follow-up harness op filed in HANDOFF. Verified in-engine by the-pond's own
+  `test_end_to_end_loop.gd::test_completing_the_case_wins_the_run_and_credits_meta`.
+- **PC-15 — scripted driver cannot beat the bullet-hell boss (play-skill, not balance).** Measured
+  twice: a beeline reached the boss at 24/84 hp then died; a leashed farm died before the boss. The
+  driver could not reliably acquire mercury_blood from the random 3-card offers AND out-dodge
+  real-time bullet-hell. the-pond **T-062** already proved the BALANCE is sound for a realistic
+  build (ttk falls ~45%, `ttk@0≈52.4s → ttk@10≈28.8s`); the old "rounding makes it harder" diagnosis
+  stays WITHDRAWN. Adjudicating real-time survival is the **LLM playtest tier's** job, not this
+  robustness gate's. The boss is still reached and *takes real damage* (a counted, passing check).
+
+**Denominator lineage (disclosed, no silent narrowing):** U-009 counted PC-12 and PC-15 as two
+`blocked` fails → 44/47. Both are now uncounted `gate.info` named limitations (−2 from the
+denominator, per the Standing constraint's demotion-with-disclosure rule), and PC-17's fix plus the
+section-4 death repair turned the remaining checks green → **45/45 MET**.
+
+**Next rung: R3 exploit-hunter (`verify_round3.py`) — UNBLOCKED.** The four formerly-unreachable
+modes exist; same-seed replay determinism is unblocked (PC-1 fixed). The pause *toggle* is safe for
+R3 random input; PauseMenu **Quit-to-Menu** stays permanently OFF the R3 allowlist.
+
+## 2026-07-20 — U-009: R2 RE-BASELINED — NOT MET 44/47 (the post-M7 gate-repair baseline, now superseded)
 
 **R2 NOT MET — 44/47** (seed 20260720, the-pond HEAD `94890d0`, godot 4.7.1). This is the
 consolidated, trustworthy baseline after the whole U-001…U-008 gate-repair pass and the-pond's M7

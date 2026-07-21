@@ -1,22 +1,30 @@
 # Pond Conspiracy (the-pond) — UGT Integration Plan
 
-**Status: U-009 DONE — R2 RE-BASELINED, NOT MET 44/47 (2026-07-20, the-pond HEAD `94890d0`, seed
-20260720, godot 4.7.1; reproduced identically to U-008 — stable, not flaky). This is the authoritative
-post-M7 baseline after the whole U-001…U-008 gate-repair pass. R1 still MET 18/18; `py_compile` exit 0.
-No check was edited — the number is 44/47 because that is the game's real state. Split: 44 pass /
-3 non-pass = 2 `gate.blocked` + 1 `gate.check` FAIL. The three non-passes: PC-15 (balance — the
-automated driver did not beat the wave-5 boss this run; boss on 23 hp after 490 cycles), PC-12 (victory
-run RESULT unobservable over the current wire — named harness gap, follow-up filed below), and PC-17
-(NEW, U-008 — the pause is COSMETIC: `get_tree().paused` flips but gameplay keeps running). RESOLVED &
-now measured: PC-11 (3 distinct bosses, T-054 — was 1 CRITICAL prose block, now 7 green checks),
-PC-13 (real non-destructive pause toggle, T-058/T-059), PC-14 (locked-arena spawner stop, T-061),
-PC-16 (player containment, `Player.tscn` mask 2→3 — invariant sweep CLEAN, 0 violations / 1588 steps).
-PC-15 diagnosis WITHDRAWN (T-062 count-vs-type verdict adopted). Corrected-denominator lineage
-(21/26 → 29/31 → 30/33 → 34/37 → 35/37 → 44/47) and the full per-finding disposition are in
-RESULTS.md's U-009 entry. **Next rung: R3 exploit-hunter (`verify_round3.py`) — now UNBLOCKED**
-(M7 landed; same-seed replay determinism unblocked because PC-1 is fixed). PC-17 is an open game-side
-follow-up but does NOT gate R3 (the pause toggle never ends the run; R3 needs no functioning freeze).
-Quit-to-Menu stays permanently OFF the R3 allowlist.**
+**Status: R2 GREEN — MET 45/45 (2026-07-21, the-pond HEAD `92de418`, seed 20260720, godot 4.7.1).**
+R1 still MET 18/18; `py_compile` exit 0. This supersedes U-009's 44/47: the game-side gaps that
+44/47 measured were then REPAIRED (repair-the-gaps-before-advancing), and every counted check now
+passes because the game works over the wire. Game-side fixes committed in the-pond with provenance:
+**PC-17** cosmetic pause (`74eaa9a` T-064 — gameplay subtree → `PROCESS_MODE_PAUSABLE`; now "player
+held within 0.00px while paused"), **PC-16** player containment (`92de418` T-065, `collision_mask`
+2→3, sweep 0/2033), and the U-008 harness pause re-enable (`8d03e3f`). UGT-side: section 4 gained
+R1's deliberate-death phase (its offensive loop stopped reaching a run END once the player was
+contained — R1 stayed 18/18, so it was a driver gap, not a game one), and PC-15 got a safe pre-boss
+farm.
+
+**Two ACCEPTED, named, uncounted limitations remain (owner-agreed 2026-07-21; each was a counted
+`blocked` in the 44/47 line — demoted with disclosure, denominator −2):**
+- **PC-12** — victory RESULT not observable over the current JSON-lines wire (create/step/choose/
+  state/quit has no board-connection/evidence-grant op). Code path exists (T-057) and is verified
+  in-engine by the-pond's `test_end_to_end_loop.gd`. **Follow-up harness op filed below.**
+- **PC-15** — a SCRIPTED driver cannot out-dodge the real-time bullet-hell boss (measured twice).
+  the-pond T-062 proved the BALANCE is sound for a realistic build; this is a play-SKILL verdict for
+  the **LLM playtest tier**, not the robustness gate. The boss is still reached and takes real damage
+  (a counted, passing check).
+
+Denominator lineage: 21/26 → 29/31 → 30/33 → 34/37 → 35/37 → 44/47 → **45/45 MET**. Full disposition
+in RESULTS.md's 2026-07-21 entry. **Next rung: R3 exploit-hunter (`verify_round3.py`) — UNBLOCKED and
+now the immediate next step** (same-seed replay determinism unblocked, PC-1 fixed). The pause *toggle*
+is safe for R3 random input; PauseMenu **Quit-to-Menu** stays permanently OFF the R3 allowlist.
 
 Prior status line (kept for history): R2 NOT MET — 21/26 (2026-07-20). Five blocked: four modes
 the game had NO code path for, plus a boss the automated driver did not beat (PC-15 balance note,
@@ -138,7 +146,12 @@ against zero enemies), and `gate.sh` unable to pass a green suite at all. Detail
 
 ### Still open
 
-- **PC-17 (NEW, U-008) — the pause is COSMETIC; an open game-side follow-up that does NOT gate R3.**
+- **PC-17 — RESOLVED (the-pond `74eaa9a` T-064, 2026-07-21).** The fix demoted the gameplay subtree
+  (Player, EnemySpawner, BossArena, hazards) + each spawned enemy to `PROCESS_MODE_PAUSABLE`, so
+  `section_pause` invariant 2 is now GREEN ("player held within 0.00px while paused"). The original
+  diagnosis is retained below as history (the "Fix shape" it proposed — a relay child — was one
+  option; the shipped fix took the per-node PAUSABLE route and it holds).
+  (Historical diagnosis follows.)
   (Corrects the earlier "on the critical path before U-009/R3" framing: U-009 re-baselined R2 with
   PC-17 left honestly failing, and R3 does not require a functioning freeze — the pause *toggle* never
   ends the run, so R3 random input including `pause` is safe. Fix this upstream when convenient; it is

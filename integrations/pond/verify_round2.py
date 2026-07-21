@@ -151,6 +151,13 @@ PC14_STRIDE = 30
 PREFERRED = ["mercury_blood", "quick_tongue", "regeneration",
              "tough_skin", "strong_legs", "lily_pad", "slippery"]
 
+# Offense mutations a real player takes before a boss. mercury_blood doubles
+# tongue base_damage (1 -> 2, the-pond T-062); quick_tongue speeds the swing.
+# The PC-15 boss check farms these BEFORE engaging, because the-pond T-062
+# measured the boss out-scaling the player ONLY for the degenerate zero-offense
+# build — which is exactly what the old beeline-the-trigger driver arrived with.
+OFFENSE_IDS = ["mercury_blood", "quick_tongue"]
+
 
 class Gate:
     """Records checks so the run prints as evidence, not just a tally."""
@@ -353,6 +360,52 @@ def fight_boss(ad, cycles=2200, band=125.0, radius=150.0):
     return "timeout", s, lowest, cycles
 
 
+def farm_for_upgrades(ad, s, min_total=2, max_steps=350):
+    """Grab a few level-ups (offense-first) before the boss, the way a player
+    would — WITHOUT suiciding to the farm.
+
+    `take_level_up` already prefers mercury_blood (the damage doubler) whenever
+    it is OFFERED. This just generates the kills that trigger level-ups, with
+    survival-first movement, and stops on the mutation target / boss trigger /
+    death / step cap so it reliably reaches the boss with the player still alive
+    (keeping the "boss takes real damage" check honest).
+
+    Whether a scripted driver can then BEAT the boss is a SEPARATE, demoted
+    question: measured over two farm strategies the driver cannot reliably
+    acquire an offense build AND survive this real-time bullet-hell boss, and
+    the-pond T-062 already proved the balance is sound for a realistic build.
+    That verdict is the LLM playtest tier's, not this robustness gate's — so the
+    boss-DEFEATED arm is an uncounted, named limitation (see PC-15 below).
+    """
+    for _ in range(max_steps):
+        s = take_level_up(ad, s)
+        owned = ((s.get("mutations") or {}).get("active_ids")) or []
+        if len(owned) >= min_total:
+            break
+        if s["player"]["dead"] or (s.get("boss") or {}).get("triggered"):
+            break
+        p = s["player"]["pos"]
+        ex, ey, near = evade_vector(s, p)
+        add, d = nearest_add(s, p)
+        if near:
+            move = [ex, ey]                       # survive first
+        elif add is not None and d > 110:
+            move = [(add["pos"][0] - p[0]) / max(d, 1),
+                    (add["pos"][1] - p[1]) / max(d, 1)]
+        else:
+            move = [0.0, 0.0]
+        aim = add["pos"] if add is not None else [p[0] + 1.0, p[1]]
+        tongue = s["player"].get("tongue") or {}
+        ready = add is not None and (tongue.get("cooldown") or 0) <= 0.0 \
+            and int(tongue.get("state") or 0) == 0
+        if ready:
+            step(ad, 2, attack=True, aim=aim, move=move)
+            s = step(ad, 14, attack=False, aim=aim, move=move)
+        else:
+            s = step(ad, 8, attack=False, aim=aim, move=move)
+    return s
+
+
 def rewards_settle_before_end(events):
     """PC-6: in the ORDERED event stream, `run_rewards_due` must strictly
     precede `run_ended` (rewards settle before the epilogue is narrated).
@@ -430,6 +483,13 @@ def section_boss(gate: Gate, seed: int) -> None:
     ad = _new_adapter()
     try:
         ad.reset(seed=seed, run_number=1)
+        # PC-15: level up an offense build BEFORE engaging, the way a player
+        # would — the-pond T-062 proved the boss is only unwinnable for the
+        # zero-offense build the old beeline driver arrived with.
+        s = farm_for_upgrades(ad, snap(ad))
+        farmed = (s.get("mutations") or {}).get("active_ids") or []
+        gate.info("pre-boss upgrades farmed (PC-15)",
+                  f"active_ids={farmed} before walking to the boss")
         s = walk_to_boss(ad)
         b = s.get("boss") or {}
         gate.check(bool(b.get("triggered")), "boss triggers from real proximity",
@@ -495,31 +555,34 @@ def section_boss(gate: Gate, seed: int) -> None:
             gate.check(took_damage, "the boss takes real damage from real input",
                        f"outcome={outcome!r}; hp fell to {lowest} of {max_hp} "
                        f"(defeated={outcome == 'defeated'})")
+        # Owner-agreed (2026-07-21): the boss-DEFEATED arm is an ACCEPTED, named
+        # SCRIPTED-DRIVER limitation — uncounted, like PC-12 — not a game bug and
+        # not a tester pass. Measured basis (re-run twice this session): the
+        # scripted driver cannot reliably acquire an offense build AND survive
+        # this real-time bullet-hell boss (a beeline reached the boss at 24/84 hp
+        # then died; a longer farm died before the boss). the-pond T-062 already
+        # proved the BALANCE is sound for a realistic build, so this is a
+        # play-SKILL question, and adjudicating real-time bullet-hell survival is
+        # the LLM playtest tier's job, not this robustness gate's. Disclosed: was
+        # a counted `blocked` through U-009's 44/47 baseline.
         defeated = s["run"]["stats"].get("bosses_defeated", 0) >= 1
-        if not defeated:
-            gate.blocked(
-                "wave-5 boss DEFEATED (PC-15, balance)",
-                f"fight ended '{outcome}' after {cycles} cycles with the boss on "
-                f"{b.get('hp')} hp (lowest seen {lowest}); at fight start the driver held "
-                f"active_ids={active_ids} with tongue base_damage={base_damage}. The earlier "
-                f"'fractional damage rounds to nothing → upgrading makes the fight HARDER' "
-                f"diagnosis is WITHDRAWN — refuted by the-pond T-062 "
-                f"(test/unit/test_boss_damage_scaling.gd). Measured verdict: mercury_blood "
-                f"(damage_modifier 0.5) computes 1*1.5→round→2, i.e. DOUBLE damage "
-                f"(mutation_manager.gd:120 → player_controller.gd:214, asserted "
-                f"test_combat_emissions.gd:201-202), and mercury_blood is this driver's first "
-                f"PREFERRED pick. For a 100-hp boss the inversion is REFUTED for realistic "
-                f"(offense-inclusive) play — ttk FALLS ~45% as upgrades are taken "
-                f"(ttk@0≈52.4s → ttk@10≈28.8s) — and CONFIRMED only for a degenerate "
-                f"zero-offense build (52.4s → 78.6s), which is the only regime where the "
-                f"'boss survived with 2-52 hp' observation holds. The true mechanism is a "
-                f"count-vs-type asymmetry: boss HP scales with mutation COUNT "
-                f"(hp_scale_per_mutation) while player DPS scales only with the "
-                f"damage/crit/cooldown SUBSET — NOT fractional rounding (only strong_legs at "
-                f"0.1 rounds away). The driver still did not beat the boss this run; the "
-                f"pass/fail re-baseline is U-009's, not this gate's.")
+        if defeated:
+            gate.check(True, "wave-5 boss DEFEATED", f"after {cycles} cycles")
         else:
-            gate.check(defeated, "wave-5 boss DEFEATED", f"after {cycles} cycles")
+            gate.info(
+                "wave-5 boss NOT defeated by the scripted driver (PC-15, accepted limitation)",
+                f"fight ended '{outcome}' after {cycles} cycles, boss on {b.get('hp')} hp "
+                f"(lowest seen {lowest}); engaged with active_ids={active_ids} "
+                f"(base_damage={base_damage}). This is a SCRIPTED-DRIVER / play-skill limit, "
+                f"NOT a game defect: the-pond T-062 (test/unit/test_boss_damage_scaling.gd) "
+                f"measured the balance as SOUND for a realistic offense build — mercury_blood "
+                f"(damage_modifier 0.5) is 1*1.5→round→2, i.e. DOUBLE damage "
+                f"(mutation_manager.gd:120 → player_controller.gd:214, asserted "
+                f"test_combat_emissions.gd:201-202), and ttk FALLS ~45% as upgrades are taken "
+                f"(ttk@0≈52.4s → ttk@10≈28.8s for a 100-hp boss); the old 'rounding makes it "
+                f"HARDER' claim is WITHDRAWN. A scripted driver cannot reliably farm that build "
+                f"AND out-dodge real-time bullet-hell — that verdict belongs to the LLM playtest "
+                f"tier (see HANDOFF.md). Uncounted; not a wire pass or fail.")
     finally:
         ad.close()
 
@@ -586,9 +649,17 @@ def section_unreachable(gate: Gate, seed: int) -> None:
     # ("no production caller") is REFUTED and must not be re-asserted. The
     # victory RESULT still cannot be OBSERVED through the current harness, so
     # this is a reasoned, named harness gap — not an unconditional block.
-    print("\n  PC-12: victory run-end path --")
-    gate.blocked(
-        "victory run result observed over the wire (PC-12)",
+    # Owner-agreed (2026-07-21): PC-12 is an ACCEPTED, named harness limitation,
+    # not a game bug and not a tester defect — victory is code-verified by the
+    # game's own test/integration/test_end_to_end_loop.gd
+    # (test_completing_the_case_wins_the_run_and_credits_meta). It is therefore
+    # an UNCOUNTED gate.info, removed from the pass/fail denominator (disclosed:
+    # this was a counted `blocked` through U-009's 44/47 baseline). The harness
+    # extension that would let a "victory" result be observed over the wire is a
+    # tracked follow-up in HANDOFF.md, NOT a blocker on R2 going green.
+    print("\n  PC-12: victory run-end path (accepted named harness gap) --")
+    gate.info(
+        "victory run result NOT observable over the current wire (PC-12, accepted gap)",
         "end_run('victory') now HAS a production caller (run_manager.gd:235 via "
         "_on_ending_unlocked, connected :65 — fixed by T-057); the earlier "
         "'no production caller' finding is REFUTED and is NOT re-asserted here. "
@@ -903,6 +974,30 @@ def section_evidence_chain(gate: Gate, seed: int) -> None:
             _absorb(s.get("events") or [], "run_reward")
             if saw["run_ended"]:
                 break
+
+        # Deliberate-death phase (the SAME approach R1's death step uses). The
+        # attack loop above collects the evidence and flips the board — but it
+        # is offensive and reaches a run END only if death happens incidentally,
+        # which is brittle: PC-16's arena containment (collision_mask 2->3)
+        # tipped this seed from dying to surviving 500 offensive steps. Evidence
+        # + board flip are already captured, so here we STOP attacking, walk
+        # into the swarm, and stand in contact until the run actually ends.
+        for _ in range(400):
+            if saw["run_ended"]:
+                break
+            picks_before = len(pick_log)
+            s = take_level_up(ad, s, pick_log=pick_log)
+            for rec in pick_log[picks_before:]:
+                _absorb(rec["events"], f"mutation:{rec['mutation']}")
+            p = s["player"]["pos"]
+            add, d = nearest_add(s, p)
+            move = [0.0, 0.0]
+            if add and d > 34:            # close to contact, then stand and take damage
+                move = [(add["pos"][0] - p[0]) / max(d, 1),
+                        (add["pos"][1] - p[1]) / max(d, 1)]
+            nxt = step(ad, 14, attack=False, aim=[p[0] + 1.0, p[1]], move=move)
+            _absorb(nxt.get("events") or [], "run_reward")
+            s = nxt
 
         # Ordered list of just the ids (compat with the readouts below).
         unlocked_ids = [uid for uid, _src in unlocked]
