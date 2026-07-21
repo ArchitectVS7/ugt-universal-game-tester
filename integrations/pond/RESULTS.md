@@ -2,6 +2,47 @@
 
 Commit-traceable record. A failed check is data. Game repo: `~/Dev/Games/the-pond/`.
 
+## 2026-07-20 — U-001: PC-11 CLOSED, PC-13 reclassified, PC-12 re-scoped (R2 `section_unreachable` now measures over the wire)
+
+`verify_round2.py:section_unreachable` previously took no adapter and executed no game code —
+three unconditional `gate.blocked()` calls carrying prose (PC-11/PC-12/PC-13). All three
+underlying defects are now fixed game-side, so the section was rewritten to drive real game
+code over the wire. Re-run (seed 20260720, `UGT_GODOT_BIN=/opt/homebrew/bin/godot`):
+**R2 NOT MET 29/31, 2 blocked (PC-12 harness gap, PC-15 balance).**
+
+- **PC-11 (CRITICAL) — CLOSED. Fixed game-side by T-054, verified over the wire.**
+  `LevelGenerator.BOSS_SCENES` now maps a distinct boss per run band and
+  `TestArenaController._assign_boss_for_run` assigns it onto `BossArena.boss_scene`. The gate
+  drives `run_number` 1/5/10, walks each into the BossArena trigger, and reads `boss_id` from
+  the live harness `_boss_state()`: **run 1 → `foreman` (80 hp), run 5 → `lobbyist` (100 hp),
+  run 10 → `ceo` (150 hp) — three distinct ids.** Guarded so a boss that never triggers fails
+  as *boss-not-reached* (a distinct message) rather than masquerading as a same-id mismatch. The
+  old finding ("BossArena.boss_scene set in exactly one place → CEO ending unreachable") is
+  RESOLVED.
+- **PC-13 — reclassified (fixed by T-058/T-059).** Pause is now a real, non-destructive mode:
+  the `pause` action toggles `get_tree().paused` and emits `EventBus.pause_toggled` instead of
+  `get_tree().quit()`, and `input_manager.gd` was deleted. `section_unreachable` records this as
+  INFO; the actual wire assertion (re-enable the pause action in the harness, assert tree paused
+  / `pause_toggled` emitted / run not destroyed) is **U-008's** job. No more "there is no pause"
+  prose.
+- **PC-12 — re-scoped from "no production caller" (REFUTED) to a named harness gap.** The caller
+  now exists — `run_manager.gd:235` calls `end_run("victory")` inside `_on_ending_unlocked`
+  (connected `:65`, T-057). But a `"victory"` run RESULT cannot be OBSERVED over the current
+  wire: reaching `EventBus.ending_unlocked` needs all 16 logs + Lobbyist + CEO defeats + the
+  smoking-gun board connection (`meta_progression.gd check_ending_unlock`), and the JSON-lines
+  harness exposes only `create/step/choose/state/quit` — no board-connection / evidence-grant
+  op. Kept as a reasoned `gate.blocked` naming that gap; follow-up harness extension filed under
+  HANDOFF.md "Still open". Do NOT re-assert "no production caller".
+
+Denominator disclosure: old **21/26** (5 failed: PC-11, PC-12, PC-13, PC-14, PC-15) → new
+**29/31** (2 blocked: PC-12, PC-15). The denominator widens because PC-11 became 7 real checks
+(3 boss-reached + 3 boss-id + 1 distinctness summary) and PC-12 stays 1, while PC-13 left the
+tally entirely (INFO increments no counter): `section_unreachable` went 3 counted blocks → 8
+counted (7 pass + 1 block), net +5 to the total. PC-14 happened to PASS this run (no adds in the
+locked arena at the sampled frame — it is the conditional check in `section_boss`, not a
+`section_unreachable` change). R2 remains honestly **NOT MET** on PC-12 (wire gap) and PC-15
+(balance).
+
 ## 2026-07-20 — R1 MET 18/18 · PC-5 (CRITICAL) + PC-6 found and FIXED upstream
 
 `verify_round1.py`, seed 20260719, one full run loop through `PondHarnessAdapter`:

@@ -10,21 +10,39 @@ decision, the evidence -> conspiracy-board -> epilogue chain, BOTH run-end paths
 (death and victory), and pause.
 
 The answer is a qualified no, and the qualifications are the point of this gate.
-Four of R2's modes turn out to have no code path at all, which is precisely the
-class of defect a full-spine round exists to find:
+The remaining blocks are genuine no-code-path / balance defects, which is
+precisely the class of defect a full-spine round exists to find:
 
-  * only ONE of the three bosses is wired into any scene, so the true ending
-    (which gates on the CEO) is unreachable — finding PC-11;
-  * `end_run("victory")` has no production caller, so the victory run-end path
-    and everything hanging off it is dead — finding PC-12;
-  * there is no pause anywhere: the "pause" action calls `get_tree().quit()`,
-    so ESC destroys the run — finding PC-13;
   * the boss arena clears regular enemies then leaves the spawner running, so
-    the "locked" arena refills with adds — finding PC-14.
+    the "locked" arena refills with adds — finding PC-14;
+  * the wave-5 boss cannot be defeated with real input because damage rounds to
+    nothing while each mutation adds boss hp — finding PC-15 (balance).
 
-Those are asserted as BLOCKED checks: they FAIL the gate and print as findings
-with the evidence that proves them, rather than being quietly skipped. A gate
-that skips what the game cannot do reports a green that means nothing.
+Two earlier structural blocks have since been FIXED game-side and are now
+measured over the wire rather than asserted as prose:
+
+  * PC-11 (only one boss wired) is fixed by T-054 — `LevelGenerator` now maps a
+    distinct boss per run band (Wetland/Foreman, Chemical Plant/Lobbyist,
+    HQ/CEO). This gate drives run_number 1/5/10, walks each to its boss, and
+    asserts three DISTINCT boss_id values read from the live harness. Expected
+    to pass, proving the fix.
+  * PC-13 (ESC quit the process) is fixed by T-058/T-059 — pause now toggles
+    `get_tree().paused` and emits `EventBus.pause_toggled`, never quits, and
+    `input_manager.gd` is deleted. Its wire assertion (re-enabling the pause
+    action in the harness and asserting its invariants) is U-008's job, so this
+    gate records it as INFO rather than re-driving it.
+
+PC-12 remains a fail, but for a different reason than originally filed: the
+victory run-end path now HAS a production caller (`run_manager.gd:235` via
+`_on_ending_unlocked`, T-057). It is unreachable through the CURRENT harness —
+reaching `EventBus.ending_unlocked` needs all 16 logs + Lobbyist + CEO defeats
++ the smoking-gun board connection, and the JSON-lines protocol exposes no
+board-connection / evidence-grant op. So it is an explicit named harness gap,
+recorded as a reasoned BLOCKED (the follow-up is filed in HANDOFF.md).
+
+The blocks FAIL the gate and print as findings with the evidence that proves
+them, rather than being quietly skipped. A gate that skips what the game cannot
+do reports a green that means nothing.
 
 Everything that IS reachable is driven for real: arenas are selected by pinning
 the run number (the same input the game uses), hazards are read as live NODES,
@@ -89,7 +107,9 @@ class Gate:
         return ok
 
     def blocked(self, label: str, detail: str) -> None:
-        """A mode with NO code path. Fails the gate — see the module docstring."""
+        """A mode that cannot be exercised — either NO game code path or a named
+        harness gap. Fails the gate (never unconditionally) — see the module
+        docstring. `detail` must carry the specific reason, not just a label."""
         self.failed += 1
         print(f"  [BLOCKED] {label}\n            {detail}")
         self.findings.append(f"BLOCKED {label}: {detail}")
@@ -336,37 +356,96 @@ def section_boss(gate: Gate, seed: int) -> None:
         ad.close()
 
 
-def section_unreachable(gate: Gate) -> None:
-    """Modes R2 requires that have no code path at all. Evidence, not opinion."""
-    print("\n  -- 3. modes with no code path (structural findings) --")
+def section_unreachable(gate: Gate, seed: int) -> None:
+    """Modes R2 requires that a full-spine round must decide over the wire.
+
+    PC-11/PC-13 are now FIXED game-side and measured/reclassified here; PC-12
+    is a reasoned harness gap (its production caller now exists). Nothing in
+    this section is an unconditional gate.blocked() — the standing constraint.
+
+    Note on the acceptance phrasing "accepts an adapter": every other section
+    in this file takes (gate, seed) and CONSTRUCTS its own PondHarnessAdapter,
+    because each reset() restarts the headless subprocess. PC-11 needs three
+    separate resets at different run_numbers, so a single shared adapter cannot
+    serve them. This section follows the same convention — (gate, seed), one
+    adapter per run — rather than being handed a prebuilt adapter.
+    """
+    print("\n  -- 3. boss roster, victory path, and pause --")
+
+    # PC-11 (CRITICAL, fixed by T-054): a distinct boss per run band. Drive
+    # run_number 1/5/10, walk each to its boss over the wire, and read boss_id
+    # from the live harness. LevelGenerator maps run 1->foreman (Wetland),
+    # 5->lobbyist (Chemical Plant), 10->ceo (Corporate HQ).
+    print("\n  PC-11: three distinct bosses, one per run band --")
+    EXPECTED_BOSS = {1: "foreman", 5: "lobbyist", 10: "ceo"}
+    boss_ids: dict[int, str | None] = {}
+    for run_number, expected in EXPECTED_BOSS.items():
+        ad = PondHarnessAdapter()
+        try:
+            ad.reset(seed=seed, run_number=run_number)
+            s = walk_to_boss(ad, gate)
+            b = s.get("boss") or {}
+            present = bool(b.get("present"))
+            boss_ids[run_number] = b.get("boss_id") if present else None
+            # Distinct failure path #1: the walk never reached a boss at all.
+            # A boss that never triggers must fail as boss-not-reached, NOT
+            # masquerade as a same-id / wrong-id mismatch below.
+            if not gate.check(
+                    present,
+                    f"run {run_number} reaches its boss (PC-11)",
+                    f"boss-not-reached: triggered={b.get('triggered')} "
+                    f"present={present} player_dead={s.get('player', {}).get('dead')} "
+                    f"— walked to BOSS_TRIGGER={BOSS_TRIGGER}"):
+                continue
+            # Distinct failure path #2: reached a boss, but the WRONG one.
+            gate.check(
+                b.get("boss_id") == expected,
+                f"run {run_number} fields the {expected} boss (PC-11)",
+                f"boss_id={b.get('boss_id')!r} (expected {expected!r}) "
+                f"hp={b.get('hp')}/{b.get('max_hp')}")
+        finally:
+            ad.close()
+
+    distinct = {v for v in boss_ids.values() if v}
+    gate.check(
+        len(distinct) >= 3,
+        "all three bosses reachable as distinct ids (PC-11, was CRITICAL — fixed T-054)",
+        f"boss_ids by run={boss_ids} distinct={sorted(distinct)}")
+
+    # PC-12 (fixed by T-057): end_run("victory") NOW HAS a production caller —
+    # run_manager.gd:235 inside _on_ending_unlocked (connected :65), fired when
+    # EventBus.ending_unlocked lands during an active run. The original finding
+    # ("no production caller") is REFUTED and must not be re-asserted. The
+    # victory RESULT still cannot be OBSERVED through the current harness, so
+    # this is a reasoned, named harness gap — not an unconditional block.
+    print("\n  PC-12: victory run-end path --")
     gate.blocked(
-        "all three bosses reachable (PC-11, CRITICAL)",
-        "BossArena.boss_scene is an @export set in exactly one place — "
-        "TestArena.tscn -> BossLobbyist. BossCEO.tscn and BossForeman.tscn are referenced "
-        "ONLY by unit tests; no production code instantiates either, and the three arena "
-        "scenes carry hazards only. Consequences: MetaProgression.check_ending_unlock() "
-        "requires ceo_defeated, so the TRUE ENDING can never unlock; unlocks."
-        "all_bosses_defeated can never become true; the CEO-gated informant "
-        "(informant_manager.gd:198) and CEO hints (hint_system.gd:116) are dead content. "
-        "docs/prd.md:198 specifies a boss PER ARENA (Wetland/Chemical Plant/Corporate HQ) — "
-        "that mapping was never implemented.")
-    gate.blocked(
-        "both run-end paths reachable (PC-12)",
-        "end_run('victory') has NO production caller — the only one is "
-        "run_manager.gd:157 end_run('death') from _on_player_died. Boss defeat routes to "
-        "enter_investigation_phase(), never to a win. So MetaProgression.end_run_victory() "
-        "(150% rewards) is called only by tests, runs.successful_runs can never increment, "
-        "best_time can never be set, and RunEndScreen's whole victory branch "
-        "(run_end_screen.gd:77/120/157) is unreachable. R1 exercised death; victory has no "
-        "path to exercise.")
-    gate.blocked(
-        "pause exists (PC-13)",
-        "There is no pause in this game. The 'pause' input action (bound to ESCAPE in "
-        "input_manager.gd:142) is consumed at test_arena_controller.gd:84 by "
-        "`get_tree().quit()` — pressing it mid-run quits the application outright, with no "
-        "menu and no confirmation, destroying the run. No PauseMenu scene or script exists "
-        "anywhere in the project. This is deliberately NOT driven here: wiring the action "
-        "into the harness would let any random-input tier (R3) kill the process.")
+        "victory run result observed over the wire (PC-12)",
+        "end_run('victory') now HAS a production caller (run_manager.gd:235 via "
+        "_on_ending_unlocked, connected :65 — fixed by T-057); the earlier "
+        "'no production caller' finding is REFUTED and is NOT re-asserted here. "
+        "But a 'victory' run RESULT could not be OBSERVED over the wire: reaching "
+        "EventBus.ending_unlocked requires all 16 logs + the Lobbyist and CEO "
+        "defeats + the smoking-gun conspiracy-board connection "
+        "(meta_progression.gd check_ending_unlock), and the JSON-lines harness "
+        "protocol exposes only create/step/choose/state/quit — there is no "
+        "board-connection or evidence-grant op to reach ending_unlocked. So the "
+        "victory arm (successful_runs / win_rate / RunEndScreen's victory branch) "
+        "is unreachable THROUGH THE CURRENT WIRE, not un-coded. Follow-up harness "
+        "extension filed in integrations/pond/HANDOFF.md.")
+
+    # PC-13 (fixed by T-058/T-059): pause is now a real, non-destructive mode.
+    # Reclassified to INFO — its wire assertion is U-008's job. Do NOT leave
+    # prose that says "there is no pause".
+    print("\n  PC-13: pause --")
+    gate.info(
+        "pause is now a real, non-destructive mode (PC-13, fixed T-058/T-059)",
+        "the 'pause' action toggles get_tree().paused and emits "
+        "EventBus.pause_toggled instead of quitting the process; "
+        "input_manager.gd was deleted. Its wire assertion — re-enable the pause "
+        "action in the harness and assert its invariants (tree paused, "
+        "pause_toggled emitted, run NOT destroyed) — lands in U-008, not this "
+        "gate.")
 
 
 def section_evidence_chain(gate: Gate, seed: int) -> None:
@@ -434,7 +513,7 @@ def main() -> int:
     gate = Gate()
     section_arenas(gate, seed)
     section_boss(gate, seed)
-    section_unreachable(gate)
+    section_unreachable(gate, seed)
     section_evidence_chain(gate, seed)
 
     total = gate.passed + gate.failed
@@ -444,12 +523,14 @@ def main() -> int:
         return 0
     print(f"ROUND 2 NOT MET — {gate.passed}/{total} checks passed, "
           f"{gate.failed} failed/blocked.")
-    print("\nFindings (each is a real game defect, to be fixed upstream):")
+    print("\nFindings (each is a real game defect or a named wire gap):")
     for f in gate.findings:
         print(f"  * {f.splitlines()[0]}")
-    print("\nThe blocked checks are not harness limitations — they are modes the game\n"
-          "has no code path for. See integrations/pond/RESULTS.md for the full\n"
-          "diagnosis of PC-11 through PC-15.")
+    print("\nPC-14 (spawner refills the locked arena) and PC-15 (boss balance) are\n"
+          "real game defects with no code path / no winnable path. PC-12 is a named\n"
+          "harness gap: the victory caller now exists (T-057) but no wire op reaches\n"
+          "it. PC-11 (three distinct bosses) and PC-13 (real pause) are FIXED and\n"
+          "now measured/reclassified above. See integrations/pond/RESULTS.md.")
     return 1
 
 

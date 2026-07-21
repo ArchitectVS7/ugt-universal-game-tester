@@ -99,6 +99,17 @@ against zero enemies), and `gate.sh` unable to pass a green suite at all. Detail
 
 ### Still open
 
+- **Harness gap (follow-up filed by U-001): no wire op reaches `EventBus.ending_unlocked`, so a
+  `"victory"` run result cannot be OBSERVED over the wire.** The JSON-lines harness protocol
+  (`tests/harness/ugt_harness.gd`) exposes only `create/step/choose/state/quit`. Reaching
+  `ending_unlocked` (and thus `run_manager.gd:235`'s `end_run("victory")`, T-057) requires all 16
+  data logs + the Lobbyist and CEO boss defeats + the smoking-gun conspiracy-board connection
+  (`meta_progression.gd check_ending_unlock`) — none of which have an affordance in the harness. To
+  let a future R2 observe a real `"victory"` run result and MetaProgression's victory arm
+  (`successful_runs` / `win_rate` moving), the harness needs a new op to grant evidence / make a
+  board connection (or otherwise drive `ending_unlocked`). Until then PC-12 is a reasoned
+  `gate.blocked` in `verify_round2.py` naming exactly this gap (NOT "no production caller" — that is
+  refuted, the caller now exists). Boss-defeat driving is separately blocked by PC-15 balance.
 - **PC-9 — REFUTED as filed. I was wrong; max-range hit detection works.** (Tests since fixed
   and green.) See RESULTS.md
   "PC-9 investigation" for the full correction. The 11–28px I read as "the tongue never reaches
