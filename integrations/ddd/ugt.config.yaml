@@ -102,6 +102,23 @@ action_space:
   # refusal paths can be asserted state-inert. Every other id is drawn from the
   # legal list, so the adapter cannot send an illegal action by accident.
 
+# LLM playtest tier (L-002 legal-action drive mode). Additive + config-only: it
+# feeds the prompt's KEY VALUES line and the per-run summary. The trial/exploit
+# ladder ignores this block entirely.
+playtest:
+  guide_char_budget: 2000
+  key_state_paths:
+    - { path: "p0.hp", label: "P0 HP", note: "0-30" }
+    - { path: "p1.hp", label: "P1 HP", note: "0-30" }
+    - { path: "turn", label: "turn" }
+    - { path: "phase", label: "phase" }
+    - { path: "pendingSeat", label: "acting seat" }
+  summary_paths:
+    - { path: "p0.hp", label: "p0_hp_delta" }
+    - { path: "p1.hp", label: "p1_hp_delta" }
+  win_path: null
+  loss_path: null
+
 # VESTIGIAL — required by UgtConfig; UNUSED by the exploit-hunter/trial path.
 # DDD is tested by invariants + determinism, not rewards. Do not add reward
 # shaping here; if a reward-driven tier is ever wired, design it deliberately.

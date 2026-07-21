@@ -489,6 +489,54 @@ class DddHarnessAdapter(BaseAdapter):
         """Ask the harness to re-simulate the recorded action log and verify it."""
         return self._request({"op": "replay", "matchId": self._match_id})
 
+    # ── legal-action drive mode (L-002 playtest seam) ─────────────────────────
+    # A thin, game-agnostic channel for the LLM playtester: expose the SAME legal
+    # list the ladder scripts read via `_legal`, and apply ONE chosen legal action
+    # verbatim. Both methods are pure relays composed of existing primitives
+    # (`_pending_seat`, `_legal`, `send_raw_action`, `_read_state`) — no rules, no
+    # fabricated effects (the sim_bridge discipline this file enforces).
+    def legal_actions(self):
+        """Legal action objects for the seat the engine is waiting on — the SAME
+        list the ladder scripts read via `_legal`. Returns [] when the match has
+        ended (no pending seat). Pure relay; the engine is authoritative."""
+        seat = self._pending_seat()
+        if seat is None:
+            return []
+        actions, _ = self._legal(seat)
+        return actions
+
+    def apply_legal(self, action, legal_count=None):
+        """Apply ONE legal action object verbatim and return the standard
+        (state, terminated, truncated, info) 4-tuple.
+
+        `action` MUST be a member of the list `legal_actions()` returned this step
+        (the LLM picks it by index). It is sent verbatim through `send_raw_action`,
+        so the engine — never this adapter — decides the outcome; a legal action
+        that is unexpectedly refused surfaces as `result.ok is False`, which the DDD
+        invariant suite (`inv_no_error_on_legal`) turns into a real finding. `info`
+        carries the `command`/`result` shape those invariants read."""
+        resp = self.send_raw_action(action)
+        after = self._read_state()
+        terminated = after.get("resultKind", "ONGOING") != "ONGOING"
+        name = action.get("t") if isinstance(action, dict) else str(action)
+        result = {
+            **resp,
+            "legalCount": legal_count or 0,
+            "probe": False,
+            "actionName": name,
+        }
+        info = {
+            "command": "act",
+            "action": action,
+            "actionName": name,
+            "seat": resp.get("seat"),
+            "probe": False,
+            "stateHash": after.get("stateHash"),
+            "result": result,
+            "legalCount": legal_count or 0,
+        }
+        return after, terminated, False, info
+
     # ── seat / action selection (transport policy, NOT game logic) ───────────
     def _pending_seat(self):
         """Which seat the engine is waiting on, or None if the match has ended.

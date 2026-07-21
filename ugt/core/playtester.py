@@ -27,14 +27,17 @@ LLM_ACTION_SCHEMA = {
     "properties": {
         "action_type": {
             "type": "string",
-            "enum": ["action_id", "press_key", "type_text", "wait", "diagnose", "end_turn"],
+            "enum": ["action_id", "press_key", "type_text", "wait", "diagnose", "end_turn",
+                     "legal_action"],
             "description": (
                 "action_id: simulation game — value is the action name from the config. "
                 "press_key: browser game — value is a single key (e.g. 'T', 'Enter'). "
                 "type_text: browser game — value is text to type. "
                 "wait: pause for one step (use sparingly). "
                 "diagnose: flag that the current state is confusing or broken. "
-                "end_turn: signal that the current turn is complete."
+                "end_turn: signal that the current turn is complete. "
+                "legal_action: harness game — value is the INDEX (0-based, as a string) "
+                "of one action from the LEGAL ACTIONS list shown in the prompt."
             ),
         },
         "value":            {"type": "string", "description": "The action value (action name, key, or text)"},
@@ -46,7 +49,8 @@ LLM_ACTION_SCHEMA = {
 }
 
 # Valid action_type values for fallback parsing
-_VALID_ACTION_TYPES = {"action_id", "press_key", "type_text", "wait", "diagnose", "end_turn"}
+_VALID_ACTION_TYPES = {"action_id", "press_key", "type_text", "wait", "diagnose", "end_turn",
+                       "legal_action"}
 
 
 def playtest_game(config, strategy_guide, max_actions=100, output_path=None, provider="anthropic",
@@ -93,13 +97,74 @@ def playtest_game(config, strategy_guide, max_actions=100, output_path=None, pro
     else:
         raise ValueError(f"Unknown engine type: '{config.engine_type}'")
 
-    project_dir = os.path.dirname(os.path.abspath(config.filepath))
-    results_dir = os.path.join(project_dir, "results")
+    return _run_and_write(adapter, llm, config, strategy_guide, max_actions,
+                          output_path, provider, runs, invariants,
+                          action_mode="action_id")
+
+
+def playtest_game_with_adapter(adapter, provider, strategy_guide, max_actions=100,
+                               output_path=None, model=None, runs=1, invariants=None,
+                               action_mode="legal_action", config=None):
+    """Playtest via an ALREADY-CONSTRUCTED adapter instance (L-002).
+
+    The three JSON-lines harness adapters (DDD / Nexus-Dominion / Pond) are not
+    registered under an `engine.type` in env.py — each game's own ladder scripts
+    build the adapter directly. This entry point takes that adapter and runs the
+    SAME LLM loop as `playtest_game`; the only difference is the input/action
+    channel (`action_mode`, e.g. "legal_action"). It is the integration seam L-006
+    (NEXUS text-driven mode) will reuse.
+
+    adapter        — a connected-or-not adapter instance (connect() is called here).
+                     For action_mode="legal_action" it MUST expose legal_actions()
+                     and apply_legal(); otherwise a NotImplementedError names the gap.
+    provider       — "anthropic" or "ollama" (same dispatch as playtest_game).
+    config         — a UgtConfig-like object for project_name / playtest block /
+                     results dir. Defaults to adapter.config. May be minimal — every
+                     access is getattr-guarded.
+
+    Returns the aggregate report dict (runs>1) or the single run report (runs==1).
+    """
+    sys.stdout.reconfigure(line_buffering=True)
+
+    if provider == "anthropic":
+        llm = _AnthropicLLM(model or "claude-opus-4-8")
+    elif provider == "ollama":
+        llm = _OllamaLLM(model or "gemma4:26b")
+    else:
+        raise ValueError(f"Unknown LLM provider: '{provider}'. Choose 'anthropic' or 'ollama'.")
+
+    if config is None:
+        config = getattr(adapter, "config", None)
+
+    return _run_and_write(adapter, llm, config, strategy_guide, max_actions,
+                          output_path, provider, runs, invariants,
+                          action_mode=action_mode)
+
+
+def _run_and_write(adapter, llm, config, strategy_guide, max_actions, output_path,
+                   provider, runs, invariants, action_mode="action_id"):
+    """Shared post-adapter orchestration for both entry points: connect, wire
+    invariants + action vocabulary, drive `runs` playtests, write reports. The
+    `action_mode` is threaded straight through to `_run_single_playtest`; every
+    `config` access is getattr-guarded so a minimal adapter-supplied config works."""
+    project_name = getattr(config, "project_name", None) or "the game"
+    cfg_data = getattr(config, "data", None)
+    cfg_data = cfg_data if isinstance(cfg_data, dict) else {}
+    action_mappings = getattr(config, "action_mappings", None) or {}
+
+    filepath = getattr(config, "filepath", None)
+    if output_path:
+        results_dir = os.path.dirname(os.path.abspath(output_path)) or "."
+    elif filepath:
+        results_dir = os.path.join(os.path.dirname(os.path.abspath(filepath)), "results")
+    else:
+        results_dir = os.path.abspath("results")
     os.makedirs(results_dir, exist_ok=True)
 
-    playtest_cfg = config.data.get("playtest", {}) if isinstance(config.data, dict) else {}
+    playtest_cfg = cfg_data.get("playtest", {}) if isinstance(cfg_data, dict) else {}
 
-    print(f"[*] Phase 3 — Playtest: connecting to game ({config.engine_type})...")
+    engine_type = getattr(config, "engine_type", None) or action_mode
+    print(f"[*] Phase 3 — Playtest: connecting to game ({engine_type}, mode={action_mode})...")
     adapter.connect()
 
     invariant_list = list(invariants(adapter)) if callable(invariants) else list(invariants or [])
@@ -107,8 +172,10 @@ def playtest_game(config, strategy_guide, max_actions=100, output_path=None, pro
         print(f"[*] {len(invariant_list)} invariant check(s) active during play")
 
     # Give the LLM layer the action vocabulary so mis-fielded intents can be salvaged.
+    # (Only meaningful for action_id mode; legal_action mode indexes into the live
+    # legal list, so an empty vocabulary here is correct and harmless.)
     valid_action_names = set()
-    for action_def in config.action_mappings.values():
+    for action_def in action_mappings.values():
         valid_action_names.add(action_def.get("name") if isinstance(action_def, dict) else str(action_def))
     if hasattr(llm, "valid_actions"):
         llm.valid_actions = valid_action_names
@@ -124,7 +191,7 @@ def playtest_game(config, strategy_guide, max_actions=100, output_path=None, pro
                       f"model={llm.model}, max_actions={max_actions})...")
             run_report = _run_single_playtest(
                 adapter, llm, config, strategy_guide, max_actions,
-                playtest_cfg, invariant_list, run_index,
+                playtest_cfg, invariant_list, run_index, action_mode=action_mode,
             )
             run_report["provider"] = provider
             run_report["model"] = llm.model
@@ -142,7 +209,7 @@ def playtest_game(config, strategy_guide, max_actions=100, output_path=None, pro
 
     if runs == 1:
         report = run_reports[0]
-        report["game"] = config.project_name
+        report["game"] = project_name
         out = output_path or os.path.join(results_dir, "playtest-report.json")
         with open(out, "w") as f:
             json.dump(report, f, indent=2, default=str)
@@ -151,7 +218,7 @@ def playtest_game(config, strategy_guide, max_actions=100, output_path=None, pro
 
     aggregate = _aggregate_runs(run_reports)
     summary_report = {
-        "game": config.project_name,
+        "game": project_name,
         "provider": provider,
         "model": llm.model,
         "runs": runs,
@@ -176,17 +243,34 @@ def playtest_game(config, strategy_guide, max_actions=100, output_path=None, pro
 
 
 def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
-                         playtest_cfg, invariant_list, run_index):
-    """One playtest run: reset, drive up to max_actions LLM decisions, return the run report."""
+                         playtest_cfg, invariant_list, run_index, action_mode="action_id"):
+    """One playtest run: reset, drive up to max_actions LLM decisions, return the run report.
+
+    `action_mode` selects the input/action CHANNEL only — the loop body (delta
+    assertion, bug-report shape, invariant checks, contradiction detector) is
+    identical across modes. "action_id" (default) drives config-registered discrete
+    ids / UI keys; "legal_action" drives one of the adapter's own reported legal
+    actions per step (harness games with no terminal / no config action vocabulary).
+    """
     terminal_budget = int(playtest_cfg.get("terminal_char_budget", 400))
     summary_paths = [e for e in (playtest_cfg.get("summary_paths") or [])
                      if isinstance(e, dict) and "path" in e]
 
-    # Build action name → ID map
+    if action_mode == "legal_action":
+        if not (hasattr(adapter, "legal_actions") and hasattr(adapter, "apply_legal")):
+            raise NotImplementedError(
+                f"{type(adapter).__name__} does not support action_mode='legal_action' "
+                f"(needs legal_actions() and apply_legal())"
+            )
+
+    # Build action name → ID map (action_id mode only — legal_action mode indexes
+    # into the live legal list and never consults the config action vocabulary).
     name_to_id = {}
-    for action_id, action_def in config.action_mappings.items():
-        name = action_def.get("name", str(action_id)) if isinstance(action_def, dict) else str(action_def)
-        name_to_id[name] = int(action_id)
+    if action_mode != "legal_action":
+        action_mappings = getattr(config, "action_mappings", None) or {}
+        for action_id, action_def in action_mappings.items():
+            name = action_def.get("name", str(action_id)) if isinstance(action_def, dict) else str(action_def)
+            name_to_id[name] = int(action_id)
 
     current_state = adapter.reset()
     baseline_state = json.loads(json.dumps(current_state, default=str))
@@ -215,8 +299,31 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
     start_time = time.time()
 
     for step_num in range(1, max_actions + 1):
-        terminal_text = adapter.get_terminal_text(terminal_budget)
-        prompt = _build_prompt(config, strategy_guide, current_state, terminal_text, action_log)
+        legal_list = None
+        if action_mode == "legal_action":
+            legal_list = adapter.legal_actions()
+            if not legal_list:
+                # ONGOING with no legal move would be a soft-lock; in practice this
+                # means the match ended between steps. Reset to a fresh episode
+                # rather than spin — same banking/re-baseline as a normal reset.
+                pre_reset = current_state
+                try:
+                    current_state = adapter.reset()
+                except Exception:
+                    ended_early = "no_legal_actions_and_reset_failed"
+                    break
+                else:
+                    bank_deltas(pre_reset)
+                    baseline_state = json.loads(json.dumps(current_state, default=str))
+                    episode_resets += 1
+                    inv_ctx.clear()
+                    continue
+            terminal_text = ""
+            prompt = _build_legal_prompt(config, strategy_guide, current_state,
+                                         legal_list, action_log, playtest_cfg)
+        else:
+            terminal_text = adapter.get_terminal_text(terminal_budget)
+            prompt = _build_prompt(config, strategy_guide, current_state, terminal_text, action_log)
 
         try:
             llm_action = llm.choose_action(prompt)
@@ -321,6 +428,20 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
                     executed_action_id = end_turn_id
                     current_state, terminated, truncated, step_info = adapter.step(end_turn_id)
 
+            elif action_type == "legal_action":
+                # value is the 0-based index of one action in THIS step's legal list.
+                try:
+                    idx = int(str(value).strip())
+                except (ValueError, TypeError):
+                    idx = -1
+                if not legal_list or not (0 <= idx < len(legal_list)):
+                    upper = (len(legal_list) - 1) if legal_list else -1
+                    print(f"  [Step {step_num}] legal index {value!r} out of range 0..{upper} — skipping")
+                    continue
+                executed_action_id = -1  # sentinel: same convention as press_key/type_text
+                current_state, terminated, truncated, step_info = adapter.apply_legal(
+                    legal_list[idx], legal_count=len(legal_list))
+
         except Exception as exec_err:
             print(f"  [Step {step_num}] Execution error: {exec_err}")
             # The game is being reset mid-step: invariants must not compare the
@@ -385,7 +506,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         # agent stuck in a loop — both are auto-flag-worthy without LLM cooperation.
         material_delta = {k: v for k, v in delta.items() if k != "turn_number"}
         noop_key = f"{action_type}:{value}"
-        if not material_delta and action_type in ("action_id", "press_key", "type_text", "end_turn"):
+        if not material_delta and action_type in ("action_id", "press_key", "type_text", "end_turn", "legal_action"):
             noop_streaks[noop_key] = noop_streaks.get(noop_key, 0) + 1
             if noop_streaks[noop_key] == 3:
                 repeats = noop_streaks[noop_key]
@@ -805,6 +926,41 @@ def _build_prompt(config, strategy_guide, current_state, terminal_text, action_l
         f"## Terminal Output\n```\n{terminal_text[-terminal_budget:]}\n```\n\n"
         f"## Strategy Guide\n{strategy_guide[:guide_budget]}\n\n"
         f"Respond JSON only. Use action_type=\"action_id\" and value=<one of the action names above>."
+    )
+
+
+def _build_legal_prompt(config, strategy_guide, current_state, legal_list, action_log, playtest_cfg):
+    """Prompt for legal_action mode: the adapter's own structured state (serialized
+    JSON — the exact shape the game's ladder scripts read) plus its live legal-action
+    list. Game-agnostic: each legal action is dumped as its raw JSON, with no
+    game-specific interpretation in this module."""
+    project = getattr(config, "project_name", None) or "the game"
+    playtest_cfg = playtest_cfg or {}
+    guide_budget = int(playtest_cfg.get("guide_char_budget", 2000))
+
+    legal_lines = "\n".join(
+        f"  {i}: {json.dumps(a, default=str)}" for i, a in enumerate(legal_list)
+    ) or "  (no legal actions)"
+
+    recent_log = action_log[-5:] if len(action_log) > 5 else action_log
+    recent_summary = "\n".join(
+        f"  Step {e['step']}: {e['action']} → {e.get('state_delta', {})}"
+        for e in recent_log
+    ) or "  (no actions taken yet)"
+
+    upper = len(legal_list) - 1
+    return (
+        f"You are playtesting {project}. Choose the best next action.\n\n"
+        f"NOTE: If you see EPISODE_RESET in recent actions, the previous episode "
+        f"ended normally (win/draw/step limit) and the game restarted — NOT a bug.\n\n"
+        f"## Current State\n"
+        + _key_values_line(playtest_cfg, current_state)
+        + f"```json\n{json.dumps(current_state, indent=2, default=str)}\n```\n\n"
+        f"## LEGAL ACTIONS (respond with action_type=\"legal_action\", value=<the NUMBER>)\n"
+        f"{legal_lines}\n\n"
+        f"## Recent Actions\n{recent_summary}\n\n"
+        f"## Strategy Guide\n{strategy_guide[:guide_budget]}\n\n"
+        f"Respond JSON only. action_type=\"legal_action\", value=\"<index 0..{upper}>\"."
     )
 
 

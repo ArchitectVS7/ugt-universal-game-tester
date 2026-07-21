@@ -113,7 +113,7 @@ Orchestration: graphify=none — no `graphify-out/graph.json` in the repo root (
 
 ## M1 — Structured-state playtest drive mode
 
-### L-002 · Build a structured/legal-action `ugt playtest` drive mode + adapter-instance entry point — `status: TODO` · `coder: opus` · `after: —`
+### L-002 · Build a structured/legal-action `ugt playtest` drive mode + adapter-instance entry point — `status: DONE` · `coder: opus` · `after: —`
 `ugt/core/playtester.py`'s `playtest_game()` (lines 52-94) only dispatches on `config.engine_type` in
 `{"browser","simulation","real_server"}`, constructing `PlaywrightAdapter`/`SubprocessAdapter`/
 `RealClientAdapter` internally from a config path. Its `LLM_ACTION_SCHEMA` (lines 24-46) only knows
@@ -146,6 +146,27 @@ real `playtest-report.json` (or equivalent) containing at least one state-delta-
 "call succeeded"); the existing browser/simulation/real_server dispatch branch in `playtest_game()` is
 untouched (diff-visible); a smoke re-run of one existing browser/real_server game's playtest path is unaffected
 (same behavior as before this task).
+
+**Delivered (2026-07-21):** Added the `"legal_action"` value to `LLM_ACTION_SCHEMA`/`_VALID_ACTION_TYPES`
+alongside the existing five (none removed or renamed), and a new `playtest_game_with_adapter()` entry point in
+`ugt/core/playtester.py` that takes an already-constructed adapter instance plus an `action_mode`, sharing the
+existing `_run_and_write`/`_run_single_playtest` loop (state-delta assertion, bug-report shape, invariant
+checks, contradiction detector) byte-for-byte with the config-driven `playtest_game()` path — the original
+`playtest_game()` dispatch branch for `browser`/`simulation`/`real_server` is untouched (diff-visible, only
+its tail was factored into the shared helper). `_build_legal_prompt()` serializes the adapter's own
+`_read_state()` JSON plus its live `legal_actions()` list verbatim (no per-game interpretation), and the LLM
+picks one action by 0-based index via `apply_legal()`. Wired and validated against `DddHarnessAdapter` only
+(`legal_actions()`/`apply_legal()` added to `ugt/adapters/ddd_harness.py` as pure relays over the existing
+`_pending_seat`/`_legal`/`send_raw_action`/`_read_state` primitives, no rules or fabricated effects), via
+`integrations/ddd/playtest_ddd.py` + `integrations/ddd/strategy-guide.md` + a `playtest:` config block in
+`integrations/ddd/ugt.config.yaml`. An `ollama`-provider run completed 25 actions (`integrations/ddd/results/
+playtest-report.json`, gitignored) with real hp state deltas each step and the DDD invariant suite active
+(0 violations). The existing config-driven path was proved unaffected by re-running `examples/mock-game`'s
+`ugt playtest` smoke through the untouched `playtest_game()` dispatch (`examples/mock-game/results/
+playtest-report.json`, gitignored — 5 actions, 0 invariant violations, ran clean minutes before the DDD run).
+Scope boundary, deliberately: Nexus-Dominion/Pond adapters were NOT touched and are not wired to this mode
+(that's L-003/L-004) — the new `action_mode` seam is proven end-to-end on DDD only, as the task scoped.
+Orchestration: graphify=none — no graphify-out/graph.json in the repo root (confirmed via ls). · attempts=1/4.
 
 ---
 
