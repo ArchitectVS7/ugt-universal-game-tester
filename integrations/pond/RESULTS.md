@@ -129,6 +129,13 @@ locked arena at the sampled frame — it is the conditional check in `section_bo
 `section_unreachable` change). R2 remains honestly **NOT MET** on PC-12 (wire gap) and PC-15
 (balance).
 
+**Follow-up (2026-07-20, U-005):** the PC-14 arm is no longer the single-frame `if adds / else
+gate.check(True)` conditional described above — it is now a real persisted-window measurement
+(`gate.check(not worst_adds, ...)` over `PC14_SAMPLES` idle samples, 0 non-boss adds required at
+every sample; see the PC-14 section below). This is a **category change only** — the arm is still
+exactly 1 check, so the denominator is count-neutral (no widen/narrow). The 29/31 numbers above are
+a dated run record and are unchanged; U-009 re-baselines the full R2 score.
+
 ## 2026-07-20 — R1 MET 18/18 · PC-5 (CRITICAL) + PC-6 found and FIXED upstream
 
 `verify_round1.py`, seed 20260719, one full run loop through `PondHarnessAdapter`:
@@ -863,14 +870,28 @@ Deliberately not driven from the harness: wiring that action into the generic in
 let R3's random-input tier kill the process. The harness's existing comment warned about this
 and was right — I added it, then reverted it before it could do damage.
 
-### PC-14 — the "locked" boss arena refills with adds
+### PC-14 — ~~the "locked" boss arena refills with adds~~ **FIXED — the-pond T-061 (2026-07-20, U-005)**
 
-`BossArena.trigger_boss()` locks the arena and calls `_clear_regular_enemies()`, but nothing
-stops `EnemySpawner` — it is only paused for INVESTIGATION (`test_arena_controller.gd:113`).
-So the arena refills within seconds and the clear is pointless. The gate observed 3 regular
-enemies (Polluted Tadpole, Toxic Minnow) inside the locked arena during the boss fight.
-Clearing the arena and then immediately refilling it is incoherent either way — one of the two
-behaviours is wrong.
+**Resolved.** `BossArena.trigger_boss()` now calls `_stop_enemy_spawner()` right after
+`_lock_arena()` (the-pond `combat/scripts/boss_arena.gd:57`, T-061), which resolves the sibling
+`EnemySpawner` via `_find_enemy_spawner()` and calls its `stop_spawning()`. The proximity-trigger
+path (`_on_player_entered → trigger_boss`) previously never halted the spawner — that was the
+actual defect — so the one-shot `_clear_regular_enemies()` was immediately undone. It is verified
+in-suite by `test/unit/test_boss_arena.gd::test_trigger_boss_stops_spawner_no_new_enemies_for_5s`,
+which drives the exact proximity-trigger path and asserts zero spawns across ~301 simulated 60 Hz
+frames (>5s) after lock.
+
+This is now a **passing wire measurement** in `verify_round2.py`: after the boss triggers, the gate
+holds idle in the locked arena for a short window (`PC14_SAMPLES` × `PC14_STRIDE` = ~3s, evade +
+dodge only, never attacking so the boss is neither killed nor able to kill the player and a spawner
+leak has a fair chance to fire) and asserts **0 non-boss adds at every sample**. It passes because
+the spawner is stopped and would fail if the T-061 fix regressed. Replaces the old vacuous
+`gate.check(True, "boss arena is a clean 1v1", ...)` conditional arm.
+
+**Was (BLOCKED in the 8852b19 run):** `_clear_regular_enemies()` emptied the arena on trigger but
+nothing stopped `EnemySpawner` — it was only paused for INVESTIGATION (`test_arena_controller.gd:113`),
+so the arena refilled within seconds. The gate observed 3 regular enemies (Polluted Tadpole, Toxic
+Minnow) inside the locked arena during the boss fight.
 
 ### PC-15 (balance) — ~~the wave-5 boss could not be defeated (fractional damage rounds to nothing)~~ **DIAGNOSIS WITHDRAWN — the-pond T-062 verdict adopted (2026-07-20, U-004)**
 

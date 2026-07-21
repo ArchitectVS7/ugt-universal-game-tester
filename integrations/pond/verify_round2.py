@@ -13,8 +13,6 @@ The answer is a qualified no, and the qualifications are the point of this gate.
 The remaining blocks are genuine no-code-path / balance defects, which is
 precisely the class of defect a full-spine round exists to find:
 
-  * the boss arena clears regular enemies then leaves the spawner running, so
-    the "locked" arena refills with adds — finding PC-14;
   * the automated driver did not defeat the wave-5 boss this run — finding PC-15
     (balance). The earlier "damage rounds to nothing while each mutation adds
     boss hp" diagnosis is WITHDRAWN: the-pond T-062
@@ -23,7 +21,7 @@ precisely the class of defect a full-spine round exists to find:
     offense-inclusive builds and confirmed only for a degenerate zero-offense
     build — not fractional rounding.
 
-Two earlier structural blocks have since been FIXED game-side and are now
+Three earlier structural blocks have since been FIXED game-side and are now
 measured over the wire rather than asserted as prose:
 
   * PC-11 (only one boss wired) is fixed by T-054 — `LevelGenerator` now maps a
@@ -36,6 +34,13 @@ measured over the wire rather than asserted as prose:
     `input_manager.gd` is deleted. Its wire assertion (re-enabling the pause
     action in the harness and asserting its invariants) is U-008's job, so this
     gate records it as INFO rather than re-driving it.
+  * PC-14 (the "locked" boss arena refilled with adds) is fixed by T-061 —
+    `trigger_boss()` now calls `BossArena._stop_enemy_spawner()` right after
+    `_lock_arena()`, so the one-shot clear is no longer immediately undone by an
+    active spawner. This gate holds idle in the locked arena for a short window
+    (evade + dodge only, never attacking) and asserts 0 non-boss adds at every
+    sample — the wire analogue of T-061's in-suite idle >=5s assertion. Expected
+    to pass, proving the fix.
 
 PC-12 remains a fail, but for a different reason than originally filed: the
 victory run-end path now HAS a production caller (`run_manager.gd:235` via
@@ -113,6 +118,12 @@ EXPECTED_PER_WAVE = {1: 8, 5: 16, 10: 20}
 
 # The BossArena trigger box in TestArena.tscn, in world coordinates.
 BOSS_TRIGGER = (960.0, 250.0)
+
+# PC-14 (the-pond T-061): after trigger_boss()->_stop_enemy_spawner() the locked
+# arena must not refill. Wire analogue of T-061's idle >=5s assertion — sample
+# the arena across this window and require 0 non-boss adds at every sample.
+PC14_SAMPLES = 6      # 6 * 30 frames / 60fps = ~3s of idle observation
+PC14_STRIDE = 30
 
 # Mutations preferred when a level-up card comes up, best-first. A player
 # upgrades before a boss; damage first, then survivability.
@@ -241,7 +252,7 @@ def evade_vector(s: dict, pos, radius=150.0):
     return ax, ay, near
 
 
-def walk_to_boss(ad, gate: Gate, max_cycles=140) -> dict:
+def walk_to_boss(ad, max_cycles=140) -> dict:
     """Walk into the BossArena trigger, then wait out the invulnerable intro."""
     s = snap(ad)
     for _ in range(max_cycles):
@@ -388,7 +399,7 @@ def section_boss(gate: Gate, seed: int) -> None:
     ad = _new_adapter()
     try:
         ad.reset(seed=seed, run_number=1)
-        s = walk_to_boss(ad, gate)
+        s = walk_to_boss(ad)
         b = s.get("boss") or {}
         gate.check(bool(b.get("triggered")), "boss triggers from real proximity",
                    f"triggered={b.get('triggered')} locked={b.get('locked')}")
@@ -397,19 +408,41 @@ def section_boss(gate: Gate, seed: int) -> None:
         gate.check(not b.get("invulnerable"), "boss becomes vulnerable after its intro",
                    f"invulnerable={b.get('invulnerable')} phase={b.get('phase')}")
 
-        # PC-14: the arena locks and clears regular enemies, then leaves the
-        # spawner running. Count what is actually in the locked arena.
-        adds = [e for e in (s.get("enemies") or []) if not e.get("boss_id")]
-        if adds:
-            gate.blocked(
-                "boss arena is a clean 1v1 (PC-14)",
-                f"{len(adds)} regular enem(ies) inside the LOCKED boss arena: "
-                f"{sorted({e.get('type') for e in adds})}. BossArena._clear_regular_enemies() "
-                f"empties the arena on trigger but nothing stops EnemySpawner, which is only "
-                f"paused for INVESTIGATION — so the arena refills within seconds and the clear "
-                f"is pointless.")
-        else:
-            gate.check(True, "boss arena is a clean 1v1", "no adds present")
+        # PC-14 (BLOCKED in the 8852b19 run; FIXED game-side by the-pond T-061):
+        # trigger_boss() now calls BossArena._stop_enemy_spawner() right after
+        # _lock_arena(), so the locked arena no longer refills with adds — proven
+        # in-suite by test_boss_arena.gd::test_trigger_boss_stops_spawner_no_new_
+        # enemies_for_5s. Wire analogue of that idle >=5s assertion: hold in the
+        # locked arena WITHOUT attacking (evade + dodge only, so the boss is
+        # neither killed nor able to kill us and a spawner leak has a fair chance
+        # to fire) and require ZERO non-boss adds at EVERY sample. Passes because
+        # the spawner is stopped; fails if the leak regresses. Replaces the old
+        # unconditional literal-True arm.
+        worst_adds: list = []
+        for _ in range(PC14_SAMPLES):
+            adds = [e for e in (s.get("enemies") or []) if not e.get("boss_id")]
+            if len(adds) > len(worst_adds):
+                worst_adds = adds
+            if s["player"]["dead"]:
+                break
+            s = take_level_up(ad, s)
+            ex, ey, near = evade_vector(s, s["player"]["pos"])
+            dodge = (s["player"].get("dodge_cooldown") or 0) <= 0.0
+            s = step(ad, PC14_STRIDE, attack=False,
+                     aim=(s.get("boss") or {}).get("pos"),
+                     move=[ex, ey] if near else [0.0, 0.0], dodge=dodge)
+        secs = PC14_SAMPLES * PC14_STRIDE / 60.0
+        gate.check(
+            not worst_adds,
+            "boss arena stays a clean 1v1 across a post-lock window "
+            "(PC-14, fixed by the-pond T-061)",
+            (f"{len(worst_adds)} non-boss enem(ies) leaked into the LOCKED arena "
+             f"within ~{secs:.0f}s of trigger: "
+             f"{sorted({e.get('type') for e in worst_adds})} — the T-061 "
+             f"_stop_enemy_spawner() has regressed") if worst_adds else
+            (f"0 non-boss adds across {PC14_SAMPLES} samples over ~{secs:.0f}s "
+             f"post-lock — trigger_boss()->_stop_enemy_spawner() holds "
+             f"(the-pond T-061); was BLOCKED in 8852b19"))
 
         # Instrumentation (uncounted INFO): log the actual mutation ids owned
         # and the resolved tongue base_damage at fight start, read over the
@@ -422,17 +455,15 @@ def section_boss(gate: Gate, seed: int) -> None:
         outcome, s, lowest, cycles = fight_boss(ad)
         b = s.get("boss") or {}
         max_hp = b.get("max_hp")
-        if outcome == "defeated":
-            gate.check(True, "the boss takes real damage from real input",
-                       f"boss defeated after {cycles} cycles (lowest hp seen {lowest})")
-        elif max_hp is None:
+        if outcome != "defeated" and max_hp is None:
             gate.check(False, "the boss takes real damage from real input",
                        f"boss snapshot empty/absent after the fight (boss={b!r}, "
                        f"outcome={outcome!r}) — cannot measure damage against a real value")
         else:
-            gate.check(lowest < max_hp,
-                       "the boss takes real damage from real input",
-                       f"hp fell to {lowest} of {max_hp}")
+            took_damage = outcome == "defeated" or lowest < max_hp
+            gate.check(took_damage, "the boss takes real damage from real input",
+                       f"outcome={outcome!r}; hp fell to {lowest} of {max_hp} "
+                       f"(defeated={outcome == 'defeated'})")
         defeated = s["run"]["stats"].get("bosses_defeated", 0) >= 1
         if not defeated:
             gate.blocked(
@@ -457,7 +488,7 @@ def section_boss(gate: Gate, seed: int) -> None:
                 f"0.1 rounds away). The driver still did not beat the boss this run; the "
                 f"pass/fail re-baseline is U-009's, not this gate's.")
         else:
-            gate.check(True, "wave-5 boss DEFEATED", f"after {cycles} cycles")
+            gate.check(defeated, "wave-5 boss DEFEATED", f"after {cycles} cycles")
     finally:
         ad.close()
 
@@ -489,7 +520,7 @@ def section_unreachable(gate: Gate, seed: int) -> None:
         ad = _new_adapter()
         try:
             ad.reset(seed=seed, run_number=run_number)
-            s = walk_to_boss(ad, gate)
+            s = walk_to_boss(ad)
             b = s.get("boss") or {}
             present = bool(b.get("present"))
             boss_ids[run_number] = b.get("boss_id") if present else None
@@ -675,13 +706,12 @@ def main() -> int:
     print("\nFindings (each is a real game defect or a named wire gap):")
     for f in gate.findings:
         print(f"  * {f.splitlines()[0]}")
-    print("\nPC-14 (spawner refills the locked arena) is a real game defect with no\n"
-          "code path. PC-15 is a balance note (count-vs-type HP/DPS asymmetry,\n"
-          "the-pond T-062) — the automated driver did not beat the boss this run.\n"
-          "PC-12 is a named harness gap: the victory caller now exists (T-057) but no\n"
-          "wire op reaches it. PC-11 (three distinct bosses) and PC-13 (real pause)\n"
-          "are FIXED and now measured/reclassified above. See\n"
-          "integrations/pond/RESULTS.md.")
+    print("\nPC-15 is a balance note (count-vs-type HP/DPS asymmetry, the-pond T-062)\n"
+          "— the automated driver did not beat the boss this run. PC-12 is a named\n"
+          "harness gap: the victory caller now exists (T-057) but no wire op reaches\n"
+          "it. PC-11 (three distinct bosses), PC-13 (real pause), and PC-14 (locked\n"
+          "arena spawner leak, fixed by the-pond T-061) are FIXED and now measured/\n"
+          "reclassified above. See integrations/pond/RESULTS.md.")
     return 1
 
 
