@@ -1,6 +1,18 @@
 # Pond Conspiracy (the-pond) — UGT Integration Plan
 
-**Status: R2 GREEN — MET 45/45 (2026-07-21, the-pond HEAD `92de418`, seed 20260720, godot 4.7.1).**
+**Status: R3 GREEN — MET 11/11 (2026-07-21, the-pond HEAD `92de418`, godot 4.7.1). THE POND TRIAL
+LADDER IS COMPLETE: spike 13/13 · smoke 8/8 · R1 18/18 · R2 45/45 · R3 11/11.** `verify_round3.py`
+runs UGT's real ExploitHunter (5×45 random-input steps over the full 14-action vocabulary), every
+R1/R2 invariant + soft-lock/live-position guards, zero findings, full coverage, non-vacuous (28 kills
+/ 92 damage / a deliberate death reaches RUN_END), and a **bit-identical same-seed replay**
+(determinism confirmed; PC-1 seeded). Auto-clears level-ups (the vocabulary can't pick a card);
+`pause` excluded from the hunt (a real pause now freezes the game — PC-17 — so a random pause would
+trip the soft-lock guard). A vacuous-invariant tester bug was found+fixed building R3 (the suite ran
+against an empty `info["result"]` — now wired to the raw snapshot). **Next tier: LLM playtest
+(credit-gated) — owns the PC-15 play-skill/balance verdict the robustness gate cannot; plus the
+tracked PC-12 harness-op follow-up below.** The ladder itself needs nothing further.
+
+Prior status (R2, superseded): R2 GREEN — MET 45/45 (2026-07-21, the-pond HEAD `92de418`, seed 20260720, godot 4.7.1).
 R1 still MET 18/18; `py_compile` exit 0. This supersedes U-009's 44/47: the game-side gaps that
 44/47 measured were then REPAIRED (repair-the-gaps-before-advancing), and every counted check now
 passes because the game works over the wire. Game-side fixes committed in the-pond with provenance:

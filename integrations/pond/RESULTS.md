@@ -2,6 +2,34 @@
 
 Commit-traceable record. A failed check is data. Game repo: `~/Dev/Games/the-pond/`.
 
+## 2026-07-21 — R3 GREEN: ExploitHunter MET 11/11 — the trial ladder is COMPLETE
+
+**R3 MET — 11/11** (seed 20260721, the-pond HEAD `92de418`, godot 4.7.1). `integrations/pond/
+verify_round3.py` drives UGT's real `ExploitHunter` over the live headless game: a seeded
+stochastic policy across the whole 14-id action vocabulary, 5 episodes × 45 steps, every R1/R2
+`build_suite()` invariant plus two R3-only guards (`inv_no_soft_lock`, `inv_arena_before_death`)
+asserted after every step. Result: **zero findings**, full vocabulary coverage (14/14), non-vacuous
+(28 kills, 92 player-damage events, a deliberate death reaches RUN_END in 73 steps), and — the
+headline R3 property — a fixed same-seed action sequence replays **bit-identical** over the
+world-digest stream (`firstDiv=None`, 40 steps), confirming the game is deterministic now that PC-1's
+tongue-crit RNG island is seeded. No SCRIPT ERROR on any adapter's stderr. **The pond trial ladder is
+complete: spike 13/13 · smoke 8/8 · R1 18/18 · R2 45/45 · R3 11/11.**
+
+**Tester defect found + fixed while building R3 (a vacuous-check bug, the class this project exists to
+kill):** the first R3 run reported 14 `run_phase_known` findings. Root cause was NOT a game bug —
+pond's adapter `step()` info carries no `"result"` key, but `trial.to_hunter_invariants()` reads the
+raw snapshot off `info["result"]`, so the ENTIRE invariant suite was running against an empty `{}` in
+the hunt path (every invariant vacuously passing; `run_phase_known` was the only one that fails loudly
+on empty input, which is what exposed it). Fixed by wiring the raw snapshot through `info["result"]`
+in `HuntAdapter.step`, so all invariants now check the real world — after which the hunt found zero
+real findings. Two pond-specific hunt affordances: the adapter **auto-clears level-ups** (the 14-id
+vocabulary can't pick a card, and a level-up freezes the tree — otherwise every 10 kills reads as a
+soft-lock), and `pause` is **excluded** from the hunt (a real pause now truly freezes the game per the
+PC-17 fix, so a random pause would trip the soft-lock guard on a working feature).
+
+**LLM playtest tier** remains the open next tier (credit-gated) and owns the PC-15 play-skill /
+balance-feel verdict the robustness gate cannot. R3 leaves the pond ladder green end to end.
+
 ## 2026-07-21 — R2 GREEN: MET 45/45 after the game-side gaps were repaired (the authoritative baseline)
 
 **R2 MET — 45/45** (seed 20260720, the-pond HEAD `92de418`, godot 4.7.1). R1 still MET 18/18.
