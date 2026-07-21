@@ -1,0 +1,114 @@
+# UGT config for Pond Conspiracy (the-pond, Godot 4.7 real-time bullet-hell) —
+# REAL game via the JSON-lines headless HARNESS
+# (the-pond/tests/harness/ugt_harness.gd), never a re-implementation (the
+# sim_bridge lesson).
+#
+# The harness runs the actual game under `godot --headless --fixed-fps 60`,
+# frozen between commands; a step advances exactly N physics frames of held
+# named-action input. PondHarnessAdapter (ugt/adapters/pond_harness.py) spawns
+# it per episode and composes each discrete action id into an input macro (the
+# only state consulted is the harness's own enemy list / player position —
+# structural reads for aim/chase targets, never rules or costs).
+# See integrations/pond/README.md for the run recipe.
+#
+# NOTE: like DDD / nexus-dominion, this game is tested by INVARIANTS +
+# determinism, NOT reward shaping — reward_profiles below is VESTIGIAL
+# (UgtConfig requires the block). The trial scripts import the adapter
+# directly and drive it by hand.
+#
+# Action ids MUST stay in lockstep with PondHarnessAdapter._compose.
+
+project:
+  name: "Pond Conspiracy (bullet-hell roguelike, real game via headless harness)"
+  version: "0.1.0"
+
+engine:
+  # "simulation": a JSON-lines stdin/stdout subprocess. The adapter spawns it
+  # directly (Popen) and also reads the game-specific keys below.
+  type: "simulation"
+  entry: "tests/harness/ugt_harness.gd"
+  game_root: "/Users/vs7/Dev/Games/the-pond"
+  harness_script: "res://tests/harness/ugt_harness.gd"
+  # godot_bin empty -> gate.sh-order lookup (PATH, /opt/homebrew, Godot.app);
+  # override with UGT_GODOT_BIN / POND_ROOT env vars.
+  godot_bin: ""
+  seed: 20260719
+  # One discrete action = this many physics frames of held input (0.5s @60).
+  frames_per_step: 30
+  # Truncation only — a run otherwise ends by death or run-loop completion.
+  max_steps: 600
+
+# Observation paths index into the adapter's NORMALIZED flat state dict
+# (_normalize). These exist for UgtConfig validity + a future env.py path; the
+# trial scripts read the dict directly.
+observation_space:
+  type: "box"
+  shape: 12
+  mappings:
+    - path: "player_x"
+      min: 0
+      max: 1920
+    - path: "player_y"
+      min: 0
+      max: 1080
+    - path: "player_hp"
+      min: 0
+      max: 1000
+    - path: "player_max_hp"
+      min: 0
+      max: 1000
+    - path: "player_dead"
+      min: 0
+      max: 1
+    - path: "player_invulnerable"
+      min: 0
+      max: 1
+    - path: "enemy_count"
+      min: 0
+      max: 500
+    - path: "nearest_enemy_dist"
+      min: 0
+      max: 99999
+    - path: "bullets"
+      min: -1
+      max: 10000
+    - path: "wave"
+      min: 0
+      max: 100
+    - path: "run_active"
+      min: 0
+      max: 1
+    - path: "events_count"
+      min: 0
+      max: 1000
+
+# Every id is a pure INPUT macro (held named actions + the player's own
+# aim_target_override hook). Aim/chase targets are structural reads of the
+# harness's own active-enemy list. Attack/dodge ids choreograph a
+# press->release edge inside the step (the game reads those with
+# is_action_just_pressed(), like a real click).
+action_space:
+  type: "discrete"
+  size: 14
+  actions:
+    0:  { name: "idle" }            # no input held
+    1:  { name: "move_n" }          # 8-way movement, held all step
+    2:  { name: "move_ne" }
+    3:  { name: "move_e" }
+    4:  { name: "move_se" }
+    5:  { name: "move_s" }
+    6:  { name: "move_sw" }
+    7:  { name: "move_w" }
+    8:  { name: "move_nw" }
+    9:  { name: "attack_nearest" }  # stand, aim nearest active enemy, one press
+    10: { name: "dodge" }           # one dodge press (i-frames, FR-01)
+    11: { name: "chase_nearest" }   # move toward nearest enemy, aim at it
+    12: { name: "kite_nearest" }    # back away from nearest enemy, aim + attack
+    13: { name: "retreat_spawn" }   # move toward the episode's spawn point
+
+# VESTIGIAL — required by UgtConfig; UNUSED by the exploit-hunter/trial path.
+reward_profiles:
+  _unused:
+    formula: "0"
+    win_bonus: 0
+    loss_penalty: 0
