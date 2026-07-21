@@ -56,7 +56,7 @@ Statuses: `TODO` | `IN-PROGRESS` | `DONE` | `BLOCKED(reason)`
 
 ## M0 — Vacuous-check audit (Warzones, Tarot-War)
 
-### L-001 · Audit Warzones' and Tarot-War's ladder scripts for the DDD/Pond vacuous-check failure mode — `status: TODO` · `coder: opus` · `after: —`
+### L-001 · Audit Warzones' and Tarot-War's ladder scripts for the DDD/Pond vacuous-check failure mode — `status: DONE` · `coder: opus` · `after: —`
 Read `integrations/warzones/{verify_round1,verify_round2,verify_round10}.py` (note: Warzones' R3 is misnamed
 `verify_round10.py`) and `integrations/tarot-war/{verify_round1,verify_round2,verify_round3}.py` end to end —
 not just their R3 files, since DDD's bug lived in bespoke driving logic that wasn't confined to any one rung.
@@ -87,6 +87,27 @@ class is fixed with a committed negative-case regression script; `integrations/w
 for the house style), and record this audit; each game's R1 script still reports the same MET count as before
 this task (`verify_round1.py` for both games, non-regression); `HANDOFF.md` added for both games pointing at
 the new `RESULTS.md`.
+
+**Delivered (2026-07-21):** All six ladder scripts (`verify_round1/2/10.py` for Warzones,
+`verify_round1/2/3.py` for tarot-war) were read end to end and every `ck(...)` call dispositioned against the
+`ExploitHunter.run()` reference pattern, with the trajectory-recording `SeededWarzonesAdapter`/
+`SeededTarotAdapter` subclasses confirmed to populate every field on every branch (terminating step, refused
+action, unmapped-id probe) — no vacuous instrumentation there. One real instance of the DDD/Pond failure class
+was found and fixed in both games' R3 same-seed determinism checks: `same_len and divergence is None` reports
+"identical" for two *empty* trajectories, which would have false-passed the moment a trajectory was empty for a
+non-crash reason. Both were replaced with a shared, named `trajectories_match(first, second)` predicate that
+fails closed on empty input, with a committed negative-case regression script per game
+(`integrations/{warzones,tarot-war}/determinism_selftest.py`, in the style of Pond's
+`pc6_ordering_selftest.py`) proving the old inline predicate would have passed wrongly. No check was added or
+removed, so live MET counts are unchanged (Warzones 23/23 · 12/12 · 6/6; tarot-war 22/22 · 12/12 · 7/7).
+`integrations/warzones/RESULTS.md` and `integrations/tarot-war/RESULTS.md` were created (per-game house style,
+migrating prior README-only findings plus the full audit disposition), and `HANDOFF.md` added for both pointing
+at the new `RESULTS.md`. Scope boundary: one pre-existing R1 weakening in tarot-war
+(`verify_round1.py:221` — a `conserved` dead variable whose `>=40` conservation clause the `ck` never reads) was
+found, documented, and deliberately left unchanged rather than fixed, since it is a weakening independently
+covered by G4 and R2's census tracker, not a false pass, and changing it would alter tarot-war's R1 MET count
+in violation of the non-regression accept criterion.
+Orchestration: graphify=none — no `graphify-out/graph.json` in the repo root (checked; task is a code audit grounded directly in the six ladder scripts + the ExploitHunter reference). · attempts=3/4.
 
 ---
 
