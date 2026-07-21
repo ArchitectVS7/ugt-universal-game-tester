@@ -1,4 +1,4 @@
-# Archive — superseded documents
+# Dev — ideation, lessons learned, superseded documents
 
 These docs are kept for history but no longer reflect the current direction. **Do not follow them as plans.**
 See `../PLAN-FORWARD.md` (start here) and the memory note `architecture-pivot-real-server` for the current state.
@@ -13,6 +13,8 @@ See `../PLAN-FORWARD.md` (start here) and the memory note `architecture-pivot-re
 | `DEV-CHECKLIST.md` | 2026-07-04 | Consolidated 2026-07-05. Framework build-status log; its "Phase 1/2/3" numbering collided with `PLAN-FORWARD.md`'s own Phase 0/1/2 (different meanings for the same word). Completed-work record is superseded by `PLAN-FORWARD.md`; its still-open "Future Work" items were folded into `PLAN-FORWARD.md`'s "Framework backlog" section. |
 | `PLAN-FORWARD-spacerquest.md` | 2026-07-16 | The SpacerQuest-era root `PLAN-FORWARD.md` (last updated 2026-07-06). Preserved verbatim as the detailed record of Phases 0–2, Gate C, and the re-verification/velocity campaigns — all of which completed, with every ranked finding fixed upstream. Archived because SpacerQuest went ON HOLD (full redesign away from the 1991 BBS style; integration moved to `../integrations/spacerquest_old/`) and the root plan was rewritten around the five-game trial-ladder methodology. |
 | `TASKS-2026-07-20-pond-r2-gate-repair.md` | 2026-07-20 | Orchestrator task list (U-001…U-009) that repaired Pond's R2 gate arithmetic (vacuous checks, hardcoded blocks) and re-baselined it after the-pond's M7 fix landed. All nine tasks reached `DONE` the same day (R2 21/26 → 45/45, Pond's ladder then completed R3 the next day). Findings live on in `../integrations/pond/RESULTS.md`; archived here once superseded by the next `TASKS.md` (LLM-tier push, 2026-07-21). |
+| `TASKS-2026-07-21-llm-playtest-rollout.md` | 2026-07-21 | Completed orchestrator run (L-001…L-006), all status DONE — the LLM-playtest wiring/audit pass across ddd/nexus/nexus-dominion/pond/tarot-war; archived once superseded by the next root TASKS.md, same pattern as the prior pond-r2 task list. |
+| `UGT-TRACK-RECORD.md` | 2026-07-21 | Compiled retrospective audit ("Has It Earned Its Place?", lesson log, roadmap-ahead) — a point-in-time assessment report, not a live operating doc; PLAN-FORWARD.md at root already owns "what's next". |
 
 **Still-active docs (NOT archived):** `../UGT-USER-MANUAL.md` (onboarding a new game), `../PLAYTEST-DESIGN.md`
 (LLM playtest spec — Phase 2 balance tier).

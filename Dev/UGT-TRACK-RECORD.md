@@ -1,8 +1,10 @@
 # UGT Track Record — Has It Earned Its Place?
 
-*Compiled 2026-07-21. Sources: `PLAN-FORWARD.md`, `archive/PLAN-FORWARD-spacerquest.md`, every
-`integrations/<game>/{HANDOFF,RESULTS,README}.md`, `PLAYTEST-DESIGN.md`, `UGT-USER-MANUAL.md`, and git history
-of `ugt/core`, `ugt/adapters`, `ugt/cli.py`, `ugt/utils`.*
+*Compiled 2026-07-21; refreshed same day after the L-001–L-006 LLM-tier push. Sources: `PLAN-FORWARD.md`,
+`archive/PLAN-FORWARD-spacerquest.md`, every `integrations/<game>/{HANDOFF,RESULTS,README}.md`,
+`PLAYTEST-DESIGN.md`, `UGT-USER-MANUAL.md`, `TASKS.md` (L-001–L-006 delivery notes), the surviving
+`integrations/spacerquest_old/results/**/*.json` campaign logs, and git history of `ugt/core`, `ugt/adapters`,
+`ugt/cli.py`, `ugt/utils`.*
 
 ## Bottom line
 
@@ -11,10 +13,13 @@ and four genres have now run through UGT. Every one of them found and fixed real
 *game*, not just in the tester — including three CRITICAL-severity bugs a real player would have hit
 immediately (SpacerQuest's free-attack fuel exploit, Nexus Dominion's inert-empire opening, Pond's
 un-killable enemy). UGT also broke itself in smaller ways along the way, caught its own three false findings,
-and — most reassuring — has now independently rediscovered the same failure mode (a check that silently
-never runs and reports a vacuous green) in three unrelated integrations, which is exactly the kind of
-"boring but real" bug class the project should be worried about missing. The one tier that has **not**
-earned its keep yet is the LLM balance playtester: it has driven a verdict on exactly one game.
+and has now independently rediscovered the same failure mode (a check that silently never runs and reports a
+vacuous green) **four times** — DDD, Pond, and, as of today's audit pass, Warzones/Tarot-War's determinism
+checks and, most significantly, **the shared playtester core itself**. The LLM balance tier, which one review
+ago had driven a verdict on exactly one game, is now wired and `ollama`-validated on five of seven games —
+but that same push found the core tier had been silently blind on a real (if rare) class of action the whole
+time, which is either the best possible argument for doing this work or a reason to treat every prior LLM
+playtest result with one more grain of salt. Both are true; see below.
 
 ---
 
@@ -141,6 +146,45 @@ refuted, reproduced to 2 decimal places as the correctly-working retract animati
 (**PC-15**, withdrawn in favor of the game's own re-measurement). Trial ladder complete as of today: spike
 13/13, smoke 8/8, R1 18/18, R2 45/45, R3 11/11.
 
+**2026-07-21 — the LLM-tier push (`TASKS.md` L-001–L-006), and a bug that predates this session by two weeks.**
+Following this same day's first version of this report, an orchestrated run closed the LLM-playtest gap it
+identified. **L-001** re-audited Warzones' and Tarot-War's ladder scripts for the DDD/Pond vacuous-check
+pattern (per explicit priority) and found one real instance: both games' R3 same-seed determinism checks used
+an inline predicate (`same_len and divergence is None`) that would report "identical" for two *empty*
+trajectories — a latent false-pass for a class of failure that never happened to fire, fixed with a shared,
+named `trajectories_match()` predicate and a committed negative-case regression script per game, in the style
+of Pond's own self-tests. Both games got a `RESULTS.md`/`HANDOFF.md` for the first time. **L-002** then built
+the actual missing piece: a `"legal_action"` schema value and an adapter-instance entry point in
+`ugt/core/playtester.py`, letting the LLM tier drive a JSON-lines subprocess harness (no terminal) by reading
+its real structured state and choosing from its real legal-action list — validated end to end against DDD via
+the free `ollama` provider before touching anything else. **L-003** and **L-004** then wired Nexus Dominion (a
+fixed 0–17 order menu, since the engine has no native legal-action enumerator) and Pond (deliberately scoped to
+the macro layer only — the LLM is consulted solely at level-up mutation choices, with combat driven by the
+existing R1 heuristic policy, since real-time frame-by-frame play was already judged the wrong granularity for
+an LLM). **L-005** wired Tarot-War through its *existing* browser engine path (no new schema needed) and, in
+the process, disclosed rather than hid a deviation: the game has no keyboard handlers, so the "existing
+`press_key`/`type_text`" wording in its own accept criteria didn't fit, and the run used `action_id` mode
+instead — the honest choice over a technically-compliant but vacuous one. **L-006** wired NEXUS through its
+existing `type_text`/`get_terminal_text` real-server path — and its first attempt exposed a bug in the *shared
+core*, not the game: the `type_text` branch of `playtest_game()`'s main loop never reassigned `current_state`
+after sending a command, so every state-delta assertion on that path had silently been comparing against `{}`.
+This is the exact vacuous-check failure class the whole push was hunting for, except it was sitting in the
+tester's own core loop rather than in any one game's script. It was root-caused and fixed in the same task
+(guarded so `press_key`-only adapters are byte-for-byte unchanged), and the live NEXUS re-run confirmed all 25
+`type_text` steps then carried real state deltas.
+
+Because this bug lived in code every browser/real-server game's playtest run already shared, it was worth
+checking whether it had ever fired for real — not just in theory. It had: the surviving
+`integrations/spacerquest_old/results/**/*.json` campaign logs (SpacerQuest is the one game with a completed
+Gate-C balance verdict) show `type_text` was used only 6 times across roughly 3,150 total playtest actions
+recorded — a rare escape hatch, not the campaign's main channel (nearly all of it ran through discrete
+`action_id`s, which were never affected). But 3 of those 6 were "accept a found weapon-enhancement salvage
+item" prompts (`action: "Y"`, `expected: "...boosting weapon strength"`), and all 3 recorded `"state_delta": {}`
+— the bug, caught in the act, two weeks before anyone knew to look for it. Gate-C's actual ranked findings
+don't appear to rest on these particular turns (see the open item below), but whether the salvage-enhancement
+mechanic itself does what the game intends was never actually verified by UGT — the tooling was blind on
+exactly the turns that would have shown it.
+
 ---
 
 ## How UGT tests different kinds of games
@@ -165,14 +209,18 @@ reasonable claim that the adapter pattern itself — not just any one adapter �
 
 | Game | Loop validation (R1/R2) | Exploit-hunting (R3) | Imbalance / design findings | LLM playtest | Frontend/human UAT |
 |---|---|---|---|---|---|
-| SpacerQuest (old) | ✅ Phase 0 DoD 13/13 | ✅ Phase 1, 200 steps clean | ✅ Gate-C, 7 ranked findings | ✅ **Only game with a completed LLM balance verdict** | not tracked in UGT |
+| SpacerQuest (old) | ✅ Phase 0 DoD 13/13 | ✅ Phase 1, 200 steps clean | ✅ Gate-C, 7 ranked findings | ✅ completed balance verdict — **but see the type_text caveat above**: 3 of ~3,150 logged actions had a silently-empty state delta, now understood as the same bug L-006 just fixed | not tracked in UGT |
 | Rimward/SpacerQuest | ✅ verify 9/9 | n/a (RL evaluate instead) | RL collapse-detector caught one invalid run | not run (RL path used instead) | not tracked in UGT |
-| Warzones | ✅ R1 23/23, R2 12/12 | ✅ R3 6/6 | 2 criticals + 1 open (WZ-R3, deferred) | not run | not tracked in UGT |
-| Tarot-War | ✅ R1 22/22, R2 12/12 | ✅ R3 7/7 | 8/8 findings closed | not run | not tracked in UGT |
-| NEXUS | ✅ R1 25/25, R2 36/36 | ✅ R3 9/9, zero game findings | 5 fixes, 2 characterizations | not run — **explicitly deferred** | not tracked in UGT |
-| DDD | ✅ R1 11/11, R2 26/26 | ✅ R3 32/32 (re-run), zero findings | 2 wire-only defects, 2 self-corrections | not run — **needs structured-JSON drive mode first** | not tracked in UGT |
-| Nexus Dominion | ✅ R1 12/12, R2 17/17 | ✅ R3 43/43, zero findings | 10 findings, 1 CRITICAL (ND-3) | not run — **credit-gated** | ⚠️ human UAT U-110 **failed**; ND-3 likely a root cause, retest recommended |
-| Pond | ✅ R1 18/18, R2 45/45 | ✅ R3 11/11, zero findings | 1 CRITICAL (PC-5), 1 data-destroying bug (PC-2), 17 named findings total | not run — **judged wrong granularity for real-time**, macro-layer variant proposed | ⚠️ needed for tongue feel (PC-10) + accessibility, explicitly flagged as separate from the ladder |
+| Warzones | ✅ R1 23/23, R2 12/12 | ✅ R3 6/6 | 2 criticals + 1 open (WZ-R3, deferred); L-001 audit found + fixed an empty-trajectory vacuous-pass risk in the R3 determinism check | not wired — **in active development, deliberately deferred a few days per the user**; L-001 only audited it, no wiring task exists yet | not tracked in UGT |
+| Tarot-War | ✅ R1 22/22, R2 12/12 | ✅ R3 7/7 | 8/8 findings closed; same determinism-check fix as Warzones (L-001) | ✅ **wired (L-005)** — `ollama`, 30 actions to round 30, 0 bugs, `action_id` mode (disclosed deviation: no keyboard handlers, so `press_key`/`type_text` didn't fit) | not tracked in UGT |
+| NEXUS | ✅ R1 25/25, R2 36/36 | ✅ R3 9/9, zero game findings | 5 fixes, 2 characterizations | ✅ **wired (L-006)** — `ollama`, 25 actions, all with real state deltas after the core `type_text` fix, 0 violations | not tracked in UGT |
+| DDD | ✅ R1 11/11, R2 26/26 | ✅ R3 32/32 (re-run), zero findings | 2 wire-only defects, 2 self-corrections | ✅ **wired (L-002)** — new `legal_action` mode, `ollama`, 25 actions, live HP deltas, 0 violations | not tracked in UGT |
+| Nexus Dominion | ✅ R1 12/12, R2 17/17 | ✅ R3 43/43, zero findings | 10 findings, 1 CRITICAL (ND-3) | ✅ **wired (L-003)** — `legal_action` mode (fixed 0–17 order menu, no native legal-list), `ollama`, 22 actions, 18 with real deltas | ⚠️ human UAT U-110 **failed**; ND-3 likely a root cause, retest recommended |
+| Pond | ✅ R1 18/18, R2 45/45 | ✅ R3 11/11, zero findings | 1 CRITICAL (PC-5), 1 data-destroying bug (PC-2), 17 named findings total | ✅ **wired (L-004), macro-layer only** — LLM consulted at level-up mutation choices only, combat auto-driven by the existing R1 heuristic; `ollama`, 7 decisions across 9 runs | ⚠️ needed for tongue feel (PC-10) + accessibility, explicitly flagged as separate from the ladder |
+
+**Important caveat on every ✅ above except SpacerQuest's:** these are `ollama`-validated wiring smoke tests
+(20–30 actions), not balance verdicts. None of the five newly-wired games has had a real Anthropic-funded
+balance campaign yet — that stays credit-gated (see Roadmap).
 
 ---
 
@@ -194,66 +242,77 @@ reasonable claim that the adapter pattern itself — not just any one adapter �
   adapter (`ddd_harness.py`) — the mistake was caught before it shipped into a result, not after.
   `NexusDominionHarnessAdapter` and `PondHarnessAdapter` both then followed the corrected pattern cleanly.
 - **DDD R3 seed stability + `.env` wiring for the playtest tier** (commit `9ecd139`, 2026-07-17).
+- **`"legal_action"` playtest schema + adapter-instance entry point** (L-002, 2026-07-21) — the structured-state
+  drive mode DDD/Nexus Dominion/Pond needed, added without touching the existing browser/simulation/real_server
+  dispatch branch (verified unaffected via an `examples/mock-game` smoke re-run).
+- **`type_text` state-delta fix** (L-006, 2026-07-21) — `playtest_game()`'s main loop now reassigns
+  `current_state` after a `type_text` action instead of silently discarding the adapter's return value. This is
+  a correctness fix to code every browser/real-server playtest run shares, not a NEXUS-specific patch — see the
+  chronological entry above for what it retroactively explains in SpacerQuest's own historical logs.
 
 ## Recommendation: what should be retested
 
-The good news first: the one shared-core refactor (`trial.py` extraction) was already validated the right
-way, by an exact re-run, and nothing has touched that shared code since — **no blanket re-run of the whole
-portfolio is justified by core changes.** The recommendations below are narrower and targeted at real,
-specific gaps this history surfaced:
+The one shared-core refactor from the prior review (`trial.py` extraction) was already validated the right
+way, by an exact re-run, and nothing has touched that shared code since. Today's push closes out two of the
+four targeted recommendations from that review and surfaces one new one:
 
-1. **Audit Warzones' and Tarot-War's own R3/exploit-hunter scripts for silently-vacuous checks.** These two
-   integrations (2026-07-06/07) were written *before* the vacuous-check failure mode was ever seen. It has
-   since been independently rediscovered twice — DDD's `verify_round3.py` seed-search stitching bug and
-   Pond's `HuntAdapter.step` never wiring `info["result"]` — in two unrelated, independently-written scripts.
-   That is a real pattern, not a coincidence, and it means the two oldest, never-refactored ladder scripts are
-   exactly the ones that have never been checked against it. This is a cheap, targeted read-through, not a
-   full re-run.
-2. **Re-run Nexus Dominion's human UAT (U-110).** ND-3 (empty Cosmic Order tiers, empire inert for 10 cycles)
-   was flagged as a likely root cause of that UAT's failure and is now fixed upstream. The engine trial cannot
-   sign off UAT itself — that requires an actual human retest, which is the recommended next action for this
-   game specifically, not another engine ladder run.
-3. **No retest needed for SpacerQuest (old)** — it's archived, the game itself is being redesigned, and
-   re-running a ladder against code that's about to be replaced wouldn't produce actionable information.
-4. **When credits return, treat the first LLM playtest run per game as new coverage, not a retest** — none of
-   tarot-war/NEXUS/DDD/nexus-dominion/pond has ever had one, so there's no prior baseline to reconcile against;
-   just run it.
+1. ~~Audit Warzones' and Tarot-War's R3 scripts for silently-vacuous checks~~ — **DONE (L-001, 2026-07-21)**.
+   Found and fixed one real instance (an empty-trajectory vacuous-pass in both games' determinism checks),
+   with committed negative-case regression scripts. Both games also got a `RESULTS.md`/`HANDOFF.md` for the
+   first time.
+2. **Re-run Nexus Dominion's human UAT (U-110) — still open.** ND-3 (empty Cosmic Order tiers, empire inert
+   for 10 cycles) is fixed upstream and was flagged as a likely root cause of that UAT's failure, but an
+   engine/LLM trial still cannot sign off UAT itself — that needs an actual human retest.
+3. **No retest needed for SpacerQuest (old)** — archived, the game is being redesigned, unchanged from before.
+4. ~~When credits return, treat the first LLM playtest run per game as new coverage~~ — **now literally true**:
+   tarot-war, NEXUS, DDD, and nexus-dominion each got their first-ever LLM-driven run today (via `ollama`),
+   and Pond got its first macro-layer run. There is no prior baseline for any of them to reconcile against.
+5. **NEW: audit whether SpacerQuest Gate-C's `type_text`-driven turns hold up, now that the core bug is fixed.**
+   The surviving campaign logs show exactly 3 "accept salvage weapon enhancement" turns with a
+   silently-empty `state_delta` — real fallout from the bug L-006 fixed, caught after the fact rather than
+   during the campaign. Gate-C's 7 ranked findings don't appear to depend on these specific turns (they're a
+   different mechanic — salvage installs, not the fuel-gate/cargo-scoring findings the verdict rests on), but
+   *whether the salvage-enhancement mechanic itself works as the game intends* was never actually verified —
+   the tooling was blind on exactly the turns that would show it. This is a small, targeted, evidence-grounded
+   follow-up (drive a few salvage-install turns against the live server and confirm the stat change now
+   registers), not a reason to distrust the whole verdict.
 
-## Where the LLM tier stands (and why it's paused)
+## Where the LLM tier stands now
 
-**Only SpacerQuest (old) has ever completed an LLM playtest campaign.** Every other game — tarot-war, NEXUS,
-DDD, nexus-dominion, and pond — has this tier explicitly deferred, for two compounding reasons:
+**Five of seven in-scope games now have a working, `ollama`-validated LLM playtest path**: tarot-war, NEXUS,
+DDD, nexus-dominion, and pond (macro-layer). SpacerQuest (old) remains the only game with a *completed balance
+verdict* (Gate-C) — the five new wirings are smoke-tested integration proofs (20–30 actions, 0 bugs each), not
+balance campaigns. Warzones remains unwired, deliberately: it's under active development and the user asked
+to hold off testing it for a few days rather than test a moving target.
 
-- **Anthropic API credits ran out mid-campaign on 2026-07-06** and this has blocked every LLM run since; it is
-  the single largest item on the framework backlog by a wide margin.
-- **A structured-JSON drive mode doesn't exist yet.** `ugt playtest` currently reads text/terminal state via
-  `press_key`/`get_terminal_text` — fine for a browser or a real server, but DDD, Nexus Dominion, and Pond are
-  all subprocess harnesses with no terminal at all. This was scoped as a DDD-only gap in earlier planning, but
-  it is now a **three-game shared blocker** and worth building once as a generic structured-state playtester
-  variant rather than solving it per game.
-- **Pond specifically has a third, separate reason**: real-time bullet-hell dodging was judged the wrong
-  granularity for a per-action LLM loop. A macro-layer variant (LLM chooses upgrades/strategy, not
-  frame-by-frame dodges) has been proposed but not built.
+What's still blocking a *paid* balance verdict on any of the five newly-wired games:
+
+- **Anthropic API credits ran out mid-campaign on 2026-07-06** and nothing Anthropic-funded has run since;
+  every wiring task today was deliberately validated against the free local `ollama` provider instead so this
+  wasn't a blocker for the coding work itself, but it's still the gate on a real verdict.
+- **The structured-JSON drive mode blocker is resolved** (L-002) — this was the other half of what was keeping
+  DDD/Nexus Dominion/Pond off the tier, and it's now built and proven on all three.
 
 ## Roadmap ahead
 
-1. **Top up Anthropic API credits.** Blocking five games' worth of balance verdicts; nothing else on this list
-   matters until this is unblocked.
-2. **Build the structured-JSON playtest drive mode** once credits exist — benefits DDD, Nexus Dominion, and
-   Pond (macro-layer) simultaneously rather than being built three times.
-3. **Run the two targeted actions above**: the Warzones/Tarot-War vacuous-check audit, and Nexus Dominion's
-   human UAT retest.
-4. **Formalize human/frontend UAT as an explicit fourth doorway**, not an ad hoc note. It has only been
+1. **Top up Anthropic API credits**, then run real balance campaigns against tarot-war, NEXUS, DDD, nexus-
+   dominion, and pond — five games' worth of first-ever balance verdicts are now just a credit top-up away.
+2. **The new L-002 follow-up**: drive a few live salvage-enhancement turns against SpacerQuest to confirm the
+   stat change registers now that the `type_text` delta bug is fixed (recommendation 5 above).
+3. **Re-run Nexus Dominion's human UAT (U-110)** now that ND-3 is fixed upstream.
+4. **Wire Warzones once its active-dev phase settles** — same shape as tarot-war's L-005 (browser engine,
+   already supported, no new drive mode needed); deliberately not started yet per the user.
+5. **Formalize human/frontend UAT as an explicit fourth doorway**, not an ad hoc note. It has only been
    tracked at all for the two most recent games (Nexus Dominion, Pond), and in both cases it caught things —
    visual readability, onboarding, animation feel, accessibility — that no engine-level tier can see by
    construction. Every future integration's `HANDOFF.md` should carry a UAT status line the same way it
    already carries ladder status.
-5. **Game #8 candidate: `overlord`.** The last portfolio re-ranking (2026-07-09) shortlisted overlord ahead of
+6. **Game #8 candidate: `overlord`.** The last portfolio re-ranking (2026-07-09) shortlisted overlord ahead of
    what were then DDD/nexus-dominion — both of those are now done, and pond was added from a later pass, so
    overlord is the one remaining named candidate never onboarded. Worth confirming this is still the right
    pick before starting, since the portfolio hasn't been re-surveyed since pond was added.
-6. **Framework backlog, revisit-when-blocking items** (unchanged priority, still valid): a config-driven CLI
+7. **Framework backlog, revisit-when-blocking items** (unchanged priority, still valid): a config-driven CLI
    path for the trial ladder (arguably due for a look now that 7 integrations all hand-roll their own ladder
-   scripts), a browser feature-map/screen-detection story for `ugt verify`, and a desktop
-   (`pyautogui`/computer-use) adapter for non-browser, non-terminal games beyond what subprocess harnesses can
-   cover.
+   scripts, and L-002 added an *adapter-instance* entry point specifically to sidestep this rather than solve
+   it), a browser feature-map/screen-detection story for `ugt verify`, and a desktop (`pyautogui`/computer-use)
+   adapter for non-browser, non-terminal games beyond what subprocess harnesses can cover.
