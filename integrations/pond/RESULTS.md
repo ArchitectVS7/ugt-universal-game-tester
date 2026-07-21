@@ -107,7 +107,7 @@ code over the wire. Re-run (seed 20260720, `UGT_GODOT_BIN=/opt/homebrew/bin/godo
   RESOLVED.
 - **PC-13 — reclassified (fixed by T-058/T-059).** Pause is now a real, non-destructive mode:
   the `pause` action toggles `get_tree().paused` and emits `EventBus.pause_toggled` instead of
-  `get_tree().quit()`, and `input_manager.gd` was deleted. `section_unreachable` records this as
+  `get_tree().quit()`, and `input_manager.gd` was deleted by the-pond T-059. `section_unreachable` records this as
   INFO; the actual wire assertion (re-enable the pause action in the harness, assert tree paused
   / `pause_toggled` emitted / run not destroyed) is **U-008's** job. No more "there is no pause"
   prose.
@@ -859,16 +859,33 @@ rewards) is called only by tests, `runs.successful_runs` can never increment, `b
 never be set, and `RunEndScreen`'s entire victory branch (`run_end_screen.gd:77/120/157`) is
 unreachable. R1 exercised death because death is the only ending that exists.
 
-### PC-13 — there is no pause; ESC quits the game outright
+### PC-13 — ~~there is no pause; ESC quits the game outright~~ **RESOLVED — the-pond T-058 + T-059 (2026-07-20)**
 
-The `pause` action (bound to ESCAPE, `input_manager.gd:142`) is consumed at
-`test_arena_controller.gd:84` by `get_tree().quit()`. Pressing it mid-run terminates the
-application with no menu and no confirmation, destroying the run. No PauseMenu scene or script
-exists anywhere in the project.
+**Resolved.** Pause is now a real, non-destructive mode. The `pause` action is bound in
+`project.godot:78–82` (`physical_keycode: 4194305`, ESC) and consumed by
+`combat/scenes/test_arena_controller.gd::_handle_pause_input` (`:122`, reached from `_process:110`),
+which flips `get_tree().paused` and emits `EventBus.pause_toggled` via `_set_paused` (`:138–141`) —
+pausing only during `RunPhase.COMBAT` (`:126`), never stacking on an existing pause (`:128`), never
+destroying the run. `SceneRouter._on_pause_toggled` (`core/scripts/scene_router.gd:185`, connected
+`:110`) presents/dismisses `metagame/scenes/PauseMenu.tscn` off that signal. `get_tree().quit()` is
+gone from `combat/`.
 
-Deliberately not driven from the harness: wiring that action into the generic input path would
-let R3's random-input tier kill the process. The harness's existing comment warned about this
-and was right — I added it, then reverted it before it could do damage.
+The previously-cited `input_manager.gd:142` binding was **deleted by the-pond T-059** (not merely
+unwired). It was an orphaned parallel input registry never registered in `project.godot`'s autoload
+and never part of the real input map; `core/scripts/input_manager.gd` and `test/unit/test_input.gd`
+are gone from `git ls-files`. Mis-citing that orphan as the live pause binding is the exact defect
+the-pond `TASKS.md:397` (T-059's note) calls out — its green `test_default_bindings_exist` is what
+let the earlier review cite `input_manager.gd:142` when the real binding was always `project.godot:78–82`.
+
+**Was:** the original PC-13 claimed the `pause` action was bound at `input_manager.gd:142` and
+consumed at `test_arena_controller.gd:84` by `get_tree().quit()` — terminating the application with
+no menu and no confirmation, destroying the run, with no PauseMenu scene anywhere. That code path no
+longer exists.
+
+The harness deliberately does not drive the pause action from the generic input path (wiring it into
+R3's random-input tier could pause/stall the process). The live wire assertion — re-enable the pause
+action in the harness and assert `get_tree().paused` / `pause_toggled` emitted / run not destroyed —
+is **U-008's** job.
 
 ### PC-14 — ~~the "locked" boss arena refills with adds~~ **FIXED — the-pond T-061 (2026-07-20, U-005)**
 
