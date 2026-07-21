@@ -62,10 +62,37 @@ import sys
 import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from ugt.adapters.pond_harness import PondHarnessAdapter  # noqa: E402
+import invariants  # noqa: E402  (local module, from integrations/pond/)
+# Single source of truth for the stderr whitelist: import R1's, never re-author
+# it, so the two rungs cannot drift. Importing verify_round1 is side-effect-free
+# — its main() only runs under __main__; the top level just defines constants.
+from verify_round1 import STDERR_WHITELIST  # noqa: E402
 
 DEFAULT_SEED = 20260720
+
+# The per-step invariant suite R1 sweeps after every step (integrations/pond/
+# invariants.py). R2 drives far more frames, so it needs the same net.
+SUITE = invariants.build_suite()
+
+# Populated by step() as the gate drives frames; verdicts read in main().
+_VIOLATIONS: list[str] = []
+_STEP_NO = 0
+# Every adapter constructed this run, so a single central stderr scan sees the
+# real SCRIPT ERRORs of every subprocess (this is how PC-8 was caught).
+_ADAPTERS: list = []
+
+
+def _new_adapter():
+    """Construct a PondHarnessAdapter and register it for the central stderr
+    scan. Its stderr_lines persist on the object and are complete after close()
+    (the stderr thread is joined in _kill_process), so the finally-block scan
+    reads every runtime SCRIPT ERROR plus teardown noise the whitelist absorbs."""
+    ad = PondHarnessAdapter()
+    _ADAPTERS.append(ad)
+    return ad
 
 # Arena selection thresholds the game itself uses (LevelGenerator, FR-06).
 # Driving these is the whole reason `run_number` is a create-time config key.
@@ -128,8 +155,20 @@ def snap(ad) -> dict:
 
 
 def step(ad, frames=10, **inp) -> dict:
+    """Drive `frames` frames of real input and sweep the invariant suite over
+    the resulting wire state — R1 parity (verify_round1.py:109), centralized
+    here because every driven frame in R2 funnels through this helper. The
+    per-step `choose` frames stay un-swept, exactly as R1 does not sweep its
+    mutation-pick step. No game rule is reimplemented: `before`/`after` are the
+    adapter's own normalized snapshots and `resp` is the raw harness snapshot."""
+    global _STEP_NO
+    before_raw = ad.last_snapshot or {}
     resp = ad._rpc({"op": "step", "frames": frames, "input": inp})
     ad.last_snapshot = resp
+    _STEP_NO += 1
+    before = ad._normalize(before_raw) if before_raw else {}
+    for msg in SUITE.check_command(before, ad._normalize(resp), "step", resp):
+        _VIOLATIONS.append(f"step {_STEP_NO} ({inp}): {msg}")
     return resp
 
 
@@ -289,6 +328,17 @@ def rewards_settle_before_end(events):
     return ok, rewards_idx, ended_idx
 
 
+def scan_stderr(lines, whitelist):
+    """Real SCRIPT ERROR / Parse Error stderr lines, minus the forked-addon
+    teardown noise the whitelist covers. Pure — no game, no wire — so a
+    checked-in test (stderr_scan_selftest.py) can drive it with a synthetic
+    blob. Logic mirrors verify_round1.py:404-406 exactly so the two rungs
+    cannot drift; the whitelist itself is IMPORTED from R1, not re-authored."""
+    return [ln for ln in lines
+            if ("SCRIPT ERROR" in ln or "Parse Error" in ln)
+            and not any(w in ln for w in whitelist)]
+
+
 # ---------------------------------------------------------------------------
 # Sections
 # ---------------------------------------------------------------------------
@@ -298,7 +348,7 @@ def section_arenas(gate: Gate, seed: int) -> None:
     """All three arenas reached, each with its own hazards live as NODES."""
     print("\n  -- 1. every arena, selected the way the game selects it --")
     for run_number, expect_id, expect_hazard in ARENAS:
-        ad = PondHarnessAdapter()
+        ad = _new_adapter()
         try:
             ad.reset(seed=seed, run_number=run_number)
             s = snap(ad)
@@ -330,7 +380,7 @@ def section_arenas(gate: Gate, seed: int) -> None:
 def section_boss(gate: Gate, seed: int) -> None:
     """The wave-5 boss: reached, damaged, phased — and fought to a decision."""
     print("\n  -- 2. the wave-5 boss --")
-    ad = PondHarnessAdapter()
+    ad = _new_adapter()
     try:
         ad.reset(seed=seed, run_number=1)
         s = walk_to_boss(ad, gate)
@@ -411,7 +461,7 @@ def section_unreachable(gate: Gate, seed: int) -> None:
     EXPECTED_BOSS = {1: "foreman", 5: "lobbyist", 10: "ceo"}
     boss_ids: dict[int, str | None] = {}
     for run_number, expected in EXPECTED_BOSS.items():
-        ad = PondHarnessAdapter()
+        ad = _new_adapter()
         try:
             ad.reset(seed=seed, run_number=run_number)
             s = walk_to_boss(ad, gate)
@@ -482,7 +532,7 @@ def section_unreachable(gate: Gate, seed: int) -> None:
 def section_evidence_chain(gate: Gate, seed: int) -> None:
     """Evidence -> narrative -> RunEndScreen, driven to a real ending."""
     print("\n  -- 4. evidence -> epilogue -> run end --")
-    ad = PondHarnessAdapter()
+    ad = _new_adapter()
     try:
         ad.reset(seed=seed, run_number=1)
         s = snap(ad)
@@ -544,15 +594,49 @@ def section_evidence_chain(gate: Gate, seed: int) -> None:
 
 
 def main() -> int:
+    global _VIOLATIONS, _STEP_NO
+    _VIOLATIONS, _STEP_NO = [], 0
+    _ADAPTERS.clear()
     seed = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_SEED
     print("=" * 70)
     print(f"POND ROUND 2 — full spine (seed {seed})")
     print("=" * 70)
     gate = Gate()
-    section_arenas(gate, seed)
-    section_boss(gate, seed)
-    section_unreachable(gate, seed)
-    section_evidence_chain(gate, seed)
+    try:
+        section_arenas(gate, seed)
+        section_boss(gate, seed)
+        section_unreachable(gate, seed)
+        section_evidence_chain(gate, seed)
+
+        # Invariant sweep verdict — R1 parity (verify_round1.py:390). Every
+        # driven step ran the suite (in step()); assert zero violations across
+        # the whole spine. A violation here is a real game defect, recorded as
+        # a finding, never tuned away.
+        print("\n  -- 5. per-step invariants across the full spine --")
+        gate.check(
+            not _VIOLATIONS,
+            "invariant sweep is CLEAN across every driven step (R1 parity)",
+            f"0 violations over {_STEP_NO} steps" if not _VIOLATIONS
+            else f"{len(_VIOLATIONS)} violations over {_STEP_NO} steps")
+        for v in _VIOLATIONS[:10]:
+            print(f"    invariant violation — {v}")
+    except Exception as exc:  # noqa: BLE001
+        import traceback
+        traceback.print_exc()
+        gate.check(False, "exception-free run",
+                   f"{type(exc).__name__}: {exc}")
+    finally:
+        # Stderr scan — R1 parity (verify_round1.py:404-409), in a finally so it
+        # runs even when a section raises. Reads the real subprocess stderr of
+        # every adapter this run (how PC-8 was originally caught), filtered
+        # through the whitelist IMPORTED from R1 via the shared scan predicate.
+        print("\n  -- 6. subprocess stderr (every adapter this run) --")
+        all_err = [ln for ad in _ADAPTERS for ln in ad.stderr_lines]
+        bad = scan_stderr(all_err, STDERR_WHITELIST)
+        gate.check(
+            not bad,
+            "no SCRIPT ERROR on the game's stderr (R1 parity)",
+            f"{len(bad)} error lines" + (f"; first: {bad[0]}" if bad else ""))
 
     total = gate.passed + gate.failed
     print("\n" + "=" * 70)

@@ -2,6 +2,57 @@
 
 Commit-traceable record. A failed check is data. Game repo: `~/Dev/Games/the-pond/`.
 
+## 2026-07-20 — U-003: R1's two safety nets ported into R2 — invariant sweep surfaced a NEW escape (PC-16)
+
+R2 drove tens of thousands of frames with neither safety net R1 has: no per-step
+`invariants.build_suite()` sweep and no `SCRIPT ERROR` stderr scan (PC-8 was originally caught by
+exactly that scan). Both are now ported into `verify_round2.py`, following R1's structure so the
+two rungs cannot drift:
+
+- **Invariant sweep** — `invariants.build_suite()` is built once at module load and run inside the
+  central `step()` helper (the primitive every driven frame in R2 funnels through — the faithful
+  analogue of R1 sweeping after every `ep.step()`), reusing the exact predicate set R1/R3 share.
+  `main()` asserts zero violations across the whole spine, R1 parity with `verify_round1.py:390`.
+- **Stderr scan** — extracted as a pure predicate `scan_stderr(lines, whitelist)` that mirrors
+  `verify_round1.py:404-406` line-for-line, run in `main()`'s **`finally`** so it executes even when
+  a section raises. The whitelist is **imported** (`from verify_round1 import STDERR_WHITELIST`),
+  never re-authored, so the rungs share one source. Every adapter constructed this run is registered
+  (`_new_adapter()`), so the single scan reads every subprocess's real stderr.
+- **Committed negative test** `integrations/pond/stderr_scan_selftest.py` (5 cases) feeds synthetic
+  stderr blobs through the same `scan_stderr` predicate R2 uses: the acceptance-mandated case — a
+  real `SCRIPT ERROR: Invalid call…` line MUST be flagged — plus a `Parse Error`, a whitelisted
+  teardown line that must NOT be flagged (proving the imported whitelist suppresses forked-addon
+  noise), clean/warning lines, and a mixed blob isolating the one real error. Passes 5/5, no game.
+
+**R2 re-measured NOT MET 30/33** (seed 20260720, godot 4.7.1); prior baseline was **29/31**. The
+denominator widened by exactly the two ported checks: **stderr scan PASSED** (0 error lines) and
+**invariant sweep FAILED**. `main()` now wraps the sections in try/except/finally (R1 parity), so a
+mid-section raise records a failed `exception-free run` check rather than aborting the tally.
+
+### PC-16 (new, REAL — surfaced by the ported invariant sweep): the boss arena does not contain the player
+
+The sweep reported **201 `player escaped vertically` violations over 2329 driven steps**, all during
+the wave-5 boss fight (aim = the boss at `[960, 100]`): the player repeatedly reached **y = -71 to
+-127**, e.g. `step 223: y=-121.4 outside [0.0, 1080.0] (+/-64.0)`. This is a real containment
+failure, not a tester artifact — the player is outside **both** the outer TestArena top wall
+(world y=0) **and** the boss arena's own top wall (world y=-50):
+
+- `BossArena.tscn` is placed at world `(960, 250)` in `TestArena.tscn`; its `ArenaWalls` children
+  (`TopWall` local y=-300 → world y=-50, plus Bottom/Left/Right) are `StaticBody2D` nodes whose only
+  child is a `ColorRect` — **none has a `CollisionShape2D`**, so the walls are purely decorative and
+  cannot stop the player.
+- `boss_arena.gd:70-72`'s lock step iterates `arena_walls.get_children()` and calls
+  `set_deferred("disabled", false)` on each `StaticBody2D` — but `StaticBody2D` has no `disabled`
+  property and there is no collision shape to enable regardless, so "locking" the arena adds no
+  collision either. (The scene facts above are source-read context; the **observed** wire evidence is
+  the 201 out-of-bounds player positions during the boss fight.)
+
+Consequence: the "locked" boss arena visually frames the fight but does not physically bound it — a
+player kiting the top-positioned boss drifts off the top of the play area. Filed for upstream fix in
+the game (give the boss walls real `CollisionShape2D` geometry, or clamp the player to the boss
+arena rect on lock). This is precisely the previously-invisible defect the ported sweep exists to
+catch: the pre-port R2 had no invariant sweep and never noticed the player leaving the arena.
+
 ## 2026-07-20 — U-002: PC-6 ordering check made real (was vacuous); two overclaiming labels narrowed
 
 `verify_round2.py:section_evidence_chain` asserted the PC-6 ordering contract (rewards settle
