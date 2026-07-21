@@ -267,6 +267,28 @@ def fight_boss(ad, cycles=2200, band=125.0, radius=150.0):
     return "timeout", s, lowest, cycles
 
 
+def rewards_settle_before_end(events):
+    """PC-6: in the ORDERED event stream, `run_rewards_due` must strictly
+    precede `run_ended` (rewards settle before the epilogue is narrated).
+
+    `events` is an ordered sequence of event dicts (or bare signal strings).
+    Returns (ok, rewards_idx, ended_idx) using FIRST-seen positions. Pure — no
+    game state — so a checked-in negative test can drive it with a synthetic
+    out-of-order list. Contract source: run_manager.gd emits rewards before
+    narration; evidence_manager.gd / meta_progression.gd consume run_rewards_due.
+    """
+    rewards_idx = ended_idx = None
+    for i, e in enumerate(events):
+        sig = e.get("signal") if isinstance(e, dict) else e
+        if sig == "run_rewards_due" and rewards_idx is None:
+            rewards_idx = i
+        elif sig == "run_ended" and ended_idx is None:
+            ended_idx = i
+    ok = (rewards_idx is not None and ended_idx is not None
+          and rewards_idx < ended_idx)
+    return ok, rewards_idx, ended_idx
+
+
 # ---------------------------------------------------------------------------
 # Sections
 # ---------------------------------------------------------------------------
@@ -336,9 +358,18 @@ def section_boss(gate: Gate, seed: int) -> None:
 
         outcome, s, lowest, cycles = fight_boss(ad)
         b = s.get("boss") or {}
-        gate.check(lowest < (b.get("max_hp") or 100),
-                   "the boss takes real damage from real input",
-                   f"hp fell to {lowest} of {b.get('max_hp')}")
+        max_hp = b.get("max_hp")
+        if outcome == "defeated":
+            gate.check(True, "the boss takes real damage from real input",
+                       f"boss defeated after {cycles} cycles (lowest hp seen {lowest})")
+        elif max_hp is None:
+            gate.check(False, "the boss takes real damage from real input",
+                       f"boss snapshot empty/absent after the fight (boss={b!r}, "
+                       f"outcome={outcome!r}) — cannot measure damage against a real value")
+        else:
+            gate.check(lowest < max_hp,
+                       "the boss takes real damage from real input",
+                       f"hp fell to {lowest} of {max_hp}")
         defeated = s["run"]["stats"].get("bosses_defeated", 0) >= 1
         if not defeated:
             gate.blocked(
@@ -458,6 +489,7 @@ def section_evidence_chain(gate: Gate, seed: int) -> None:
         saw = {"evidence_unlocked": False, "run_rewards_due": False,
                "run_ended": False, "player_died": False}
         result = None
+        event_stream: list = []
         for _ in range(500):
             s = take_level_up(ad, s)
             p = s["player"]["pos"]
@@ -469,6 +501,7 @@ def section_evidence_chain(gate: Gate, seed: int) -> None:
             step(ad, 2, attack=True, aim=aim, move=move)
             s = step(ad, 14, attack=False, aim=aim, move=move)
             for e in (s.get("events") or []):
+                event_stream.append(e)
                 sig = e.get("signal")
                 if sig in saw:
                     saw[sig] = True
@@ -482,11 +515,16 @@ def section_evidence_chain(gate: Gate, seed: int) -> None:
                    "a run reaches a real end over the wire",
                    f"result={result!r} events={ {k: v for k, v in saw.items()} }")
         gate.check(result == "death",
-                   "the only reachable run result is 'death'",
-                   f"result={result!r} — see PC-12: no production path emits 'victory'")
-        gate.check(saw["run_rewards_due"],
-                   "rewards are settled BEFORE the epilogue is narrated (PC-6 ordering)",
-                   "run_rewards_due observed ahead of run_ended")
+                   "this run ended in death",
+                   f"result={result!r}")
+        ok_pc6, r_idx, e_idx = rewards_settle_before_end(event_stream)
+        gate.check(
+            ok_pc6,
+            "rewards settle BEFORE the epilogue is narrated (PC-6 ordering)",
+            f"run_rewards_due at event #{r_idx} precedes run_ended at #{e_idx}"
+            if ok_pc6 else
+            f"ORDER VIOLATED / missing: run_rewards_due=#{r_idx} run_ended=#{e_idx} "
+            f"(rewards must strictly precede run_ended)")
 
         narrative = s.get("narrative") or {}
         run_end = s.get("run_end") or {}

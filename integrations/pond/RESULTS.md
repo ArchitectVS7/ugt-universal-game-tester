@@ -2,6 +2,41 @@
 
 Commit-traceable record. A failed check is data. Game repo: `~/Dev/Games/the-pond/`.
 
+## 2026-07-20 — U-002: PC-6 ordering check made real (was vacuous); two overclaiming labels narrowed
+
+`verify_round2.py:section_evidence_chain` asserted the PC-6 ordering contract (rewards settle
+before the epilogue is narrated) with a check that could never fail on ordering: it tested a bare
+boolean (`saw["run_rewards_due"]` fired *at some point*) while its detail string claimed
+"observed ahead of run_ended" — an ordering never measured. **Reintroducing PC-6 would still have
+passed it.** Rewritten to measure positional order from the already-collected ordered `events`
+stream:
+
+- New pure predicate `rewards_settle_before_end(events)` records the FIRST-seen index of
+  `run_rewards_due` and `run_ended` in the ordered stream and asserts the former strictly
+  precedes the latter. Pure (no game state), so it is driven by a **committed** negative test,
+  `integrations/pond/pc6_ordering_selftest.py` (4 cases incl. the acceptance-mandated one: an
+  out-of-order `[run_ended, run_rewards_due]` stream must FAIL; also missing-`run_rewards_due`
+  must FAIL, i.e. never vacuously green). Self-test passes 4/4.
+- The section now accumulates `event_stream` across all step batches and feeds it to the
+  predicate. Live wire re-run (seed 20260720, godot 4.7.1) prints real evidence:
+  **`run_rewards_due at event #66 precedes run_ended at #68`** — positional indices, not two
+  booleans. Contract still live and verified this session: `core/scripts/run_manager.gd:116`
+  emits `run_rewards_due` before `:119` `run_ended`; `metagame/scripts/evidence_manager.gd:227`
+  and `metagame/scripts/meta_progression.gd:160` both `.connect()` to `run_rewards_due` (NOT
+  `run_ended`) for exactly this ordering (their own comments cite the contract).
+- Two overclaiming labels narrowed to match observed evidence only: the death check's label
+  changed from "the only reachable run result is 'death'" (doubly wrong — victory is reachable
+  per T-057, and one run cannot prove "only") to **"this run ended in death"**; and
+  `section_boss`'s boss-damage check dropped its `lowest < (b.get("max_hp") or 100)` fallback —
+  an empty boss snapshot now **fails loudly** ("cannot measure damage against a real value")
+  instead of silently comparing against the literal 100. Live re-run read the real value:
+  **"hp fell to 17 of 80"** (foreman max_hp 80, not 100).
+
+**Denominator unchanged: still 29/31, 2 blocked** (PC-12 harness gap, PC-15 balance). No checks
+were added or removed — one vacuous PC-6 check was replaced by one real one, and the boss-damage
+check remains a single check per run; the difference is that both now carry real over-the-wire
+evidence rather than a claim the code did not measure.
+
 ## 2026-07-20 — U-001: PC-11 CLOSED, PC-13 reclassified, PC-12 re-scoped (R2 `section_unreachable` now measures over the wire)
 
 `verify_round2.py:section_unreachable` previously took no adapter and executed no game code —
