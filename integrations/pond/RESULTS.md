@@ -2,6 +2,115 @@
 
 Commit-traceable record. A failed check is data. Game repo: `~/Dev/Games/the-pond/`.
 
+## 2026-07-20 — U-009: R2 RE-BASELINED — NOT MET 44/47 (the authoritative post-M7 baseline)
+
+**R2 NOT MET — 44/47** (seed 20260720, the-pond HEAD `94890d0`, godot 4.7.1). This is the
+consolidated, trustworthy baseline after the whole U-001…U-008 gate-repair pass and the-pond's M7
+landing (T-053→T-063). It is a **documentation + measurement** re-baseline: `verify_round2.py` was
+run to completion and its verdict recorded — **no check was edited** (the number is 44/47 because that
+is the game's real state; adjusting a check to move it is forbidden). Reproduced **identically** to
+the U-008 run below — stable, not flaky. Alongside it: **R1 still MET 18/18** (known-green rung
+un-regressed) and `py_compile integrations/pond/*.py ugt/core/*.py` exits 0.
+
+**Current split: 44 pass / 3 non-pass** — 2 `gate.blocked` (PC-15 balance, PC-12 named harness gap) +
+1 `gate.check` FAIL (PC-17). Every non-pass cites observed wire evidence; every one of the 44 passes
+is a real measurement of working game behavior (no `gate.check(True, …)` sites remain — all three were
+removed in U-005; no source-only conclusions — the two prose `gate.blocked`s became measurements /
+named gaps in U-001).
+
+### Corrected-denominator lineage (no denominator was silently widened or narrowed)
+
+Every change of the denominator was disclosed in its own dated entry below; this is the audit trail:
+
+| Run  | Score   | Δ checks | Why the count moved |
+|------|---------|----------|---------------------|
+| 8852b19 (original R2) | **21/26** | — | 5 blocked: PC-11, PC-12, PC-13, PC-14, PC-15 (four modes had no code path + the boss) |
+| U-001 | **29/31** | +5 | `section_unreachable` stopped being 3 unconditional prose `gate.blocked`s: PC-11 became **7 measured checks** (3 boss-reached + 3 boss-id + 1 distinctness), PC-13 → `gate.info` |
+| U-002 | **29/31** | 0 | PC-6 ordering check made real (was vacuous); two overclaiming pass labels narrowed — count-neutral |
+| U-003 | **30/33** | +2 | R1's two safety nets ported into R2: **stderr scan** + **invariant sweep** (the sweep immediately surfaced PC-16) |
+| U-004 | **30/33** | 0 | PC-15 damage-rounding diagnosis withdrawn — **text only**, T-062 verdict adopted; no check touched |
+| U-005 | **30/33** | 0 | PC-14 clean-arena arm + two literal-`True` arms converted to real measurements — count-neutral (the last `gate.check(True, …)` sites eliminated, grep-clean) |
+| U-007a | **34/37** | +4 | evidence → conspiracy-board **card flip driven & measured** over the wire (4 board checks) |
+| U-007b | **35/37** | 0 | PC-16 fixed upstream (`Player.tscn collision_mask` 2→3) — the invariant **sweep flipped green** (140 violations → 0); count-neutral |
+| **U-008** | **44/47** | **+10** | `section_pause` drove the ESC toggle over the wire (10 checks). Nine pass (toggle round-trips, run never destroyed — **PC-13 core confirmed**); the tenth, invariant 2, is the **one new FAIL** — it surfaced **PC-17** |
+
+**Now: 44/47** — the +10 pause checks are the delta from 35/37; the single regression in the *pass*
+count vs "all new checks green" is PC-17, a real game defect, not a tester fault.
+
+### Per-finding disposition (PC-11 → PC-17) — which checks changed category, and why
+
+- **PC-11 (was CRITICAL) — RESOLVED (the-pond T-054).** Was **1** prose `gate.blocked` ("`boss_scene`
+  set in one place → true ending can never unlock"). Now **7 passing measured checks**: runs 1/5/10
+  each walk to `BOSS_TRIGGER=(960,250)`, reach a boss (guarded with a *distinct* boss-not-reached
+  message), and read **3 distinct `boss_id`** off the live harness — `{1:'foreman', 5:'lobbyist',
+  10:'ceo'}`. A CRITICAL prose block became seven green wire measurements.
+- **PC-12 — category change: prose `blocked` → measured, reasoned `blocked` (named harness gap).** The
+  old "`end_run('victory')` has no production caller" is **REFUTED and not re-asserted** — the caller
+  now exists (T-057, `run_manager.gd:235` via `_on_ending_unlocked`, connected `:65`). The sole
+  remaining block is that a `"victory"` run RESULT cannot be **observed over the current wire**:
+  reaching `EventBus.ending_unlocked` needs all 16 logs + Lobbyist + CEO defeats + the smoking-gun
+  board connection, and the JSON-lines harness exposes only `create/step/choose/state/quit` — no
+  evidence-grant / board-connection op. Filed as a harness-extension follow-up in `HANDOFF.md`. Boss
+  driving is separately blocked by PC-15.
+- **PC-13 — RESOLVED (the-pond T-058/T-059), core CONFIRMED live.** Was `blocked` prose ("there is no
+  pause; ESC quits the run"). Now a `gate.info` in `section_unreachable` plus **9 passing wire checks**
+  in `section_pause` (U-008): the ESC toggle flips `get_tree().paused` `false→true→false`, both
+  `EventBus.pause_toggled` edges are observed, and the run is **never destroyed**. Citation re-sourced
+  under U-006: `input_manager.gd` was **deleted** by T-059; the effective binding is `project.godot`'s
+  `pause` action → `test_arena_controller._handle_pause_input`.
+- **PC-14 — RESOLVED (the-pond T-061).** Was `blocked` (spawner leak — 3 regular enemies in the locked
+  arena). Now a **passing persisted-window measurement**: `section_boss` holds idle ~3s post-lock
+  (6 samples) and asserts **0 non-boss adds**. The vacuous single-frame `gate.check(True, …)` arm that
+  briefly replaced the block was eliminated in U-005; the pass is now driven by a measured wire value
+  (`worst_adds` read from `s["enemies"]`), the analogue of T-061's in-suite 5s-idle test.
+- **PC-15 — DIAGNOSIS WITHDRAWN (T-062 adopted, U-004); still a measured non-pass (`blocked`).** The
+  automated driver did **not** beat the boss this run: fight ended `player_died` after 490 cycles, boss
+  on **23 hp** (lowest seen 23), `active_ids=[]` at fight start, tongue `base_damage=1`. Corrected
+  mechanism (the-pond `test/unit/test_boss_damage_scaling.gd`): **count-vs-type HP/DPS asymmetry**, NOT
+  fractional rounding — `mercury_blood` computes `1*1.5→round→2` (double damage, not a no-op); the
+  inversion is **REFUTED for realistic offense-inclusive builds** (ttk@0≈52.4s → ttk@10≈28.8s, ~45%
+  faster) and confirmed only for a degenerate zero-offense build (52.4s → 78.6s). This is a **balance
+  note, not a broken-game defect** — the driver just didn't win this run.
+- **PC-16 — RESOLVED upstream (U-007 round 2), folded in here for completeness** (the task text
+  predates it). The R1/R2 invariant sweep (ported under U-003) surfaced 140 `player escaped
+  vertically` violations during the boss fight; root cause was `Player.tscn collision_mask = 2`
+  (Environment only) vs boundary walls on the default layer 1 — fixed by mask `2→3`. The **sweep is now
+  CLEAN: 0 violations over 1588 steps** this run.
+- **PC-17 — NEW, REAL, still-failing** (surfaced by U-008 driving pause invariant 2). The pause is
+  **cosmetic**: driven `move=[1,0]` walked the player **200.00px while `paused` read True** over 4×15
+  frames (a real pause must hold 0). Root cause (read from source, corroborating the observed
+  movement): the arena **ROOT** is `PROCESS_MODE_ALWAYS` (`test_arena_controller.gd:47`, T-058's
+  ESC-responsiveness mechanism) and every gameplay child inherits it — the Player is a scene child and
+  `enemy_spawner.gd:290` parents enemies directly under the root. Masked by the vacuous
+  `test_pause_menu.gd:109` (probe parented under the TEST root, never the arena). Non-vacuity: the
+  paused window held 0 enemies and no run-stat change, so those are recorded as **context only** — the
+  player-drift is the sole independent signal. Game-side fix filed in `HANDOFF.md`. **NOT an R3
+  blocker** (see below).
+
+### Verdict framing
+
+Every remaining non-pass cites observed wire evidence — quoting the three this run:
+- **PC-15 (`blocked`):** *"fight ended 'player_died' after 490 cycles with the boss on 23 hp (lowest
+  seen 23); at fight start the driver held active_ids=[] with tongue base_damage=1."*
+- **PC-12 (`blocked`):** *"a 'victory' run RESULT could not be OBSERVED over the wire … the JSON-lines
+  harness protocol exposes only create/step/choose/state/quit — there is no board-connection or
+  evidence-grant op to reach ending_unlocked."*
+- **PC-17 (`check` FAIL):** *"player drifted 200.00px while paused=True over 4 x15 frames of
+  move=[1,0] (a real pause must hold 0)."*
+
+And every one of the 44 passes is a real measurement of working game behavior — 3 arenas selected the
+way the game selects them + live hazard nodes + FR-08 wave scaling (8/16/20); the wave-5 boss reached
+by real proximity; 3 distinct bosses (PC-11); dodge i-frames negating a hit; the clean-arena window
+(PC-14); the full evidence → board-flip → epilogue → RunEndScreen spine (U-007); the pause TOGGLE
+round-trip (PC-13); a clean invariant sweep (PC-16) and clean stderr. No vacuous passes and no
+source-only conclusions remain in the gate.
+
+**Next rung: R3 exploit-hunter (`verify_round3.py`), now UNBLOCKED** — `ExploitHunter` + the R1
+invariant suite + same-seed replay determinism (unblocked because PC-1's tongue-crit RNG island was
+seeded). The `pause` toggle is safe to include in R3 random input; PauseMenu **Quit-to-Menu** stays
+permanently off the R3 allowlist. PC-17 is an open **game-side** follow-up but does **not** gate R3
+(the pause *toggle* never ends the run, and R3 requires no functioning freeze).
+
 ## 2026-07-20 — U-008: pause is DRIVEN over the wire; PC-13 core CONFIRMED but a NEW finding PC-17 (pause is cosmetic) surfaced
 
 **R2 NOT MET — 44/47 (seed 20260720), 3 non-passes: PC-15 (balance), PC-12 (wire gap), PC-17 (NEW).**

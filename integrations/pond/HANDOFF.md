@@ -1,16 +1,22 @@
 # Pond Conspiracy (the-pond) — UGT Integration Plan
 
-**Status: R2 NOT MET — 44/47 (2026-07-20, after U-001…U-008 + the-pond M7). Three non-passes:
-PC-15 (balance — driver did not beat the boss this run; re-baseline is U-009's), PC-12 (victory run
-RESULT unobservable over the current wire — filed harness follow-up below), and PC-17 (NEW, U-008 —
-the pause is COSMETIC: `get_tree().paused` flips but gameplay keeps running, filed for a game-side
-fix). U-008 DONE: pause is now DRIVEN over the wire — the harness injects the `pause` toggle and
-`verify_round2.py::section_pause` asserts the invariants; the TOGGLE round-trips cleanly and never
-ends the run (PC-13 core CONFIRMED), but invariant 2 (no-state-advance-while-paused) correctly FAILS
-and surfaced PC-17. Quit-to-Menu stays OFF the R3 allowlist (it ends the run). The formerly-blocked
-modes PC-11/PC-13/PC-14 are FIXED + measured; the board card flip is DRIVEN (U-007); PC-16 is FIXED
-upstream — the R2 invariant sweep is CLEAN (0 violations / 1588 steps). Next rung: fix PC-17
-upstream → U-009 (R2 re-baseline) → R3 exploit-hunter.**
+**Status: U-009 DONE — R2 RE-BASELINED, NOT MET 44/47 (2026-07-20, the-pond HEAD `94890d0`, seed
+20260720, godot 4.7.1; reproduced identically to U-008 — stable, not flaky). This is the authoritative
+post-M7 baseline after the whole U-001…U-008 gate-repair pass. R1 still MET 18/18; `py_compile` exit 0.
+No check was edited — the number is 44/47 because that is the game's real state. Split: 44 pass /
+3 non-pass = 2 `gate.blocked` + 1 `gate.check` FAIL. The three non-passes: PC-15 (balance — the
+automated driver did not beat the wave-5 boss this run; boss on 23 hp after 490 cycles), PC-12 (victory
+run RESULT unobservable over the current wire — named harness gap, follow-up filed below), and PC-17
+(NEW, U-008 — the pause is COSMETIC: `get_tree().paused` flips but gameplay keeps running). RESOLVED &
+now measured: PC-11 (3 distinct bosses, T-054 — was 1 CRITICAL prose block, now 7 green checks),
+PC-13 (real non-destructive pause toggle, T-058/T-059), PC-14 (locked-arena spawner stop, T-061),
+PC-16 (player containment, `Player.tscn` mask 2→3 — invariant sweep CLEAN, 0 violations / 1588 steps).
+PC-15 diagnosis WITHDRAWN (T-062 count-vs-type verdict adopted). Corrected-denominator lineage
+(21/26 → 29/31 → 30/33 → 34/37 → 35/37 → 44/47) and the full per-finding disposition are in
+RESULTS.md's U-009 entry. **Next rung: R3 exploit-hunter (`verify_round3.py`) — now UNBLOCKED**
+(M7 landed; same-seed replay determinism unblocked because PC-1 is fixed). PC-17 is an open game-side
+follow-up but does NOT gate R3 (the pause toggle never ends the run; R3 needs no functioning freeze).
+Quit-to-Menu stays permanently OFF the R3 allowlist.**
 
 Prior status line (kept for history): R2 NOT MET — 21/26 (2026-07-20). Five blocked: four modes
 the game had NO code path for, plus a boss the automated driver did not beat (PC-15 balance note,
@@ -132,8 +138,11 @@ against zero enemies), and `gate.sh` unable to pass a green suite at all. Detail
 
 ### Still open
 
-- **PC-17 (NEW, U-008) — the pause is COSMETIC; needs a game-side fix (on the critical path before
-  U-009/R3).** `get_tree().paused` flips true but gameplay keeps running: the arena ROOT is
+- **PC-17 (NEW, U-008) — the pause is COSMETIC; an open game-side follow-up that does NOT gate R3.**
+  (Corrects the earlier "on the critical path before U-009/R3" framing: U-009 re-baselined R2 with
+  PC-17 left honestly failing, and R3 does not require a functioning freeze — the pause *toggle* never
+  ends the run, so R3 random input including `pause` is safe. Fix this upstream when convenient; it is
+  not an R3 blocker.) `get_tree().paused` flips true but gameplay keeps running: the arena ROOT is
   `PROCESS_MODE_ALWAYS` (`test_arena_controller.gd:47`, T-058's mechanism for keeping ESC alive while
   paused) and every gameplay node inherits it — the Player is a scene child of the root and
   `enemy_spawner.gd:290` parents enemies directly under the root, so nothing freezes. Driven over the
