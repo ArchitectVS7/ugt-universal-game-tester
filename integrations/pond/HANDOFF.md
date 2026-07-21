@@ -1,7 +1,8 @@
 # Pond Conspiracy (the-pond) — UGT Integration Plan
 
 **Status: R2 NOT MET — 21/26 (2026-07-20). Five blocked: four modes the game has NO code
-path for, plus a boss that cannot be beaten. Next: fix PC-11/12/13 upstream, then re-run R2.**
+path for, plus a boss the automated driver did not beat this run (PC-15 is a balance note, not
+a proof of impossibility — see the-pond T-062). Next: fix PC-11/12/13 upstream, then re-run R2.**
 R1 MET 18/18 seed-independent; all R1-round open items CLOSED; game suite fully green
 1063/1063. PC-1 is fixed, so R3 same-seed replay is no longer blocked.
 
@@ -19,11 +20,17 @@ R1 MET 18/18 seed-independent; all R1-round open items CLOSED; game suite fully 
   input kill the process.)
 - **PC-14** — the "locked" boss arena clears regular enemies then leaves the spawner running,
   so it refills within seconds.
-- **PC-15 balance** — the wave-5 boss survived with 2-52 hp across 4 seeds and ~20 driver
-  configurations. Tongue damage 1 vs 100 boss hp; boss bullets cost 10 of the player's 100;
-  and `damage_modifier` is fractional against an INT base of 1 so damage mutations round away
-  to nothing while `hp_scale_per_mutation` adds a full +5% boss hp each — **taking upgrades
-  makes the fight harder**, which inverts the roguelike loop.
+- **PC-15 balance** — the automated driver did not defeat the wave-5 boss (it survived with
+  2-52 hp across 4 seeds and ~20 driver configurations). The earlier "fractional damage rounds
+  to nothing → taking upgrades makes the fight harder" diagnosis is **WITHDRAWN**; the-pond
+  T-062 (`test/unit/test_boss_damage_scaling.gd`, DONE) is the authoritative measurement. Its
+  verdict: `mercury_blood` computes `1*1.5→round→2` (double damage, `player_controller.gd:214`),
+  and for a 100-hp boss the inversion is **REFUTED for realistic (offense-inclusive) builds**
+  (ttk@0≈52.4s → ttk@10≈28.8s, ~45% faster) and **confirmed only for a degenerate zero-offense
+  build** (52.4s → 78.6s). The real mechanism is a **count-vs-type asymmetry** — boss HP scales
+  with mutation *count* (`hp_scale_per_mutation`) while player DPS scales only with the
+  damage/crit/cooldown *subset* — not fractional rounding (only `strong_legs` at 0.1 rounds
+  away). Pass/fail re-baseline is U-009's.
 Spike 13/13, smoke 8/8×3. `verify_round1.py` drives one full run loop: waves -> 10 real tongue
 kills -> damage -> provoked dodge i-frames -> level-up -> mutation applied by a real CLICK ->
 death -> `run_ended` -> epilogue -> visible RunEndScreen, with 0 invariant violations over 85

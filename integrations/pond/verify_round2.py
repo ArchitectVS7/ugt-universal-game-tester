@@ -15,8 +15,13 @@ precisely the class of defect a full-spine round exists to find:
 
   * the boss arena clears regular enemies then leaves the spawner running, so
     the "locked" arena refills with adds — finding PC-14;
-  * the wave-5 boss cannot be defeated with real input because damage rounds to
-    nothing while each mutation adds boss hp — finding PC-15 (balance).
+  * the automated driver did not defeat the wave-5 boss this run — finding PC-15
+    (balance). The earlier "damage rounds to nothing while each mutation adds
+    boss hp" diagnosis is WITHDRAWN: the-pond T-062
+    (test/unit/test_boss_damage_scaling.gd) measured the real mechanism as a
+    count-vs-type HP/DPS asymmetry — the inversion is REFUTED for realistic,
+    offense-inclusive builds and confirmed only for a degenerate zero-offense
+    build — not fractional rounding.
 
 Two earlier structural blocks have since been FIXED game-side and are now
 measured over the wire rather than asserted as prose:
@@ -406,6 +411,14 @@ def section_boss(gate: Gate, seed: int) -> None:
         else:
             gate.check(True, "boss arena is a clean 1v1", "no adds present")
 
+        # Instrumentation (uncounted INFO): log the actual mutation ids owned
+        # and the resolved tongue base_damage at fight start, read over the
+        # wire, so any UGT-side balance note stays evidence-backed.
+        active_ids = (s.get("mutations") or {}).get("active_ids") or []
+        base_damage = ((s.get("player") or {}).get("tongue") or {}).get("damage")
+        gate.info("boss-fight start state (over the wire)",
+                  f"tongue base_damage={base_damage} active_ids={active_ids}")
+
         outcome, s, lowest, cycles = fight_boss(ad)
         b = s.get("boss") or {}
         max_hp = b.get("max_hp")
@@ -425,12 +438,24 @@ def section_boss(gate: Gate, seed: int) -> None:
             gate.blocked(
                 "wave-5 boss DEFEATED (PC-15, balance)",
                 f"fight ended '{outcome}' after {cycles} cycles with the boss on "
-                f"{b.get('hp')} hp (lowest seen {lowest}). Tongue damage is 1 against 100 boss "
-                f"hp while a single boss bullet costs the player 10 of 100. Mutations do not "
-                f"close the gap: damage_modifier is fractional against an INT base of 1 so most "
-                f"damage mutations round away to nothing, while hp_scale_per_mutation adds a "
-                f"full +5% boss hp per mutation taken — so upgrading makes the fight HARDER. "
-                f"Across 4 seeds and ~20 driver configurations the boss survived with 2-52 hp.")
+                f"{b.get('hp')} hp (lowest seen {lowest}); at fight start the driver held "
+                f"active_ids={active_ids} with tongue base_damage={base_damage}. The earlier "
+                f"'fractional damage rounds to nothing → upgrading makes the fight HARDER' "
+                f"diagnosis is WITHDRAWN — refuted by the-pond T-062 "
+                f"(test/unit/test_boss_damage_scaling.gd). Measured verdict: mercury_blood "
+                f"(damage_modifier 0.5) computes 1*1.5→round→2, i.e. DOUBLE damage "
+                f"(mutation_manager.gd:120 → player_controller.gd:214, asserted "
+                f"test_combat_emissions.gd:201-202), and mercury_blood is this driver's first "
+                f"PREFERRED pick. For a 100-hp boss the inversion is REFUTED for realistic "
+                f"(offense-inclusive) play — ttk FALLS ~45% as upgrades are taken "
+                f"(ttk@0≈52.4s → ttk@10≈28.8s) — and CONFIRMED only for a degenerate "
+                f"zero-offense build (52.4s → 78.6s), which is the only regime where the "
+                f"'boss survived with 2-52 hp' observation holds. The true mechanism is a "
+                f"count-vs-type asymmetry: boss HP scales with mutation COUNT "
+                f"(hp_scale_per_mutation) while player DPS scales only with the "
+                f"damage/crit/cooldown SUBSET — NOT fractional rounding (only strong_legs at "
+                f"0.1 rounds away). The driver still did not beat the boss this run; the "
+                f"pass/fail re-baseline is U-009's, not this gate's.")
         else:
             gate.check(True, "wave-5 boss DEFEATED", f"after {cycles} cycles")
     finally:
@@ -587,8 +612,10 @@ def section_evidence_chain(gate: Gate, seed: int) -> None:
                    f"scene={run_end.get('scene')!r}")
         evidence = (s["run"]["stats"] or {}).get("evidence_collected") or []
         gate.info("evidence collected this run",
-                  f"{evidence} — the conspiracy-board card flip needs a boss kill for a "
-                  f"gated card, which PC-15 blocks")
+                  f"{evidence} — the conspiracy-board card flip is not driven by this "
+                  f"section; U-007 owns driving it over the wire. Boss kills that unlock "
+                  f"gated cards are now reachable (the-pond T-054 fixed PC-11), so the board "
+                  f"flip is no longer blocked here.")
     finally:
         ad.close()
 
@@ -648,11 +675,13 @@ def main() -> int:
     print("\nFindings (each is a real game defect or a named wire gap):")
     for f in gate.findings:
         print(f"  * {f.splitlines()[0]}")
-    print("\nPC-14 (spawner refills the locked arena) and PC-15 (boss balance) are\n"
-          "real game defects with no code path / no winnable path. PC-12 is a named\n"
-          "harness gap: the victory caller now exists (T-057) but no wire op reaches\n"
-          "it. PC-11 (three distinct bosses) and PC-13 (real pause) are FIXED and\n"
-          "now measured/reclassified above. See integrations/pond/RESULTS.md.")
+    print("\nPC-14 (spawner refills the locked arena) is a real game defect with no\n"
+          "code path. PC-15 is a balance note (count-vs-type HP/DPS asymmetry,\n"
+          "the-pond T-062) — the automated driver did not beat the boss this run.\n"
+          "PC-12 is a named harness gap: the victory caller now exists (T-057) but no\n"
+          "wire op reaches it. PC-11 (three distinct bosses) and PC-13 (real pause)\n"
+          "are FIXED and now measured/reclassified above. See\n"
+          "integrations/pond/RESULTS.md.")
     return 1
 
 

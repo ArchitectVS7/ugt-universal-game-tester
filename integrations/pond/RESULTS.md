@@ -872,26 +872,60 @@ enemies (Polluted Tadpole, Toxic Minnow) inside the locked arena during the boss
 Clearing the arena and then immediately refilling it is incoherent either way — one of the two
 behaviours is wrong.
 
-### PC-15 (balance) — the wave-5 boss could not be defeated
+### PC-15 (balance) — ~~the wave-5 boss could not be defeated (fractional damage rounds to nothing)~~ **DIAGNOSIS WITHDRAWN — the-pond T-062 verdict adopted (2026-07-20, U-004)**
 
-Across **4 seeds and ~20 driver configurations** the Lobbyist survived with **2–52 hp**
-remaining; the player died every time. Best single result: 2 hp. The driver kites at tongue
-range, evades real bullet positions, spends dodge i-frames on cooldown, culls adds, and takes
-level-up cards.
+**Correction.** The fractional-rounding mechanism and the "taking upgrades makes the fight
+HARDER" headline are **REFUTED**. **the-pond T-062 (`test/unit/test_boss_damage_scaling.gd`,
+DONE) is now the authoritative measurement**, driving the real wired paths (Player.tscn +
+MutationManager consuming `EventBus.mutation_selected`, PlayerController writing
+`tongue.base_damage`, `BossBase.apply_difficulty_scaling`). Its measured verdict:
 
-The arithmetic is the finding:
-- tongue `base_damage` is **1** against **100** boss hp — ~100 landed hits at ~1.8 swings/sec;
-- one boss bullet costs the player **10** of 100 hp, so ~10 mistakes is death;
-- **mutations cannot close the gap.** `damage_modifier` is fractional (Mercury Blood +0.5,
-  Strong Legs +0.1) against an **int** base of 1, so `round()` sends almost every damage
-  mutation to no change at all — only Mercury Blood reaches 2;
-- meanwhile `hp_scale_per_mutation` adds a full **+5% boss hp per mutation taken**.
+- `mercury_blood` (`damage_modifier = 0.5`) computes `1 * 1.5 = 1.5 → round → 2` — i.e.
+  **DOUBLE** damage, not "rounds to nothing" (`mutation_manager.gd:120` →
+  `player_controller.gd:214`, asserted by `test_combat_emissions.gd:201-202`). It is the
+  **first** entry in this driver's own `PREFERRED` list (`verify_round2.py`), so realistic
+  driving takes it first.
+- For a canonical 100-HP boss, time-to-kill **FALLS ~45%** as upgrades are taken
+  (`ttk@0 ≈ 52.4s → ttk@10 ≈ 28.8s`): the inversion is **REFUTED for realistic
+  (offense-inclusive) play** (T-062 `test_realistic_build_refutes_inversion`).
+- The inversion is **CONFIRMED only for a degenerate zero-offense build**
+  (`52.4s → 78.6s`, T-062 `test_utility_only_build_confirms_asymmetry`), which bounds where the
+  original "boss survived with 2–52 hp" observation is real.
+- The true mechanism is a **count-vs-type asymmetry**: boss HP scales with mutation *count*
+  (`hp_scale_per_mutation`), while player DPS scales only with the damage/crit/cooldown *subset*
+  — **not** fractional rounding (only `strong_legs` at 0.1 rounds away, per T-062
+  `test_rounding_facts_are_the_supported_ones`).
 
-So taking mutations makes the fight strictly HARDER: measured 100 hp unscaled vs **130 hp**
-after six mutations that produced `damage 1.1` → still 1. That inverts the roguelike loop — the
-optimal play is to refuse upgrades. This is a balance signal, not a proof of impossibility: a
-skilled human may well win. But an agent that plays the mechanics correctly should not need 20
-configurations to fail.
+`verify_round2.py`'s PC-15 block now logs the actual `active_ids` and resolved tongue
+`base_damage` at boss-fight start (uncounted `gate.info`, read over the wire) so any UGT-side
+balance note stays evidence-backed. **Denominator UNCHANGED by this correction:** no
+`gate.check` was added or removed — the instrumentation is a `gate.info`, so the tally stays as
+last recorded (U-003: **30/33**, still `NOT MET`, 2 blocked = PC-12 harness gap + PC-15
+balance). The automated driver still did not defeat the boss this run; flipping PC-15's
+pass/fail status is **U-009**'s re-baseline, not this task's.
+
+Original record below, kept for the method trail:
+
+> **~~the wave-5 boss could not be defeated~~**
+>
+> Across **4 seeds and ~20 driver configurations** the Lobbyist survived with **2–52 hp**
+> remaining; the player died every time. Best single result: 2 hp. The driver kites at tongue
+> range, evades real bullet positions, spends dodge i-frames on cooldown, culls adds, and takes
+> level-up cards.
+>
+> ~~The arithmetic is the finding:~~
+> - ~~tongue `base_damage` is **1** against **100** boss hp — ~100 landed hits at ~1.8 swings/sec;~~
+> - ~~one boss bullet costs the player **10** of 100 hp, so ~10 mistakes is death;~~
+> - ~~**mutations cannot close the gap.** `damage_modifier` is fractional (Mercury Blood +0.5,
+>   Strong Legs +0.1) against an **int** base of 1, so `round()` sends almost every damage
+>   mutation to no change at all — only Mercury Blood reaches 2;~~
+> - ~~meanwhile `hp_scale_per_mutation` adds a full **+5% boss hp per mutation taken**.~~
+>
+> ~~So taking mutations makes the fight strictly HARDER: measured 100 hp unscaled vs **130 hp**
+> after six mutations that produced `damage 1.1` → still 1. That inverts the roguelike loop — the
+> optimal play is to refuse upgrades.~~ This is a balance signal, not a proof of impossibility: a
+> skilled human may well win. But an agent that plays the mechanics correctly should not need 20
+> configurations to fail.
 
 ### Two findings I filed and then REFUTED — both were my own instrument
 
