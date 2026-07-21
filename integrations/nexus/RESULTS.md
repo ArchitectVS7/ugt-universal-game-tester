@@ -66,3 +66,68 @@ The game is winnable, byte-identical-replayable, and robust under a 360-step
 random walk — all verified live over HTTP. Next tier (not part of this ladder):
 the LLM balance-playtester (API-credit-gated), whose findings would drive the
 deliberately-deferred progression-math rebalance.
+
+## L-006: LLM playtest tier wired (2026-07-21)
+
+`integrations/nexus/playtest_nexus.py` drives NEXUS through the L-002 direct-adapter
+entry point (`playtest_game_with_adapter`) — NexusHttpAdapter is not registered under
+any `engine.type`, so its ladder scripts build it directly (the same reason DDD needs
+this path). `strategy-guide.md` (command surface + accept→scan→connect→exploit→cat
+loop + the three R2 difficulty modes) and an additive, ladder-inert `playtest:` block
+in `ugt.config.yaml` were added.
+
+**DRIVE CHANNEL — `type_text`, the real terminal UX (root-cause fix, fix-round-1):**
+L-006's accept text names `type_text`/`get_terminal_text` as the drive channel. The
+first delivery instead used `action_mode="action_id"` and *disclosed the deviation*,
+because the shared loop's `type_text` branch was fire-and-forget — it called
+`adapter.type_text(value)` and never reassigned `current_state`, so `after == before`,
+every `_compute_delta` returned `{}`, and any type_text-driven run was VACUOUS. The
+review correctly ruled the literal criterion unmet. **Fix round 1 diagnosed that as a
+real, fixable loop defect rather than an unavoidable limitation** and repaired the root
+cause:
+
+- `ugt/core/playtester.py` — the `type_text` branch now reassigns
+  `current_state, terminated, truncated, step_info` from `adapter.type_text_step(value)`
+  **when the adapter exposes it** (a `hasattr` guard). `NexusHttpAdapter.type_text_step`
+  already returns the real `(state, term, trunc, info)` transition (nexus_http.py:191),
+  so typed commands now produce GENUINE deltas. Adapters whose `type_text` is a pure
+  keystroke-into-a-field (PlaywrightAdapter, RealClientAdapter — neither has
+  `type_text_step`) keep the existing fire-and-forget behavior byte-for-byte. This is an
+  **added input channel, not a contract change** (delta assertion, the
+  `reasoning`/`expected_outcome`/`potential_bug` fields, and the bug-report shape are
+  untouched) — exactly what the Standing Constraints permit. The earlier "editing the
+  branch changes the contract for every engine" concern only applied to an *unguarded*
+  edit; the `hasattr` guard makes it a no-op for every other engine (verified: DDD
+  `legal_action` and the `action_id` path run unchanged).
+- A new `action_mode="text"` + `_build_terminal_prompt` present the game AS a terminal
+  and steer the LLM to `action_type="type_text"` with a full command line it composes
+  from live state (`scan`, `connect <ip>`, `exploit <vuln>`, `accept <mission>`,
+  `cat <file>`). Game-agnostic: the prompt lists the command vocabulary from
+  `config.action_mappings` only; argument syntax lives in the game's own strategy guide,
+  never in `playtester.py`. `action_id` / `legal_action` prompt selection is untouched.
+
+This channel is strictly MORE faithful than the earlier action_id route: action_id runs
+each verb through the adapter's `_compose_command` heuristic (which auto-fills the
+target/file/mission) — the tester composing commands; here the LLM types the whole
+command line, which is what a real player does. `get_terminal_text` is consumed every
+step to build the prompt.
+
+**Non-vacuous invariants:** the run hands the loop the SAME `invariants.SUITE` R3 hands
+the ExploitHunter (`to_hunter_invariants()`); its wrappers read `info["command"]`/
+`info["result"]`, which is exactly the `{command,result,state}` dict
+`NexusHttpAdapter.type_text_step` returns (nexus_http.py:242). These are fail-capable
+checks (e.g. `inv_rng_tick` requires rngCounter +1 EXACTLY, `inv_refused_state_inert`)
+that held every step — exercised, not stubbed.
+
+**Live ollama run (server up on :3100, PID-verified; `--provider ollama`, gemma4:26b,
+25 actions):** PLAYTEST MET — `actions_taken=25`, **all 25 steps are `type_text`**,
+**typed commands with a real state delta `=25`**, invariant suite ran with **0
+violations**. gemma4:26b composed real command lines from live state every step
+(`scan` → `discoveredServersCount +17`/`xp +25`; `connect 192.168.1.105` → `xp +15`;
+`cat …/work_vpn.txt` → `storyFlags += found_meridian_credentials`), confirming the
+delta is genuine, not `{}`. Report at `integrations/nexus/results/playtest-report.json`
+(gitignored via root `results/`). A 5-action probe first confirmed the channel wiring
+(5/5 typed commands, 5/5 with deltas) before the full run.
+
+**R1 non-regression:** `verify_round1.py` re-run live after the change → **ROUND 1 MET —
+25/25** (identical count), confirming R1 is unaffected by the shared-loop edit.

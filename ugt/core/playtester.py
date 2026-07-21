@@ -250,7 +250,10 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
     assertion, bug-report shape, invariant checks, contradiction detector) is
     identical across modes. "action_id" (default) drives config-registered discrete
     ids / UI keys; "legal_action" drives one of the adapter's own reported legal
-    actions per step (harness games with no terminal / no config action vocabulary).
+    actions per step (harness games with no terminal / no config action vocabulary);
+    "text" drives a terminal game by having the LLM TYPE raw command lines
+    (action_type="type_text"), the way a human at the prompt would — non-vacuous for
+    any adapter that reports the transition via type_text_step().
     """
     terminal_budget = int(playtest_cfg.get("terminal_char_budget", 400))
     summary_paths = [e for e in (playtest_cfg.get("summary_paths") or [])
@@ -323,7 +326,11 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
                                          legal_list, action_log, playtest_cfg)
         else:
             terminal_text = adapter.get_terminal_text(terminal_budget)
-            prompt = _build_prompt(config, strategy_guide, current_state, terminal_text, action_log)
+            if action_mode == "text":
+                prompt = _build_terminal_prompt(config, strategy_guide, current_state,
+                                                terminal_text, action_log, playtest_cfg)
+            else:
+                prompt = _build_prompt(config, strategy_guide, current_state, terminal_text, action_log)
 
         try:
             llm_action = llm.choose_action(prompt)
@@ -383,9 +390,21 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
                     pass
 
             elif action_type == "type_text":
-                adapter.type_text(value)
                 executed_action_id = -1
-                step_info = {"text": value}
+                # If the adapter's type_text semantically ADVANCES the game and can
+                # report the resulting transition (type_text_step -> (state, term,
+                # trunc, info)), capture it so the state-delta assertion and the
+                # invariant checks see the REAL delta — never a vacuous empty one.
+                # Adapters whose type_text is a pure keystroke-into-a-field (browser /
+                # real_server: the text is buffered and only committed by a later
+                # Enter/step) do NOT expose type_text_step, so they keep the existing
+                # fire-and-forget behavior byte-for-byte. This is an added input
+                # channel, not a change to the delta/fields/bug-report contract.
+                if hasattr(adapter, "type_text_step"):
+                    current_state, terminated, truncated, step_info = adapter.type_text_step(value)
+                else:
+                    adapter.type_text(value)
+                    step_info = {"text": value}
 
             elif action_type == "wait":
                 pass
@@ -961,6 +980,50 @@ def _build_legal_prompt(config, strategy_guide, current_state, legal_list, actio
         f"## Recent Actions\n{recent_summary}\n\n"
         f"## Strategy Guide\n{strategy_guide[:guide_budget]}\n\n"
         f"Respond JSON only. action_type=\"legal_action\", value=\"<index 0..{upper}>\"."
+    )
+
+
+def _build_terminal_prompt(config, strategy_guide, current_state, terminal_text, action_log, playtest_cfg):
+    """Prompt for "text" mode: the LLM drives the game by TYPING a raw command line
+    (action_type="type_text"), exactly as a human at the terminal would. The adapter's
+    own get_terminal_text output and structured state are shown; the command vocabulary
+    is listed from config.action_mappings, but the LLM types the FULL command line
+    (verb + any argument). Argument syntax — which files / servers / missions / targets
+    to name — lives in the game's own strategy guide, never in this module, so this
+    stays game-agnostic (no game-specific strings here)."""
+    playtest_cfg = playtest_cfg or {}
+    guide_budget = int(playtest_cfg.get("guide_char_budget", 2000))
+    terminal_budget = int(playtest_cfg.get("terminal_char_budget", 400))
+    project = getattr(config, "project_name", None) or "the game"
+
+    action_mappings = getattr(config, "action_mappings", None) or {}
+    command_names = ", ".join(
+        (a.get("name", str(k)) if isinstance(a, dict) else str(a))
+        for k, a in action_mappings.items()
+    ) or "(see the strategy guide)"
+
+    recent_log = action_log[-5:] if len(action_log) > 5 else action_log
+    recent_summary = "\n".join(
+        f"  Step {e['step']}: {e['action']} → {e.get('state_delta', {})}"
+        for e in recent_log
+    ) or "  (no actions taken yet)"
+
+    return (
+        f"You are playtesting {project} at its TERMINAL. Type ONE command line to play.\n\n"
+        f"NOTE: If you see EPISODE_RESET in recent actions, the previous episode ended "
+        f"normally (win/death/step limit) and the game restarted — NOT a bug. Keep playing.\n\n"
+        f"## Available command verbs (type the FULL line: verb + any argument it needs)\n"
+        f"  {command_names}\n"
+        f"  (Which files / servers / missions / targets to name as arguments is in the "
+        f"Strategy Guide below — read the Current State to fill in REAL arguments.)\n\n"
+        f"## Current State\n"
+        + _key_values_line(playtest_cfg, current_state)
+        + f"```json\n{json.dumps(current_state, indent=2, default=str)}\n```\n\n"
+        f"## Recent Actions\n{recent_summary}\n\n"
+        f"## Terminal Output\n```\n{terminal_text[-terminal_budget:]}\n```\n\n"
+        f"## Strategy Guide\n{strategy_guide[:guide_budget]}\n\n"
+        f"Respond JSON only. Use action_type=\"type_text\" and "
+        f"value=\"<the full command line to type>\"."
     )
 
 

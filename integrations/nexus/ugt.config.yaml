@@ -94,3 +94,24 @@ reward_profiles:
     formula: "(state.compromisedServersCount - before.compromisedServersCount) + 10 * (state.missionsCompletedCount - before.missionsCompletedCount)"
     win_bonus: 100
     loss_penalty: 0
+
+# LLM playtest tier (L-006). ADDITIVE + ladder-inert: R1/R2/R3 and the
+# exploit-hunter read only engine/observation_space/action_space/reward_profiles,
+# never this block. It drives the prompt's "KEY VALUES" line and the per-run
+# summary; every path below resolves into NexusHttpAdapter._read_state()'s own
+# flat dict (reusing the existing state shape — nothing invented). No loss_path:
+# NEXUS has no loss state (matching DDD / Nexus-Dominion precedent).
+playtest:
+  guide_char_budget: 3500
+  terminal_char_budget: 600
+  key_state_paths:
+    - { path: "level", label: "level" }
+    - { path: "credits", label: "credits" }
+    - { path: "compromisedServersCount", label: "servers_owned" }
+    - { path: "missionsCompletedCount", label: "missions_done" }
+    - { path: "gameStatus.completedStoryMissions", label: "story_missions", note: "0..8 -> win at 8" }
+  summary_paths:
+    - { path: "credits", label: "credits_gained" }
+    - { path: "compromisedServersCount", label: "servers_compromised" }
+    - { path: "missionsCompletedCount", label: "missions_completed" }
+  win_path: "gameStatus.isComplete"

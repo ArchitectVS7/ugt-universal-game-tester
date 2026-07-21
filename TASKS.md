@@ -272,7 +272,28 @@ verdict (varying difficulty, probing effect resolution via a stronger model or t
 credit-gated per L-003 precedent. Full detail in `integrations/tarot-war/RESULTS.md` and `HANDOFF.md`.
 Orchestration: graphify=none — no graphify-out/graph.json in repo root (checked; task is a self-contained wiring job). · attempts=1/4.
 
-### L-006 · Wire NEXUS for `ugt playtest` — `status: TODO` · `coder: sonnet` · `after: L-002`
+### L-006 · Wire NEXUS for `ugt playtest` — `status: DONE` · `coder: sonnet` · `after: L-002`
+**Delivered (2026-07-21):** Wrote `integrations/nexus/playtest_nexus.py` driving NEXUS
+through the L-002 direct-adapter entry point (`NexusHttpAdapter` isn't registered under
+any `engine.type`, same reason DDD needs a direct path) and `integrations/nexus/strategy-guide.md`
+covering the accept→scan→connect→exploit→cat loop and the three R2 difficulty modes,
+plus an additive `playtest:` block in `ugt.config.yaml`. The first delivery used
+`action_mode="action_id"` and disclosed the deviation because the shared loop's
+`type_text` branch was fire-and-forget (never reassigned `current_state`, so every
+delta was `{}`); fix-round-1 root-caused this as a real, fixable loop defect and
+repaired it in `ugt/core/playtester.py` — the `type_text` branch now reassigns state
+from `adapter.type_text_step(value)` when the adapter exposes it (`hasattr` guard, so
+PlaywrightAdapter/RealClientAdapter without `type_text_step` are byte-for-byte
+unchanged), and a new `action_mode="text"` + `_build_terminal_prompt` steer the LLM to
+type real command lines from live state. Live `ollama` run (gemma4:26b, server on
+:3100, PID-verified): PLAYTEST MET, actions_taken=25, all 25 steps `type_text`, all 25
+with real state deltas, 0 invariant violations against the same R3 `invariants.SUITE`;
+`verify_round1.py` re-run afterward stayed 25/25, confirming R1 is unaffected.
+Deliberate scope boundary: the Anthropic-provider paid balance campaign stays
+credit-gated per the L-003 precedent — this delivers the wiring and an `ollama`
+non-vacuous proof run, not the paid verdict. Full detail in
+`integrations/nexus/RESULTS.md` ("L-006") and `HANDOFF.md`.
+Orchestration: graphify=none — no `graphify-out/graph.json` in the repo root (checked via `ls`); this is a self-contained wiring task grounded directly in `playtester.py`, `nexus_http. · attempts=2/4.
 `NexusHttpAdapter` (`ugt/adapters/nexus_http.py`) already implements `type_text`/`type_text_step`/
 `get_terminal_text` (lines 182-200) — it does NOT need the `"legal_action"` schema from L-002, only the
 adapter-instance entry point L-002 builds (since `NexusHttpAdapter` isn't registered under any `engine.type` in

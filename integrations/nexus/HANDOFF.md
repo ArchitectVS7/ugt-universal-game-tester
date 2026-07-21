@@ -168,6 +168,16 @@ paths the R3 directed heuristic biases toward.
 
 - Adapter: `ugt/adapters/nexus_http.py`
 - Scripts/config: `integrations/nexus/{spike_nexus,smoke_nexus_adapter,verify_dod}.py`, `ugt.config.yaml`
+- LLM playtest (L-006): after the Live bring-up recipe above (server on :3100,
+  PID-verified) + `ollama serve`, run
+  `TEST_API_KEY=… python3 integrations/nexus/playtest_nexus.py --provider ollama`.
+  It uses the L-002 direct-adapter entry point in `action_mode="text"`: the LLM TYPES
+  raw command lines through the adapter's `type_text`/`get_terminal_text` (the real
+  terminal UX), and `NexusHttpAdapter.type_text_step` reports each transition so deltas
+  are genuine (see RESULTS.md "L-006" for the fix-round-1 root-cause repair to the
+  shared loop's type_text branch). `strategy-guide.md` + the additive `playtest:`
+  config block drive it. Exit 0 + "PLAYTEST MET" = ≥20 actions, ≥1 typed command with a
+  real state delta, invariant suite ran.
 - Game endpoints: `apps/game/src/app/api/test/{reset-episode,player-state,closed-alpha,bootstrap-player}/route.ts`
 - Game endpoint tests: `apps/game/tests/integration/api/{reset-episode,player-state}.test.ts`
 - Winnability reference: `apps/game/tests/integration/missions/full-story-winnable.test.ts`
