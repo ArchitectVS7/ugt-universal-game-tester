@@ -55,36 +55,36 @@ single adapter line.
 
 ---
 
-## The Three-Phase Testing Model
+## The Three-Tier Testing Model
 
-**Run these in order. Each phase depends on the previous one being healthy.**
+**Run these in order. Each tier depends on the previous one being healthy.** (This supersedes an older
+framing that cast Phase 2 as RL balance-training — that path still runs, see the note at the end of this
+section, but it is no longer the balance judge. The LLM playtester is.)
 
-| Phase | Command | Question answered | Output file |
-|-------|---------|------------------|-------------|
-| **1. Verify** | `ugt verify` | Does each game feature work correctly? | `results/coverage-report.json` |
-| **2. Balance** | `ugt train` + `ugt evaluate` | Can an agent learn to play? Is the game balanced? | `results/*_eval_summary.json` |
-| **3. Playtest** | `ugt playtest` | Does the game feel right to a reasoning player? | `results/playtest-report.json` |
+| Tier | Command / mechanism | Question answered | Output file |
+|------|---------------------|--------------------|-------------|
+| **1. Verify** | `ugt verify` | Does each game feature work correctly? (correctness) | `results/coverage-report.json` |
+| **2. Exploit-hunter** | `ugt/core/exploit_hunter.py` — R3 of the trial ladder | Does the game break under random/heuristic pressure? (robustness) | printed `[FINDING]`s + the round's PASS/FAIL footer |
+| **3. LLM playtest** | `ugt playtest` | Is the game *good*? Does it feel right to a reasoning player? (balance/judgment) | `results/playtest-report.json` |
 
-> **Why order matters:** Balance testing an unimplemented feature produces collapsed policies.
-> Playtesting a broken game generates noise. Phase 1 is cheap (minutes); do it first.
+> **Why order matters:** tier 3 verdicts on a game that still crashes under tier 2 are noise, and tier 2 on a
+> game whose features don't even work under tier 1 is a waste of a random walk. Tier 1 is cheap (minutes); do
+> it first.
 >
-> Use `ugt smoke-test` before Phase 1 as a quick sanity check that the bridge is responding.
+> Use `ugt smoke-test` before Tier 1 as a quick sanity check that the bridge is responding.
 
-### The trial ladder (how integrations actually run Phases 1–2)
+### The trial ladder (how integrations actually run Tiers 1–2)
 
-In practice, every real integration (see `integrations/<game>/` — warzones, tarot-war, NEXUS, DDD) climbs a
-standardized **trial ladder** of fail-closed gate scripts rather than the bare CLI commands:
+In practice, every real integration (see `integrations/<game>/`) climbs a standardized **trial ladder** of
+fail-closed gate scripts rather than the bare CLI commands — five rungs, each with its own exit criteria:
 
-1. **Spike** (`spike_<game>.py`) — prove the raw protocol round-trips headlessly (create/auth → act → read
-   state back). This is where you empirically pin protocol quirks before they bite.
-2. **Smoke** (`smoke_<game>_adapter.py`) — the same path through the `BaseAdapter` contract.
-3. **R1 — playability gate** (`verify_round1.py`) — one scripted full loop of the core game, with
-   per-command invariants checked after every command.
-4. **R2 — full spine** (`verify_round2.py`) — every major mode/system driven to a real outcome (e.g. an
-   actual win), still under invariants.
-5. **R3 — exploit-hunter** (`verify_round3.py`) — random/heuristic walks (`ugt/core/exploit_hunter.py`)
-   asserting the SAME invariants after every step, plus determinism: a same-seed replay must be
-   byte-identical.
+| Rung | Script | What it proves | Exit criteria |
+|---|---|---|---|
+| **Spike** | `spike_<game>.py` | The raw protocol round-trips headlessly (create/auth → act → read state back) | Every raw-protocol check passes; no protocol quirk left unresolved before writing the adapter |
+| **Smoke** | `smoke_<game>_adapter.py` | The same round-trip works through UGT's `BaseAdapter` contract | Same checks pass via `connect()`/`reset()`/`step()`/`close()`, not the raw protocol directly |
+| **R1 — playability** | `verify_round1.py` | One scripted full loop of the core game, invariants checked after every command | Every invariant holds across the whole loop; the loop reaches a real, meaningful state change (not a no-op); same-seed reproducible |
+| **R2 — full spine** | `verify_round2.py` | Every major mode/system driven to a real outcome (e.g. an actual win), still under invariants | Every mode reaches a genuine terminal outcome under the same invariants; the check count (denominator) is disclosed honestly — no vacuous passes, none silently narrowed or widened |
+| **R3 — exploit-hunter** | `verify_round3.py` | Random/heuristic walks (`ugt/core/exploit_hunter.py`) asserting the SAME invariants after every step, across multiple seeded episodes | Zero invariant violations/crashes across every episode and step; every action in the vocabulary exercised at least once; a same-seed replay is byte-identical (determinism) |
 
 The game-agnostic skeleton lives in `ugt/core/trial.py`: `GateRunner` (the `[PASS]`/`[FAIL]` accumulator,
 `[FINDING]` registry, and the fail-closed "ROUND N MET — p/t" footer), `InvariantSuite` (one predicate
@@ -93,8 +93,27 @@ definition reused by both the scripted rounds and the exploit-hunter, so the tie
 normalization — stays in the game's `integrations/<game>/` files. A failed check is DATA: findings print
 inline, fail the gate, and get fixed upstream in the game.
 
-Only after the ladder is green does Phase 3 (the LLM playtester) make sense — balance verdicts on a game
-that crashes are noise.
+### What happens once R3 passes
+
+R3 answers "does it work / does it break" — it does **not** answer "is it good." A green ladder is the
+*prerequisite* for the next tier, not the end of testing:
+
+1. **Tier 3 — LLM playtest** (`ugt playtest`, §9 below). An LLM plays through a realistic input channel
+   (keypresses, typed terminal commands, or a legal-action list for harness-style games with no terminal)
+   and judges balance/strategy, producing `results/playtest-report.json` with state-delta-based bug reports.
+   Only makes sense once the ladder is green — balance verdicts on a game that still crashes are noise.
+2. **Human / frontend UAT** — a real person plays the actual UI. Not yet CLI-automated by UGT, but the
+   established next step after a clean LLM playtest: things like visual readability, animation feel,
+   onboarding clarity, and accessibility that no automated tier can see by construction (an engine-level or
+   LLM-driven test can confirm the mechanics work; only a human can confirm the game *reads* well). Every
+   integration's `HANDOFF.md` should carry a UAT status line once this tier is reached.
+
+> **Legacy path, not part of the current model:** `ugt train` / `ugt evaluate` (PPO/DQN/A2C via
+> stable-baselines3) still exist and work against `simulation`/`browser` engines, and are documented in §8
+> below for games that still use them. They were the original "Phase 2" balance judge but were demoted after
+> a well-documented collapse (RL trained an agent that gamed the reward instead of playing well) — the LLM
+> playtester is the current balance/judgment tier. Don't reach for `train`/`evaluate` as a substitute for
+> `ugt playtest` on a new integration.
 
 ---
 
@@ -134,15 +153,18 @@ that crashes are noise.
 
 ## 1. What UGT Does
 
-UGT runs three phases of testing against a game, each answering a different question:
+UGT runs three tiers of testing against a game, each answering a different question (see "The Three-Tier
+Testing Model" above for the full table and exit criteria):
 
-| Phase | Tool | Question answered | Time |
-|-------|------|------------------|------|
+| Tier | Tool | Question answered | Time |
+|------|------|--------------------|------|
 | **1. Verify** | `ugt verify` | Does each feature work? (correctness) | ~minutes |
-| **2. Balance** | `ugt train` + `ugt evaluate` | Is the game learnable and balanced? | ~hours |
-| **3. Playtest** | `ugt playtest` | Does the game feel right to a reasoning agent? | ~30 min |
+| **2. Exploit-hunter** | R3 of the trial ladder | Does the game break under pressure? (robustness) | ~minutes |
+| **3. Playtest** | `ugt playtest` | Does the game feel right to a reasoning agent? (balance) | ~30 min |
 
-All three phases share the same `ugt.config.yaml` and bridge protocol. Once your bridge is written, all three phases are available.
+All three tiers share the same `ugt.config.yaml` and bridge protocol. Once your bridge is written, all three
+are available. (`ugt train`/`ugt evaluate` — RL training — still exist for `simulation`/`browser` engines but
+are a legacy path, not the current balance tier; see the note at the end of "The Three-Tier Testing Model".)
 
 ---
 
