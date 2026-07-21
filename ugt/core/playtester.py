@@ -540,7 +540,19 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
             if k not in _ignore_delta_fields and k.rsplit(".", 1)[-1] not in _ignore_delta_fields
         }
         noop_key = f"{action_type}:{value}"
-        if not material_delta and action_type in ("action_id", "press_key", "type_text", "end_turn", "legal_action"):
+        # Some commands (e.g. NEXUS's `ls`/`analyze`) are legitimately display-only: their real
+        # payload is rendered into terminal_text, not into any structured state field, so they will
+        # NEVER show a material delta no matter how useful the information they just revealed was.
+        # Tracking them in noop_streaks would auto-flag normal, repeatable recon as a "stuck loop"
+        # false positive (found 2026-07-21: `ls` on a brand-new server flagged after 3 calls even
+        # though each one legitimately listed a different directory). Games declare these verbs via
+        # playtest.display_only_verbs in their ugt.config.yaml — matched on the first whitespace
+        # token of `value`, so `"ls"` also exempts `"ls -la"` if a model ever types that variant.
+        _display_only_verbs = set(playtest_cfg.get("display_only_verbs") or [])
+        _verb = value.split(None, 1)[0] if value else value
+        if _verb in _display_only_verbs:
+            pass
+        elif not material_delta and action_type in ("action_id", "press_key", "type_text", "end_turn", "legal_action"):
             noop_streaks[noop_key] = noop_streaks.get(noop_key, 0) + 1
             if noop_streaks[noop_key] == 3:
                 repeats = noop_streaks[noop_key]

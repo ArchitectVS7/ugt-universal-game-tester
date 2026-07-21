@@ -122,3 +122,10 @@ playtest:
   # after its first (and only) real effect, with the detector silently never firing.
   ignore_delta_fields:
     - "rngCounter"
+  # ls/analyze render their payload into terminal text, not structured state, so they
+  # ALWAYS look like a no-op delta regardless of whether they revealed something new.
+  # Without this, the contradiction detector auto-flags normal repeatable recon as a
+  # false-positive "stuck loop" (found 2026-07-21: `ls` on a fresh server connection).
+  display_only_verbs:
+    - "ls"
+    - "analyze"
