@@ -1,8 +1,17 @@
 # Pond Conspiracy (the-pond) — UGT Integration Plan
 
-**Status: R2 NOT MET — 21/26 (2026-07-20). Five blocked: four modes the game has NO code
-path for, plus a boss the automated driver did not beat this run (PC-15 is a balance note, not
-a proof of impossibility — see the-pond T-062). Next: fix PC-11/12/13 upstream, then re-run R2.**
+**Status: R2 NOT MET — 35/37 (2026-07-20, after U-001…U-007 + the-pond M7). Two remaining
+non-passes, both by-design blocks that correctly fail the gate and are NOT in U-007's scope:
+PC-15 (balance — driver did not beat the boss this run; re-baseline is U-009's) and PC-12
+(victory run RESULT unobservable over the current wire — filed harness follow-up below). The
+formerly-blocked modes PC-11/PC-13/PC-14 are FIXED + measured; the board card flip is DRIVEN
+(U-007); and PC-16 (player escaped the arena during the boss fight) is FIXED upstream — the R2
+invariant sweep is now CLEAN (0 violations / 1578 steps). Next rung: U-008 (harness pause) →
+U-009 (R2 re-baseline) → R3 exploit-hunter.**
+
+Prior status line (kept for history): R2 NOT MET — 21/26 (2026-07-20). Five blocked: four modes
+the game had NO code path for, plus a boss the automated driver did not beat (PC-15 balance note,
+see the-pond T-062).
 R1 MET 18/18 seed-independent; all R1-round open items CLOSED; game suite fully green
 1063/1063. PC-1 is fixed, so R3 same-seed replay is no longer blocked.
 
@@ -106,6 +115,20 @@ against zero enemies), and `gate.sh` unable to pass a green suite at all. Detail
 
 ### Still open
 
+- **PC-16 — RESOLVED upstream (the-pond `combat/scenes/Player.tscn`), but two related latent
+  game-side items are filed for a future collision-model cleanup (NOT this task).** PC-16 (player
+  escaped the arena vertically during the boss fight) was fixed by setting the Player
+  `CharacterBody2D` `collision_mask` 2 → 3 so it collides with the boundary walls (which sit on the
+  default physics layer 1). That is the surgical, R1-safe fix. The deeper items a game task should
+  address: **(a)** the `TestArena.tscn` boundary `Walls` live on layer 1 ("Player") instead of layer 2
+  ("Environment") — the game's own `scripts/validate_collision_setup.gd` matrix intends walls to be
+  Environment and BOTH player and enemies to collide with them; **(b)** `enemy_spawner.gd`'s 600px
+  spawn ring overshoots the 540px vertical half-height, so top/bottom spawns land OUTSIDE the arena
+  (`y∈[-60,1140]`) and would be trapped the moment walls collide for enemies (moving walls to layer 2
+  without fixing this regressed R1 to 13/18); **(c)** the `BossArena` inner `ArenaWalls` have no
+  `CollisionShape2D` at all (only `ColorRect`s), so the "locked" boss box never physically confines —
+  cosmetic only, and `boss_arena.gd:70-72`'s `set_deferred("disabled", …)` on those shapeless
+  `StaticBody2D`s is a no-op. See RESULTS.md "U-007 (fix round 2): PC-16 FIXED" for the full analysis.
 - **Harness gap (follow-up filed by U-001): no wire op reaches `EventBus.ending_unlocked`, so a
   `"victory"` run result cannot be OBSERVED over the wire.** The JSON-lines harness protocol
   (`tests/harness/ugt_harness.gd`) exposes only `create/step/choose/state/quit`. Reaching
@@ -209,6 +232,19 @@ aim always at nearest enemy via structural read of the harness's own enemy list)
    flip → epilogue chain (the T-047 spine, but wire-driven), both run-end paths (death, victory),
    pause. Colorblind modes + visual polish are OUT of scope — flag for human UAT (the ND U-110
    precedent).
+   - **Board card flip — DRIVEN & MEASURED (U-007, no longer a silent gap).** The harness gained
+     an opt-in `with_board` create flag (`ugt_harness.gd::_spawn_board` + `_board_state()`, in the
+     style of the `boss_id` accessor) that instances the real `ConspiracyBoard` headless (the same
+     `instantiate()` path the T-047 E2E test uses) and reads back each live `DataLogCard`'s own
+     `is_discovered()`, the board's `discovered_count`, and MetaProgression's persistent ending gate
+     (`get_unlock_status`/`has_connection`, `CORPORATE_ENDING_ID`). `verify_round2.py` §4 now drives
+     a real death run whose `EventBus.evidence_unlocked` flips `data_log_01` undiscovered→discovered
+     on the live board — asserted as a `false→true` transition, a `discovered_count` delta that
+     matches the cards actually flipped, and lockstep with `logs_collected`. The old `gate.info`
+     "not driven by this section" note is gone. The FULL `CORPORATE_ENDING_ID` unlock (all 16 logs +
+     Lobbyist + CEO + the `data_log_04↔data_log_07` smoking-gun board connection) still can't be
+     reached over the current wire — that residual is the same PC-12 harness gap (no evidence-grant /
+     board-connection op), tracked below, not a board-flip gap.
 5. **R3 exploit-hunter** — `ExploitHunter` with invariants: hp ∈ [0, max]; no NaN/inf positions;
    player inside arena bounds; bullet count bounded (pool leak detector); run/evidence state machine
    consistent (no dupe unlocks); no `SCRIPT ERROR` on the subprocess stderr; soft-lock detection

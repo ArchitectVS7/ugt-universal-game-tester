@@ -6,8 +6,14 @@ outcome against the live headless game, through `PondHarnessAdapter`.
 R1 asked "is this game playable over the wire?" and answered yes. R2 asks the
 harder question: "does every mode the game advertises actually reach an
 outcome?" — all three arenas and their hazards, the wave-5 boss fought to a
-decision, the evidence -> conspiracy-board -> epilogue chain, BOTH run-end paths
-(death and victory), and pause.
+decision, the evidence -> conspiracy-board card flip -> epilogue chain, BOTH
+run-end paths (death and victory), and pause.
+
+Section 4 DRIVES the full evidence -> board -> epilogue chain over the wire
+(U-007): a real death run's EventBus.evidence_unlocked flips a live DataLogCard
+on an instanced ConspiracyBoard (create's with_board flag), read back from the
+harness `board` block — the board card flip HANDOFF.md lists as an R2
+requirement is now a measured check, not a silently-absent one.
 
 The answer is a qualified no, and the qualifications are the point of this gate.
 The remaining blocks are genuine no-code-path / balance defects, which is
@@ -119,6 +125,11 @@ EXPECTED_PER_WAVE = {1: 8, 5: 16, 10: 20}
 # The BossArena trigger box in TestArena.tscn, in world coordinates.
 BOSS_TRIGGER = (960.0, 250.0)
 
+# The canonical evidence set the ConspiracyBoard spawns one card per (EvidenceIds
+# .ALL — the 16 data logs; DATA_LOG_01..16). The board-flip section reads the card
+# count back over the wire and asserts the full deck instanced (U-007).
+EXPECTED_EVIDENCE_CARDS = 16
+
 # PC-14 (the-pond T-061): after trigger_boss()->_stop_enemy_spawner() the locked
 # arena must not refill. Wire analogue of T-061's idle >=5s assertion — sample
 # the arena across this window and require 0 non-boss adds at every sample.
@@ -188,13 +199,20 @@ def step(ad, frames=10, **inp) -> dict:
     return resp
 
 
-def take_level_up(ad, s: dict) -> dict:
+def take_level_up(ad, s: dict, pick_log: list | None = None) -> dict:
     """Pick a card if the level-up screen is up.
 
     MUST be called in every driving loop. LevelUpUI pauses the whole tree, so a
     driver that ignores it sees the world freeze mid-swing — tongue stuck
     EXTENDING, i-frames never expiring — and will misread that as a game
     soft-lock. (It did, during development of this gate.)
+
+    `pick_log`, when passed, receives one record per card taken:
+    `{"mutation": <id>, "events": [...]}` — the events the harness drained
+    DURING the choose (which the caller would otherwise discard). This is how a
+    driver observes whether a mutation's own effect emits `evidence_unlocked`
+    mid-run, instead of inferring it from source. Section 4 uses it so every
+    board-card flip is attributed to an event actually seen over the wire.
     """
     lvl = s.get("level_up") or {}
     if not lvl.get("pending"):
@@ -211,7 +229,10 @@ def take_level_up(ad, s: dict) -> dict:
     # the cards stay clickable for its whole duration, so a short choose returns
     # mid-fade and the next loop iteration clicks AGAIN — re-emitting
     # mutation_selected for an already-owned mutation.
-    ad.choose_mutation(pick, frames=40)
+    _, choose_events = ad.choose_mutation(pick, frames=40)
+    if pick_log is not None:
+        picked = ids[pick] if 0 <= pick < len(ids) else None
+        pick_log.append({"mutation": picked, "events": list(choose_events)})
     return snap(ad)
 
 
@@ -586,36 +607,117 @@ def section_unreachable(gate: Gate, seed: int) -> None:
 
 
 def section_evidence_chain(gate: Gate, seed: int) -> None:
-    """Evidence -> narrative -> RunEndScreen, driven to a real ending."""
-    print("\n  -- 4. evidence -> epilogue -> run end --")
+    """The advertised chain, DRIVEN over the wire: a real run's evidence unlock ->
+    conspiracy-board card flip -> epilogue -> run end.
+
+    A death run fires EventBus.run_rewards_due (strictly before run_ended, PC-6),
+    which EvidenceManager turns into EventBus.evidence_unlocked, which the LIVE
+    ConspiracyBoard consumes in _on_evidence_unlocked -> DataLogCard.set_discovered
+    — the board card flip. The board is instanced over the wire via create's
+    with_board flag (U-007); every fact is read back from the harness `board`
+    block (real DataLogCard.is_discovered() + MetaProgression's persistent gate)
+    and the run-end nodes. No game logic is reimplemented here — the flip is
+    produced by the game's own bus, never faked. This closes HANDOFF.md's R2
+    "evidence -> conspiracy-board card flip -> epilogue" requirement, which was
+    previously only an INFO line.
+    """
+    print("\n  -- 4. evidence -> conspiracy-board card flip -> epilogue -> run end --")
     ad = _new_adapter()
     try:
-        ad.reset(seed=seed, run_number=1)
+        # with_board=True: instance the real ConspiracyBoard so the card flip is
+        # observable/driveable. It is hidden (never the input target) so it cannot
+        # perturb the combat/level-up input this section drives.
+        ad.reset(seed=seed, run_number=1, with_board=True)
         s = snap(ad)
+
+        # Baseline board state, READ over the wire (not assumed): the set of cards
+        # already discovered before the run, the board's own counter, and
+        # MetaProgression's persistent log count.
+        board0 = s.get("board") or {}
+        board_present = bool(board0.get("present"))
+        base_cards = {c.get("id"): bool(c.get("discovered"))
+                      for c in (board0.get("cards") or [])}
+        base_discovered = {i for i, d in base_cards.items() if d}
+        base_count = board0.get("discovered_count") or 0
+        base_logs = (board0.get("unlock_status") or {}).get("logs_collected") or 0
+        gate.check(
+            board_present and len(base_cards) == EXPECTED_EVIDENCE_CARDS,
+            "the live ConspiracyBoard instanced over the wire (U-007, with_board)",
+            f"present={board_present} cards={len(base_cards)} "
+            f"(expected {EXPECTED_EVIDENCE_CARDS}) "
+            f"pre-discovered={sorted(base_discovered)} discovered_count={base_count}")
+
         saw = {"evidence_unlocked": False, "run_rewards_due": False,
                "run_ended": False, "player_died": False}
         result = None
         event_stream: list = []
+        # Every evidence_unlocked id seen this run, tagged with the source that
+        # emitted it ("run_reward" = a step's stream, "mutation:<id>" = a
+        # level-up card's own effect). Full capture — earlier this loop read
+        # only the 14-frame step and dropped the choose + 2-frame events, so a
+        # second flip had no observed cause and could only be inferred.
+        unlocked: list[tuple[str, str]] = []
+        pick_log: list = []           # {"mutation", "events"} per card taken
+
+        def _absorb(events, source):
+            """Fold one sub-step's events into the ordered stream + tallies.
+
+            `source` labels where these events came from, so each
+            evidence_unlocked (and therefore each board flip) is attributed to
+            something ACTUALLY observed over the wire, not read from source."""
+            nonlocal result
+            for e in events:
+                event_stream.append(e)
+                sig = e.get("signal")
+                if sig in saw:
+                    saw[sig] = True
+                if sig == "evidence_unlocked":
+                    args = e.get("args") or []
+                    if args:
+                        unlocked.append((args[0], source))
+                if sig == "run_ended":
+                    args = e.get("args") or []
+                    result = args[0] if args else None
+
         for _ in range(500):
-            s = take_level_up(ad, s)
+            # A level-up pick can itself emit evidence_unlocked (a mutation's
+            # own effect); capture those choose-frame events via pick_log rather
+            # than discarding them.
+            picks_before = len(pick_log)
+            s = take_level_up(ad, s, pick_log=pick_log)
+            for rec in pick_log[picks_before:]:
+                _absorb(rec["events"], f"mutation:{rec['mutation']}")
             p = s["player"]["pos"]
             add, d = nearest_add(s, p)
             aim = add["pos"] if add else [p[0] + 1, p[1]]
             move = [0, 0]
             if add and d > 110:
                 move = [(add["pos"][0] - p[0]) / max(d, 1), (add["pos"][1] - p[1]) / max(d, 1)]
-            step(ad, 2, attack=True, aim=aim, move=move)
+            first = step(ad, 2, attack=True, aim=aim, move=move)
             s = step(ad, 14, attack=False, aim=aim, move=move)
-            for e in (s.get("events") or []):
-                event_stream.append(e)
-                sig = e.get("signal")
-                if sig in saw:
-                    saw[sig] = True
-                if sig == "run_ended":
-                    args = e.get("args") or []
-                    result = args[0] if args else None
+            # Temporal order: choose (above), then the press frames, then the
+            # release window — the whole iteration's events, none dropped.
+            _absorb(first.get("events") or [], "run_reward")
+            _absorb(s.get("events") or [], "run_reward")
             if saw["run_ended"]:
                 break
+
+        # Ordered list of just the ids (compat with the readouts below).
+        unlocked_ids = [uid for uid, _src in unlocked]
+
+        # Post-run board read (zero-frame state op) — the flip lands synchronously
+        # inside end_run, so the final snapshot already reflects it; take a clean
+        # read anyway so the comparison is unambiguous.
+        post = ad._rpc({"op": "state"})
+        board1 = post.get("board") or {}
+        post_cards = {c.get("id"): bool(c.get("discovered"))
+                      for c in (board1.get("cards") or [])}
+        post_discovered = {i for i, d in post_cards.items() if d}
+        post_count = board1.get("discovered_count") or 0
+        post_us = board1.get("unlock_status") or {}
+        post_logs = post_us.get("logs_collected") or 0
+        ending_id = board1.get("ending_id")
+        newly = post_discovered - base_discovered
 
         gate.check(saw["player_died"] and saw["run_ended"],
                    "a run reaches a real end over the wire",
@@ -632,6 +734,54 @@ def section_evidence_chain(gate: Gate, seed: int) -> None:
             f"ORDER VIOLATED / missing: run_rewards_due=#{r_idx} run_ended=#{e_idx} "
             f"(rewards must strictly precede run_ended)")
 
+        # --- THE BOARD CARD FLIP (U-007), driven and measured ---------------------
+        # ConspiracyBoard._on_evidence_unlocked is the ONLY path to
+        # DataLogCard.set_discovered, so every card that flipped this run must
+        # correspond to an evidence_unlocked event we actually observed over the
+        # wire. We now capture that event from EVERY sub-step (choose + press +
+        # release), so the assertion is FULL attribution — no flip is left to
+        # inference. A flip with no observed unlock is itself the finding.
+        # `unlocked` carries (id, source): "run_reward" (run_rewards_due ->
+        # unlock_next_gated_evidence, in the step stream) or "mutation:<id>" (a
+        # level-up card's own effect, captured from its choose frames).
+        unlocked_set = {uid for uid, _src in unlocked}
+        attribution = {uid: src for uid, src in unlocked}   # last-writer per id
+        first_id = unlocked_ids[0] if unlocked_ids else None
+        every_flip_seen = bool(newly) and newly <= unlocked_set
+        flips_are_discovered = all(post_cards.get(i) is True for i in newly)
+        flip_ok = (first_id is not None
+                   and every_flip_seen and flips_are_discovered
+                   and not (base_discovered & newly))
+        gate.check(
+            flip_ok,
+            "every conspiracy-board flip is caused by an observed evidence unlock "
+            "over the wire (U-007; HANDOFF R2 'evidence -> board card flip')",
+            (f"cards flipped this run={sorted(newly)}; observed evidence_unlocked "
+             f"(id->source)={attribution}; every flip attributed to a wire event="
+             f"{every_flip_seen}")
+            if first_id else
+            (f"NO evidence_unlocked observed anywhere this run "
+             f"(board_present={board_present}) — cannot measure a flip"))
+
+        # The board's own counter must track the real flips: its delta equals the
+        # number of cards that actually turned discovered, and it advanced (>=1).
+        gate.check(
+            (post_count - base_count) == len(newly) and post_count > base_count,
+            "the board's discovered_count tracks the real card flips",
+            f"discovered_count {base_count} -> {post_count} "
+            f"(+{post_count - base_count}); cards newly discovered={sorted(newly)} "
+            f"(n={len(newly)}); by source={attribution}")
+
+        # The board flip and MetaProgression's PERSISTENT evidence set advance in
+        # lockstep, and the ending gate is cited by its current constant.
+        gate.check(
+            (post_logs - base_logs) == (post_count - base_count)
+            and post_logs > base_logs and ending_id == "corporate_conspiracy",
+            "flip and persistent evidence advance in lockstep, gated by "
+            "CORPORATE_ENDING_ID (the-pond T-060)",
+            f"logs_collected {base_logs} -> {post_logs}; board discovered_count "
+            f"{base_count} -> {post_count}; ending gate id={ending_id!r}")
+
         narrative = s.get("narrative") or {}
         run_end = s.get("run_end") or {}
         epilogue = str(narrative.get("epilogue") or "")
@@ -641,12 +791,18 @@ def section_evidence_chain(gate: Gate, seed: int) -> None:
                    "RunEndScreen is presented with that epilogue",
                    f"present={run_end.get('present')} visible={run_end.get('visible')} "
                    f"scene={run_end.get('scene')!r}")
-        evidence = (s["run"]["stats"] or {}).get("evidence_collected") or []
-        gate.info("evidence collected this run",
-                  f"{evidence} — the conspiracy-board card flip is not driven by this "
-                  f"section; U-007 owns driving it over the wire. Boss kills that unlock "
-                  f"gated cards are now reachable (the-pond T-054 fixed PC-11), so the board "
-                  f"flip is no longer blocked here.")
+
+        # Context (NOT a downgrade of the flip check): the full CORPORATE_ENDING_ID
+        # unlock still requires all logs + both bosses + the smoking-gun board link,
+        # which a single death run does not complete (that residual is PC-12's wire
+        # gap, recorded separately).
+        gate.info(
+            "full CORPORATE_ENDING_ID still gates on the complete case",
+            f"ending_unlocked={post_us.get('ending_unlocked')} needs all "
+            f"{post_us.get('logs_needed')} logs + Lobbyist + CEO defeats + the "
+            f"data_log_04<->data_log_07 smoking-gun board connection "
+            f"(smoking_gun={board1.get('smoking_gun')}) — one death run cannot "
+            f"complete it (see PC-12).")
     finally:
         ad.close()
 

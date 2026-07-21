@@ -2,6 +2,141 @@
 
 Commit-traceable record. A failed check is data. Game repo: `~/Dev/Games/the-pond/`.
 
+## 2026-07-20 — U-007 (fix round 2): PC-16 FIXED upstream — the player is now contained in the arena; R2 invariant sweep CLEAN
+
+The U-007 gate re-run exited 1 on three non-passes: the two by-design blocks (PC-15 balance, PC-12
+victory wire gap) and the **invariant sweep** — 140 `player escaped vertically` violations (e.g.
+`y=-163.0 outside [0.0, 1080.0] (+/-64.0)`) during the wave-5 boss fight, i.e. **PC-16**, the
+containment defect the ported sweep surfaced under U-003. PC-16 is a real GAME bug (not a tester
+artifact), so it is fixed upstream (dual validation), the sweep now passes because the game works,
+and R2 improves **34/37 → 35/37**.
+
+### Root cause (measured, then confirmed in source)
+
+The escape reproduces over the wire: driving the player straight UP with dodge, its `y` reached the
+hundreds-negative — it walked clean through the top wall. Source then explained why:
+
+- `project.godot [layer_names]` = `1 Player · 2 Environment · 3 Enemies · 4 PlayerAttack · 5 Bullets`.
+- The `Player` `CharacterBody2D` (`combat/scenes/Player.tscn`) had **`collision_mask = 2`**
+  (Environment only).
+- The `TestArena.tscn` boundary `Walls` (four `StaticBody2D` with real `CollisionShape2D`, inner
+  faces at `x=0/1920`, `y=0/1080`) were authored **without an explicit `collision_layer`**, so they
+  sit on the **default layer 1 ("Player")** — NOT Environment. `move_and_slide()` collides only when
+  the mover's mask ∩ the body's layer ≠ 0; `player_mask(2) & wall_layer(1) == 0`, so **nothing
+  collided with the boundary walls** and the player passed straight out. (Enemies, mask `6`, likewise
+  never collided with them — they enter from off-screen spawns, see below.)
+
+R1 never caught it because R1 stays interior; R2's boss fight drives the player up toward the
+top-positioned boss (`[960, 100]`) while evading, pressing it through the (non-colliding) top edge.
+
+### The fix (surgical, non-regressing): `combat/scenes/Player.tscn` `collision_mask` 2 → 3
+
+Add layer 1 to the player's mask so the player collides with the boundary walls (which live on
+layer 1). The player continues to collide with layer-2 Environment (the ChemicalPlant conveyor
+hazards) exactly as before; the only NEW physics body it now hits is the layer-1 boundary walls.
+Verified safe: the only layer-1 **physics body** in the driven arenas is those walls — the toxic
+puddles are `Area2D` (monitoring, never touched by `move_and_slide`), the security camera is a
+`Node2D`, conveyor walls are already layer 2. Nothing else on layer 1 exists to spuriously collide.
+
+**Why NOT the "cleaner" re-layer (walls → Environment layer 2).** The game's own
+`scripts/validate_collision_setup.gd` matrix documents the intended design as *both* Player and Enemy
+colliding with Environment — so the design-correct home for the walls is layer 2. But enemies
+(`enemy_spawner.gd:_get_spawn_position`) spawn on a **600px ring around the arena center (960,540)**,
+which overshoots the 540px vertical half-height: the top/bottom arcs land at `y∈[-60,1140]`, i.e.
+**outside** the walls. Putting the walls on the shared Environment layer makes enemies collide with
+them too and **traps ~29% of spawns outside the arena** — a measured R1 regression to **13/18
+(4 kills / 10 needed)**. Fixing that properly needs an enemy-spawn-containment change that would
+also break `test/unit/test_enemy_spawner.gd::test_enemies_spawn_at_radius` (asserts spawn distance
+≈ `spawn_radius` ± 50) and touches FR-08 difficulty — out of this task's scope and R1-destabilizing.
+The player-mask fix contains the player (the observed defect) without that blast radius. Two latent
+game-side items are filed for a future the-pond collision-model cleanup (see HANDOFF "Still open"):
+(a) boundary walls should live on the Environment layer, not the Player layer; (b) enemy spawns
+overshoot the arena and would be trapped once walls collide for enemies; and, separately, (c) the
+`BossArena` inner `ArenaWalls` have **no `CollisionShape2D` at all** (only `ColorRect`s) so the
+"locked" boss box never physically confines — it does not cause an invariant violation (the outer
+walls now hold), but the inner-arena lock is cosmetic. `boss_arena.gd:70-72`'s
+`set_deferred("disabled", …)` on the shapeless `StaticBody2D` walls is a no-op regardless.
+
+### Verification (measured, seed 20260720, godot 4.7.1)
+
+- Containment repro: driving into every wall now clamps the player to `y∈[14,1066]`, `x∈[14,1906]`
+  (the 28px body against walls at 0/1080/0/1920) — no escape.
+- **R1 MET 18/18** — no regression; `run summary: 101 steps, 10 kills` (enemies unaffected).
+- **R2 NOT MET 35/37** — the invariant sweep now **PASS: 0 violations over 1578 steps** (was 140);
+  stderr scan clean (0 SCRIPT ERRORs). The 2 remaining non-passes are the unchanged by-design blocks
+  **PC-15** (balance — driver did not beat the boss; re-baseline is U-009's) and **PC-12** (victory
+  result unobservable over the current wire — filed harness follow-up). These correctly FAIL the gate
+  per the standing constraint ("a gate that skips what the game cannot do reports a green that means
+  nothing"); they are NOT U-007's to resolve and were not weakened to force a green.
+- **the-pond `scripts/gate.sh`: PASS** — GUT suite `Failing Tests = 0` (baseline 2, tolerance ±4);
+  the `Player.tscn` mask change broke no game test. (BuHSpawner teardown thread errors are the known
+  benign PC-3 noise.)
+
+PC-16 status: **RESOLVED upstream** (the-pond `combat/scenes/Player.tscn`).
+
+## 2026-07-20 — U-007: the evidence → conspiracy-board card flip is now DRIVEN & MEASURED over the wire
+
+`verify_round2.py`'s docstring advertised the "evidence → conspiracy-board → epilogue chain", but
+`section_evidence_chain` never touched the board and downgraded evidence to a `gate.info` ("the
+conspiracy-board card flip is not driven by this section") — the board card flip HANDOFF.md lists as
+an R2 requirement was **silently absent, not measured**. The only real blocker was a **harness gap**:
+the JSON-lines harness loaded `TestArena.tscn` alone and exposed no board/conspiracy state, so the
+`EventBus.evidence_unlocked` the game already emits on every run end had no board listening and no
+read-back. This closes that gap and drives a real flip.
+
+**Reachability (why this is DRIVEN, not BLOCKED):** the flip is reachable through the ordinary
+death-run path — no boss kill required. On every run end, `RunManager` emits `run_rewards_due`
+before `run_ended` (the same ordering PC-6 asserts); `EvidenceManager._on_run_rewards_due →
+unlock_next_gated_evidence()` unlocks the first unresolved log (`data_log_01` on a virgin meta save,
+via `EvidenceGraph.next_unresolved`) and emits `EventBus.evidence_unlocked(id)`; a live
+`ConspiracyBoard._on_evidence_unlocked` calls `DataLogCard.set_discovered(true)` — the flip.
+
+**Harness extension (game repo, wire-only — in the style of the `boss_id` accessor):**
+- `ugt_harness.gd` gained an opt-in `with_board` create flag → `_spawn_board()` instances the real
+  `res://conspiracy_board/scenes/ConspiracyBoard.tscn` headless (the same `instantiate()` path the
+  T-047 E2E test `test/integration/test_end_to_end_loop.gd` drives, so it is known to boot clean),
+  hidden so it is never the input target (`_board_is_active()` no-ops while invisible — no focus
+  grab, no click theft of the combat/level-up input). Its `_ready()` still spawns the 16 cards and
+  subscribes to `EventBus.evidence_unlocked` **before** the first run-end unlock fires.
+- New `_board_state()` (added to `_snapshot()` as `board`, null when not requested — same shape rule
+  as `_boss_state`) reads structurally only: each live `DataLogCard`'s `get_data_id()`/
+  `is_discovered()`, the board's `discovered_count`, and MetaProgression's persistent ending gate
+  (`get_connections`/`has_connection(DATA_LOG_04, DATA_LOG_07)`/`get_unlock_status`) plus
+  `CORPORATE_ENDING_ID` (T-060) — so the ending citation uses the current constant, never
+  `TRUE_ENDING_ID`. No board logic is reimplemented; the flip is produced by the game's own bus.
+- `PondHarnessAdapter.reset(..., with_board=False)` threads the flag into the create request
+  (transport only).
+
+**The measured checks (verify_round2.py §4, +4 over baseline, all PASS at seed 20260720):**
+1. the live `ConspiracyBoard` instanced over the wire — `present=True cards=16 discovered_count=0`
+   (baseline READ, not assumed);
+2. **every board card flip is caused by an observed evidence unlock** — the driver now captures the
+   `evidence_unlocked` events from EVERY sub-step (the level-up choose frames + the attack press + the
+   release window), not just the last step, so each flip is attributed to an event actually seen over
+   the wire rather than inferred from source. Two cards flipped `discovered false→true` this run and
+   both are explained by an observed unlock: `data_log_01` via the run-reward path (`run_rewards_due →
+   unlock_next_gated_evidence`, in the step stream) and `data_log_06` by the `paper_trail` mutation's
+   own effect, captured in that card's choose frames (`id→source={data_log_06:'mutation:paper_trail',
+   data_log_01:'run_reward'}`). The check asserts `cards_flipped ⊆ observed_unlocks` — a flip with no
+   observed cause would itself be the finding;
+3. `discovered_count` delta equals the cards that actually flipped and advanced ≥1 (`0→2`, both
+   `data_log_01` + `data_log_06` as attributed above);
+4. flip and MetaProgression's persistent set advance in lockstep (`logs_collected 0→2`), gated by
+   `ending_id='corporate_conspiracy'`.
+An INFO records (context, not a downgrade) that the FULL `CORPORATE_ENDING_ID` unlock still needs all
+16 logs + Lobbyist + CEO + the `data_log_04↔data_log_07` smoking-gun connection — a single death run
+does not complete it (the same PC-12 wire gap, unchanged).
+
+**R2 re-measured NOT MET 34/37** (was 30/33): the denominator widened by exactly the 4 board checks,
+all passing. The 3 remaining non-passes are unchanged and pre-existing: **PC-15** (boss not beaten
+this run, balance), **PC-12** (victory result unobservable over the current wire), and the invariant
+sweep FAIL = **PC-16** (boss arena has no collision walls — 140 `player escaped vertically`
+violations, all in the boss fight; verified identical on committed code at 30/33, i.e. **not** caused
+by this change). Module + `section_evidence_chain` docstrings updated to describe the driven
+evidence → board-flip → epilogue chain. gdlint clean; the file's hand-maintained style is preserved
+(the-pond does not enforce `gdformat` — `gate.sh` runs neither gdformat nor gdlint, and the committed
+harness itself does not pass `gdformat --check`).
+
 ## 2026-07-20 — U-003: R1's two safety nets ported into R2 — invariant sweep surfaced a NEW escape (PC-16)
 
 R2 drove tens of thousands of frames with neither safety net R1 has: no per-step

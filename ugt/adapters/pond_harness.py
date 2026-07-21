@@ -166,7 +166,7 @@ class PondHarnessAdapter(BaseAdapter):
             raise RuntimeError(f"harness script not found: {script_fs}")
         return True
 
-    def reset(self, seed=None, run_number=None):
+    def reset(self, seed=None, run_number=None, with_board=False):
         """Fresh episode: restart the headless game and create the arena.
 
         Returns the normalized flat state dict. A bare reset() derives a
@@ -180,6 +180,12 @@ class PondHarnessAdapter(BaseAdapter):
         the bullet-speed tier (T-040/T-042). Without it every episode starts
         from a virgin meta save and only ever sees run 1's Polluted Wetland, so
         two of the three arenas are unreachable through the wire.
+
+        `with_board` is another create-time config key (U-007): when True the
+        harness also instances the real ConspiracyBoard, so the evidence ->
+        board card-flip chain becomes observable/driveable over the wire (the
+        snapshot then carries a `board` block). Off by default so the arena/boss
+        sections are never perturbed by the board's card nodes.
         """
         self._kill_process()
         self._reset_count += 1
@@ -206,7 +212,10 @@ class PondHarnessAdapter(BaseAdapter):
         create_req = {"op": "create", "seed": self.last_seed}
         if run_number is not None:
             create_req["run_number"] = int(run_number)
+        if with_board:
+            create_req["with_board"] = True
         self.last_run_number = run_number
+        self.last_with_board = bool(with_board)
         created = self._rpc(create_req, timeout=120)
         if created.get("ok") is not True:
             raise RuntimeError(f"create failed: {created}")
