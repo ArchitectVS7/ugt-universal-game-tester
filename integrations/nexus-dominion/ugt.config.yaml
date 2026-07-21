@@ -114,6 +114,30 @@ action_space:
   # engine's order vocabulary; step() marks them info["probe"]=True so the
   # invariants can tell an expected refusal from a defect.
 
+# LLM playtest tier (L-003) — the structured/legal-action drive mode built in
+# L-002. Additive + config-only: R1/R2/R3 and the exploit-hunter ignore this
+# block (UgtConfig tolerates unknown top-level keys, as DDD proved). All paths
+# resolve into the adapter's OWN normalized `_read_state` flat dict — no new
+# state shape is invented here.
+#
+#   key_state_paths -> the prompt's "⚡ KEY VALUES" line (what the LLM watches).
+#   summary_paths   -> cross-reset delta banking in the playtest report.
+# There is NO win_path/loss_path: Nexus Dominion has no terminal state by design
+# (achievements are milestones, not endings), so both are omitted.
+playtest:
+  guide_char_budget: 2000
+  key_state_paths:
+    - { path: "cycle", label: "cycle" }
+    - { path: "cyclesUntilReckoning", label: "untilReckoning", note: "a tier is assigned every 10 cycles" }
+    - { path: "player_credits", label: "credits" }
+    - { path: "player_systemsOwned", label: "systems" }
+    - { path: "player_powerScore", label: "power" }
+    - { path: "player_researchTier", label: "researchTier" }
+    - { path: "playerTier", label: "tier" }
+  summary_paths:
+    - { path: "player_powerScore", label: "power_delta" }
+    - { path: "player_systemsOwned", label: "systems_delta" }
+
 # VESTIGIAL — required by UgtConfig; UNUSED by the exploit-hunter/trial path.
 reward_profiles:
   _unused:

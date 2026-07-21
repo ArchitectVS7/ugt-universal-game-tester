@@ -172,7 +172,7 @@ Orchestration: graphify=none — no graphify-out/graph.json in the repo root (co
 
 ## M2 — Wire the remaining games to the LLM tier
 
-### L-003 · Wire Nexus Dominion to the structured drive mode — `status: TODO` · `coder: sonnet` · `after: L-002`
+### L-003 · Wire Nexus Dominion to the structured drive mode — `status: DONE` · `coder: sonnet` · `after: L-002`
 Using the entry point and `"legal_action"` schema built in L-002, write `integrations/nexus-dominion/playtest_nexus_dominion.py`
 against `NexusDominionHarnessAdapter` (`ugt/adapters/nexus_dominion_harness.py`), sourcing prompt state from its
 `game_state`/`views`-equivalent property (read the adapter's actual public API — `game_state`, `campaign_id`,
@@ -186,6 +186,30 @@ economy/fleet/research loop at a level a balance-playtester needs (not a full ma
 point with `--provider ollama`, producing a report with ≥ 20 actions and at least one state-delta assertion;
 `strategy-guide.md` exists and is referenced by the script; R1 (`integrations/nexus-dominion/verify_round1.py`)
 still reports the same MET count as before this task.
+
+**Delivered (2026-07-21):** Added `integrations/nexus-dominion/playtest_nexus_dominion.py`, wiring
+`NexusDominionHarnessAdapter` to the L-002 `playtest_game_with_adapter()` entry point via a local
+`PlaytestNexusDominionAdapter` subclass — `legal_actions()`/`apply_legal()` are pure relays over the base
+adapter's existing `action_name()`/`step()` primitives, no new game logic. Since the engine has no native
+legal-action enumerator (illegal orders are silently refused, not listed), the legal menu is the integration's
+own fixed config id space (0-17, one entry per composable action, each carrying a one-line balance note lifted
+from the config comments), deliberately narrowing out ids 18/19 (`probe_unknown_type`/`probe_malformed`) — the
+two R3 malformed-order robustness probes, which are not balance actions and are disclosed as excluded in the
+module docstring. Added a `playtest:` block to `integrations/nexus-dominion/ugt.config.yaml`
+(`key_state_paths`/`summary_paths`/`guide_char_budget`) resolving only into the adapter's own normalized
+`_read_state()` flat dict, additive and ignored by R1/R2/R3/the exploit-hunter; no `win_path`/`loss_path` is set
+because Nexus Dominion has no terminal state by design. Wrote `integrations/nexus-dominion/strategy-guide.md`
+covering the 4X economy/fleet/research/diplomacy/covert/military loop and the balance questions a playtester
+should probe (economy-before-army, research ramp payoff, Reckoning-cadence tier movement, any single dominant
+action). The invariant suite handed to the playtest loop is the SAME `ND.ALL_FLAT_PREDICATES` R3 hands the
+ExploitHunter, via `InvariantSuite(...).to_hunter_invariants()` — one definition, both tiers. A
+`--provider ollama` run (model `gemma4:26b`) completed 22 actions with 18 legal-action steps carrying a
+non-empty state delta and 0 invariant violations (`integrations/nexus-dominion/results/playtest-report.json`,
+gitignored — power_delta +314.15, systems_delta +7 over the run), clearing the ≥20-action/≥1-delta/invariants-
+ran bar. Scope boundary, deliberately: Pond (L-004) was not touched; the base `NexusDominionHarnessAdapter`
+and the R1/R2/R3/exploit-hunter ladder scripts were not modified, only subclassed, so the ladder is
+structurally unaffected by this task.
+Orchestration: graphify=none — no `graphify-out/graph.json` in the repo root (confirmed via `ls`); task grounded directly in `playtester.py`, the ND adapter/invariants/config, and the  · attempts=1/4.
 
 ### L-004 · Wire Pond to a macro-layer structured playtest (upgrade/mutation choices only) — `status: TODO` · `coder: opus` · `after: L-002`
 Real-time per-frame combat was already judged the wrong granularity for an LLM loop (per-frame dodging is not
