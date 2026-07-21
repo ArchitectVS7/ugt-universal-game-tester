@@ -184,10 +184,52 @@ Every script is fail-closed (`GateRunner.finish` returns 0 only when passed == t
 and prints `[FINDING]` lines inline. A failed check is DATA: fix it upstream in DDD
 with a pinning test and re-run — never weaken it here.
 
+## L-007: LLM playtest tier wired + run (2026-07-21)
+
+`integrations/ddd/playtest_ddd.py` drives DDD through the L-002 direct-adapter entry
+point (`playtest_game_with_adapter`) — `DddHarnessAdapter` has no
+`press_key`/`get_terminal_text` (the harness is structured JSON, not a terminal), so
+this uses `action_mode="legal_action"`: the LLM reads the adapter's own structured
+state plus its live legal-action list and picks one legal action per step by index.
+Same loop as every other engine (state-delta assertion, bug-report shape, invariant
+suite) — this only adds the input channel. The invariant suite handed to the loop is
+the exact one R3 hands the ExploitHunter (`invariants.build_suite().to_hunter_invariants()`).
+
+**Bug found + fixed in UGT core (not DDD):** the first probe run crashed —
+`ugt/core/playtester.py:552` (the display-only-verb check added same-day in
+commit `80d4af8`) called `value.split(None, 1)` unconditionally, assuming `value` is
+always a string. In `legal_action` mode `value` is the LLM's chosen index, an `int`
+— `AttributeError: 'int' object has no attribute 'split'` killed every legal-action
+playtest run outright (DDD, and would have hit nexus-dominion too if wired).
+Fixed by guarding on `isinstance(value, str)`:
+```python
+_verb = value.split(None, 1)[0] if isinstance(value, str) and value else value
+```
+`display_only_verbs` remains meaningless for `legal_action` mode (there is no verb to
+match), so the guard is a correct no-op there, not a workaround.
+
+**Live ollama run (`--provider ollama --model gemma4:26b --max-actions 40`):**
+a 5-action probe first confirmed the channel (5/5 steps with a genuine state delta),
+then the full run: **PLAYTEST MET** — `actions_taken=40`, **all 40 steps produced a
+state delta**, invariant suite ran with **0 violations**, **0 bugs flagged**, **0
+novel behaviors**. One full match played to termination mid-run (episode reset once,
+step 38, P1 at 1 HP) and a second match began before the action budget ran out
+(cumulative `p0_hp_delta=-28`, `p1_hp_delta=-30` across both matches). gemma4:26b
+mostly picked index 0 (frequently the "commit next card"/lowest-index legal option)
+with occasional stance/aggression-driven deviations (e.g. step 14 "AGGRESSIVE stance",
+step 25 "P0 at 1 HP, P1 has 18 HP — play aggressively"), showing HP-state-aware
+reasoning rather than uniform-random selection. Report at
+`integrations/ddd/results/playtest-report.json` (gitignored via root `results/`).
+
+This closes DDD's T8.2 wiring and gives D-C1 (Focus economy binding — whether cost is
+an *interesting* decision, not just a reachable constraint) its first LLM-observed
+data point: no stuck/refused-action pattern emerged over 40 steps, though a
+`max-actions 40` local-model run is a smoke test of the channel, not a balance
+verdict — a longer run (or `--provider anthropic`) is the next lever if a deeper
+balance read is wanted.
+
 ## Next tier
 
-The LLM balance-playtester (`ugt playtest`) is the tier that judges *"is this a good
-game?"* rather than *"does it work?"* — it is the natural home for D-C1 and for DDD's
-T8.2. It is credit-gated and not yet wired to this adapter (`DddHarnessAdapter` has no
-`press_key`/`get_terminal_text`; the harness is structured JSON, not a terminal, so
-the playtester would drive `legal`/`act` directly rather than a screen).
+Deeper LLM balance-playtest runs (longer `--max-actions`, `--provider anthropic`) to
+build an actual balance verdict for D-C1 / T6.2's skilled-play matchup question. DDD
+T6.3's conformance audit #2 remains untouched.

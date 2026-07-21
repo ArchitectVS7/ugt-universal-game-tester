@@ -549,7 +549,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         # playtest.display_only_verbs in their ugt.config.yaml — matched on the first whitespace
         # token of `value`, so `"ls"` also exempts `"ls -la"` if a model ever types that variant.
         _display_only_verbs = set(playtest_cfg.get("display_only_verbs") or [])
-        _verb = value.split(None, 1)[0] if value else value
+        _verb = value.split(None, 1)[0] if isinstance(value, str) and value else value
         if _verb in _display_only_verbs:
             pass
         elif not material_delta and action_type in ("action_id", "press_key", "type_text", "end_turn", "legal_action"):
