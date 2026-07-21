@@ -92,8 +92,8 @@ seed, starting `next dev` with the test env, PID verification) see `HANDOFF.md`.
 
 ## Disambiguation
 
-Unlike `spacerquest`/`spacerquest_old`, NEXUS has no naming-collision risk in
-this repo — a single unambiguous integration, no special banner needed.
+Unlike `spacerquest` (which shared a name prefix with the now-deleted `spacerquest_old`), NEXUS has no
+naming-collision risk in this repo — a single unambiguous integration, no special banner needed.
 
 ## Archive
 

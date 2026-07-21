@@ -3,10 +3,11 @@
 **Status: CURRENT, ACTIVE integration.**
 
 > **Disambiguation — read this first.** This folder (`integrations/spacerquest/`) is **Rimward** — a
-> brand-new, unrelated restart of SpacerQuest built against a new design. `integrations/spacerquest_old/`
-> is a **different, retired game** (the 1991-BBS-style Museum Edition), kept only as archived history and
-> currently ON HOLD. Do not conflate the two — they share a name prefix but nothing else. This same
-> disambiguating sentence appears in `integrations/spacerquest_old/README.md`.
+> brand-new, unrelated restart of SpacerQuest built against a new design. There used to be a second folder,
+> `integrations/spacerquest_old/`, for a **different, retired game** (the 1991-BBS-style Museum Edition) —
+> it was **deleted from this repo on 2026-07-21**, entirely superseded by this Rimward rebuild. Its history
+> (trial-ladder results, the Gate-C balance verdict, the `sim_bridge.ts` cautionary tale) lives on in
+> `Dev/PLAN-FORWARD-spacerquest.md` and `Dev/UGT-TRACK-RECORD.md`, not as a live integration folder.
 
 ## What this is
 

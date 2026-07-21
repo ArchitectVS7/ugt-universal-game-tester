@@ -5,21 +5,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Start here
 
 **Read `PLAN-FORWARD.md` before doing anything else in this repo.** It has the current direction (the
-trial-ladder methodology, the five completed game integrations, the next steps) and links to the memory notes
-with full history. The core lesson learned the hard way: **the tester must drive the real running game, never
-a re-implementation of it.** The original SpacerQuest integration used a headless `sim_bridge.ts` that slowly
-became a partial copy of the game (no combat, broken upgrades) — every RL agent trained against it learned the
-wrong game. Every integration since drives the real game (live server, real browser, or the game's own
-subprocess harness). SpacerQuest itself is **ON HOLD** (the game is being redesigned); its integration is
-archived at `integrations/spacerquest_old/`.
+trial-ladder methodology, the game integrations completed so far, the next steps) and links to the memory
+notes with full history. The core lesson learned the hard way: **the tester must drive the real running game,
+never a re-implementation of it.** The original SpacerQuest integration used a headless `sim_bridge.ts` that
+slowly became a partial copy of the game (no combat, broken upgrades) — every RL agent trained against it
+learned the wrong game. Every integration since drives the real game (live server, real browser, or the
+game's own subprocess harness). That original Museum-Edition SpacerQuest game was deleted from this repo on
+2026-07-21, entirely superseded by a from-scratch restart at `integrations/spacerquest/` ("Rimward"); its
+history is preserved in `Dev/PLAN-FORWARD-spacerquest.md` and `Dev/UGT-TRACK-RECORD.md`. Three other
+integrations (`pond`, `tarot-war`, `warzones`) are currently paused for active game-side development — see
+`integrations/README.md` for exactly which and why before doing more work on them.
 
 Other key docs, in rough reading order for a new game integration:
 - `UGT-USER-MANUAL.md` — onboarding a new game + methodology (including the trial ladder)
 - `PLAYTEST-DESIGN.md` — design spec for the LLM balance-playtester tier
 - `integrations/<game>/HANDOFF.md` — per-integration resume-here doorway (RESULTS.md = findings log)
-- `archive/` — superseded docs (old Gate-1 RL spec, early rosy walkthrough, the pre-consolidation
+- `Dev/` — superseded docs (old Gate-1 RL spec, early rosy walkthrough, the pre-consolidation
   `ASSESSMENT-AND-FIX-ROADMAP.md`/`AGENT-PLAYTEST-FRAMEWORK.md`/`DEV-CHECKLIST.md`, the SpacerQuest-era
-  `PLAN-FORWARD-spacerquest.md`); do not treat as current plans — `archive/README.md` says why each was
+  `PLAN-FORWARD-spacerquest.md`); do not treat as current plans — `Dev/README.md` says why each was
   archived and where its still-useful content went
 
 ## What this is
@@ -55,7 +58,7 @@ spine → R3 exploit-hunter); the game-agnostic scaffold is `ugt/core/trial.py` 
 
 Historically there was also an RL train/evaluate path (`ugt train`/`ugt evaluate`, PPO/DQN/A2C via
 stable-baselines3) used as a balance oracle — this was demoted after a well-documented collapse (see
-`archive/ASSESSMENT-AND-FIX-ROADMAP.md` and the archived Gate-1 spec). The CLI commands still exist and work
+`Dev/ASSESSMENT-AND-FIX-ROADMAP.md` and the archived Gate-1 spec). The CLI commands still exist and work
 against `simulation`/`browser` engines, but RL-as-balance-judgment is not the current direction for
 `real_server` games.
 
@@ -151,9 +154,12 @@ for s in spike_ddd smoke_ddd_adapter verify_round1 verify_round2 verify_round3; 
 done
 ```
 
-Current integrations: `ddd` and `nexus-dominion` (subprocess harness), `nexus` (live HTTP), `tarot-war` and
-`warzones` (browser), `spacerquest_old` (Socket.IO+HTTP real server — **archived**, game on hold; its
-infra/run commands are in `archive/PLAN-FORWARD-spacerquest.md`).
+Current integrations: `ddd`, `nexus-dominion`, and `pond` (subprocess harness — pond paused, active dev),
+`nexus` (live HTTP), `tarot-war` and `warzones` (browser — both paused: tarot-war for a human-dev expansion
+season, warzones for active dev), `spacerquest` (simulation engine over stdio, "Rimward" restart, RL-only so
+far). The original Museum-Edition SpacerQuest (`spacerquest_old`, Socket.IO+HTTP real server) was deleted
+2026-07-21, entirely superseded by `spacerquest`; its infra/run commands are preserved in
+`Dev/PLAN-FORWARD-spacerquest.md`. See `integrations/README.md` for the full index with real ladder counts.
 
 There is no `ugt.config.yaml`-driven CLI path for the ladder yet — the scripts construct a minimal config
 shim and call the adapter/`ExploitHunter`/`ugt/core/trial.py` pieces directly.
@@ -162,14 +168,14 @@ shim and call the adapter/`ExploitHunter`/`ugt/core/trial.py` pieces directly.
 
 Since there's no test suite, "does this work" means actually exercising it end-to-end:
 - Framework changes affecting `simulation`/`browser` engines → run against `examples/mock-game/` (see
-  `archive/DEV-CHECKLIST.md` for the exact expected-output sequence across all three phases — still-accurate
+  `Dev/DEV-CHECKLIST.md` for the exact expected-output sequence across all three phases — still-accurate
   record of framework behavior, just archived for its stale phase numbering).
 - Changes to `ugt/core/trial.py`, `exploit_hunter.py`, or an adapter → re-run a completed ladder against the
   live game and read the PASS/FAIL output, don't assume. Cheapest full re-run: the DDD ladder (no server to
   start — see above). This is how the `trial.py` extraction itself was validated (exact NEXUS ladder re-run).
 - After starting any game server, verify the LISTENING PID is the process you spawned
   (`lsof -nP -iTCP:<port> -sTCP:LISTEN`) — a stale server once silently absorbed an entire campaign.
-- A one-off assertion-evaluator sanity check is documented at the bottom of `archive/DEV-CHECKLIST.md`.
+- A one-off assertion-evaluator sanity check is documented at the bottom of `Dev/DEV-CHECKLIST.md`.
 
 ## Conventions specific to this repo
 
