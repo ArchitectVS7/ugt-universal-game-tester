@@ -2,6 +2,60 @@
 
 Commit-traceable record. A failed check is data. Game repo: `~/Dev/Games/the-pond/`.
 
+## 2026-07-20 — U-008: pause is DRIVEN over the wire; PC-13 core CONFIRMED but a NEW finding PC-17 (pause is cosmetic) surfaced
+
+**R2 NOT MET — 44/47 (seed 20260720), 3 non-passes: PC-15 (balance), PC-12 (wire gap), PC-17 (NEW).**
+Invariant sweep CLEAN (0 violations / 1588 steps), 0 SCRIPT ERROR. R1 still MET 18/18.
+
+**Harness change (the-pond `tests/harness/ugt_harness.gd`):** the `pause` action is now injected
+alongside `attack`/`dodge` in `_apply_input` (a boolean action, single press/release edge via the
+existing `_set_action` transition logic — NOT a MOVE_ACTION). Only the ESC *toggle* is driven; the
+PauseMenu's **Quit-to-Menu** button is deliberately never synthesized (it calls
+`RunManager.quit_to_menu()` and ends the run — under R3 random input that would still destroy the
+campaign). The header comment and the protocol doc block were updated to say so; `"pause":bool` is
+now a documented `input:` field.
+
+**Wire assertion (`verify_round2.py::section_pause`, section 3b):** drives real `pause` presses and
+reads `paused` / `events` (the EventBus tap auto-captures `pause_toggled`) / `run` / player-pos back.
+
+- **PC-13 core CONFIRMED over the wire.** The pause TOGGLE round-trips cleanly: `paused` flips
+  `false→true→false`, both `EventBus.pause_toggled(true)` and `pause_toggled(false)` edges are
+  observed, and the run is **never destroyed** (`run.active` stays True, no RunEndScreen). ESC no
+  longer `get_tree().quit()`s — T-058/T-059's core is proven live. The un-pause half proves the
+  input path stays alive while the tree is paused (the reason the arena root was made
+  `PROCESS_MODE_ALWAYS`).
+
+- **PC-17 (NEW, REAL — surfaced by driving invariant 2): the pause is COSMETIC.**
+  `get_tree().paused` flips true, yet gameplay keeps running underneath. Fed a strong `move=[1,0]`
+  for 4×15 frames while `paused` reads True, the player **drifted 200px** (a real pause must hold 0).
+  **Root cause** (read from source, corroborating the observed movement): `test_arena_controller.gd:47`
+  sets the arena **ROOT** to `PROCESS_MODE_ALWAYS` (T-058's mechanism for keeping ESC responsive
+  while paused), and every gameplay node is a child that **inherits ALWAYS** — the Player is a scene
+  child of the root, and `enemy_spawner.gd:290` parents each enemy under that same root
+  (`get_parent().add_child(enemy)`), so `get_tree().paused` never freezes any of them. In production
+  the PauseMenu overlay is drawn over a **still-running game**; the level-up modal (same
+  `get_tree().paused = true` at `level_up_ui.gd:48`) likewise fails to freeze the action — enemies
+  and bullets keep moving while the player picks a card.
+  - **Masked by a vacuous game test.** `test/unit/test_pause_menu.gd:109`
+    (`test_paused_tree_halts_pausable_processing`) claims "game state does not advance while paused"
+    but probes a `ProbeNode` parented under the **test** root (pausable), never a node under the
+    arena's ALWAYS root — so it exercises the one place the bug is NOT. Its sibling
+    `test_controller_sets_process_mode_always_and_round_trips_pause:83` positively asserts the
+    controller IS ALWAYS, cementing the propagation. This is the "vacuous green hides a real bug"
+    pattern (cf. the pond cluster-remediation lesson).
+  - **Scope / decision.** The invariant-2 check correctly **FAILS** the gate and is left failing (a
+    failed check is data — not papered over, not weakened). The fix is a game-side architecture change
+    (make the arena root pausable + an always-on input relay for the ESC toggle, since enemies are
+    parented directly under the root; and rewrite the vacuous test to probe a node under the arena),
+    plus a full GUT re-run — a dedicated the-pond task, exactly the PC-13→T-058 pattern. Filed in
+    HANDOFF.md. Not fixed inside this UGT harness+test task.
+  - **Non-vacuity note:** the player-drift is the sole independent invariant-2 signal. The paused
+    window happened to hold 0 enemies and produced no run-stat change, so those are recorded as
+    context only, explicitly NOT counted as corroborating a freeze (the standing no-vacuous-pass rule).
+
+**R3 standing exclusion (recorded):** the `pause` toggle (ESC) is now driven, but the PauseMenu's
+**Quit-to-Menu** button remains permanently OFF the R3 allowlist because it ends the run.
+
 ## 2026-07-20 — U-007 (fix round 2): PC-16 FIXED upstream — the player is now contained in the arena; R2 invariant sweep CLEAN
 
 The U-007 gate re-run exited 1 on three non-passes: the two by-design blocks (PC-15 balance, PC-12
@@ -1017,10 +1071,14 @@ consumed at `test_arena_controller.gd:84` by `get_tree().quit()` — terminating
 no menu and no confirmation, destroying the run, with no PauseMenu scene anywhere. That code path no
 longer exists.
 
-The harness deliberately does not drive the pause action from the generic input path (wiring it into
-R3's random-input tier could pause/stall the process). The live wire assertion — re-enable the pause
-action in the harness and assert `get_tree().paused` / `pause_toggled` emitted / run not destroyed —
-is **U-008's** job.
+The harness deliberately does not drive the pause action from the generic R3 random-input path (the
+PauseMenu's Quit-to-Menu button ends the run). The live wire assertion — re-enable the pause action
+in the harness and assert `get_tree().paused` / `pause_toggled` emitted / run not destroyed — was
+**DONE by U-008** (see the U-008 entry at the top of this file): the pause TOGGLE round-trips cleanly
+and never ends the run (PC-13 core CONFIRMED over the wire), but driving invariant 2 surfaced the NEW
+finding **PC-17 (pause is cosmetic — the arena root's `PROCESS_MODE_ALWAYS` propagates to all
+gameplay children, so `get_tree().paused` freezes nothing)**, masked by the vacuous
+`test_pause_menu.gd:109`.
 
 ### PC-14 — ~~the "locked" boss arena refills with adds~~ **FIXED — the-pond T-061 (2026-07-20, U-005)**
 

@@ -1,13 +1,16 @@
 # Pond Conspiracy (the-pond) — UGT Integration Plan
 
-**Status: R2 NOT MET — 35/37 (2026-07-20, after U-001…U-007 + the-pond M7). Two remaining
-non-passes, both by-design blocks that correctly fail the gate and are NOT in U-007's scope:
-PC-15 (balance — driver did not beat the boss this run; re-baseline is U-009's) and PC-12
-(victory run RESULT unobservable over the current wire — filed harness follow-up below). The
-formerly-blocked modes PC-11/PC-13/PC-14 are FIXED + measured; the board card flip is DRIVEN
-(U-007); and PC-16 (player escaped the arena during the boss fight) is FIXED upstream — the R2
-invariant sweep is now CLEAN (0 violations / 1578 steps). Next rung: U-008 (harness pause) →
-U-009 (R2 re-baseline) → R3 exploit-hunter.**
+**Status: R2 NOT MET — 44/47 (2026-07-20, after U-001…U-008 + the-pond M7). Three non-passes:
+PC-15 (balance — driver did not beat the boss this run; re-baseline is U-009's), PC-12 (victory run
+RESULT unobservable over the current wire — filed harness follow-up below), and PC-17 (NEW, U-008 —
+the pause is COSMETIC: `get_tree().paused` flips but gameplay keeps running, filed for a game-side
+fix). U-008 DONE: pause is now DRIVEN over the wire — the harness injects the `pause` toggle and
+`verify_round2.py::section_pause` asserts the invariants; the TOGGLE round-trips cleanly and never
+ends the run (PC-13 core CONFIRMED), but invariant 2 (no-state-advance-while-paused) correctly FAILS
+and surfaced PC-17. Quit-to-Menu stays OFF the R3 allowlist (it ends the run). The formerly-blocked
+modes PC-11/PC-13/PC-14 are FIXED + measured; the board card flip is DRIVEN (U-007); PC-16 is FIXED
+upstream — the R2 invariant sweep is CLEAN (0 violations / 1588 steps). Next rung: fix PC-17
+upstream → U-009 (R2 re-baseline) → R3 exploit-hunter.**
 
 Prior status line (kept for history): R2 NOT MET — 21/26 (2026-07-20). Five blocked: four modes
 the game had NO code path for, plus a boss the automated driver did not beat (PC-15 balance note,
@@ -24,9 +27,23 @@ R1 MET 18/18 seed-independent; all R1-round open items CLOSED; game suite fully 
 - **PC-12** — `end_run("victory")` has no production caller. Victory, 150% rewards,
   `successful_runs`, `best_time` and RunEndScreen's victory branch are all unreachable. Death
   is the only ending that exists.
-- **PC-13** — there is no pause. The `pause` action calls `get_tree().quit()`: ESC destroys the
-  run with no confirmation. (Not driven from the harness on purpose — it would let R3's random
-  input kill the process.)
+- **PC-13** — ~~there is no pause; ESC destroys the run via `get_tree().quit()`~~ **FIXED (the-pond
+  T-058/T-059) and now DRIVEN over the wire (U-008).** Pause toggles `get_tree().paused` + emits
+  `EventBus.pause_toggled`, never quits. `verify_round2.py::section_pause` drives the ESC toggle and
+  confirms the clean round-trip (`paused` true→false, both `pause_toggled` edges seen, run never
+  destroyed). Only the ESC *toggle* is driven; the PauseMenu's **Quit-to-Menu** button is never
+  synthesized (it calls `RunManager.quit_to_menu()` and ends the run) and stays OFF the R3 allowlist.
+- **PC-17 (NEW, U-008 — REAL, over the wire): the pause is COSMETIC.** `get_tree().paused` flips true
+  but gameplay keeps running — driven `move=[1,0]` walks the player 200px while `paused` reads True.
+  Root cause (source): `test_arena_controller.gd:47` sets the arena **ROOT** to
+  `PROCESS_MODE_ALWAYS` (T-058's ESC-responsiveness mechanism) and every gameplay node inherits it —
+  the Player is a scene child, and `enemy_spawner.gd:290` parents enemies directly under the root
+  (`get_parent().add_child`). The level-up modal (same `get_tree().paused`) fails to freeze the
+  action too. **Masked by a vacuous game test:** `test_pause_menu.gd:109` probes a node under the
+  TEST root, never a node under the arena's ALWAYS root. **Game-side fix needed** (arena root pausable
+  + an always-on ESC input relay, since enemies live directly under the root; and rewrite the vacuous
+  test to probe an arena child), then a full GUT re-run — a dedicated the-pond task (the PC-13→T-058
+  pattern). `verify_round2.py::section_pause` invariant 2 correctly fails until then.
 - **PC-14** — the "locked" boss arena clears regular enemies then leaves the spawner running,
   so it refills within seconds.
 - **PC-15 balance** — the automated driver did not defeat the wave-5 boss (it survived with
@@ -115,6 +132,20 @@ against zero enemies), and `gate.sh` unable to pass a green suite at all. Detail
 
 ### Still open
 
+- **PC-17 (NEW, U-008) — the pause is COSMETIC; needs a game-side fix (on the critical path before
+  U-009/R3).** `get_tree().paused` flips true but gameplay keeps running: the arena ROOT is
+  `PROCESS_MODE_ALWAYS` (`test_arena_controller.gd:47`, T-058's mechanism for keeping ESC alive while
+  paused) and every gameplay node inherits it — the Player is a scene child of the root and
+  `enemy_spawner.gd:290` parents enemies directly under the root, so nothing freezes. Driven over the
+  wire: a `move=[1,0]` walks the player 200px while `paused` reads True (`verify_round2.py::section_pause`
+  invariant 2, correctly FAILING). The same defect means the level-up modal does not freeze the action
+  either. Masked by the vacuous `test/unit/test_pause_menu.gd:109` (probe parented under the TEST root,
+  never under the arena). **Fix shape:** make the arena root pausable and add a small always-on child
+  node that watches `is_action_just_pressed("pause")` and calls `_handle_pause_input()` (enemies live
+  directly under the root, so per-child `PROCESS_MODE_PAUSABLE` is fragile — the relay is the robust
+  fix); then rewrite `test_pause_menu.gd:109` to probe a node parented under the arena controller, and
+  re-run the full GUT suite. This is a dedicated the-pond task, the PC-13→T-058 pattern. Once fixed,
+  `section_pause` invariant 2 flips green with no tester change.
 - **PC-16 — RESOLVED upstream (the-pond `combat/scenes/Player.tscn`), but two related latent
   game-side items are filed for a future collision-model cleanup (NOT this task).** PC-16 (player
   escaped the arena vertically during the boss fight) was fixed by setting the Player
@@ -250,6 +281,12 @@ aim always at nearest enemy via structural read of the harness's own enemy list)
    consistent (no dupe unlocks); no `SCRIPT ERROR` on the subprocess stderr; soft-lock detection
    (state hash frozen across varied inputs). Plus same-seed replay — **PC-1 is now fixed, so
    this is unblocked**; the pre-filed note below is kept as the original diagnosis.
+   - **Standing R3 input exclusion (U-008):** the `pause` *toggle* (ESC) is now driven and safe (it
+     toggles `get_tree().paused`, never ends the run), so it MAY be included in R3 random input. But
+     the PauseMenu's **Quit-to-Menu** button is permanently EXCLUDED from R3 — it calls
+     `RunManager.quit_to_menu()` and ends the run, which random input must never trigger. The harness
+     injects only the `pause` action, never a click on the Quit-to-Menu button, so this exclusion
+     holds by construction.
 
 **LLM playtest tier: DEFERRED.** Real-time dodging is the wrong granularity for an LLM. A later
 macro-layer playtest (mutation build choices + conspiracy-board connections) is plausible via the

@@ -37,9 +37,19 @@ measured over the wire rather than asserted as prose:
     to pass, proving the fix.
   * PC-13 (ESC quit the process) is fixed by T-058/T-059 — pause now toggles
     `get_tree().paused` and emits `EventBus.pause_toggled`, never quits, and
-    `input_manager.gd` is deleted. Its wire assertion (re-enabling the pause
-    action in the harness and asserting its invariants) is U-008's job, so this
-    gate records it as INFO rather than re-driving it.
+    `input_manager.gd` is deleted. Its wire assertion is DRIVEN by
+    `section_pause` (U-008): the harness re-enables the `pause` action and this
+    gate drives the ESC *toggle* only (never the PauseMenu's Quit-to-Menu
+    button, which ends the run). The pause TOGGLE round-trips cleanly over the
+    wire — `paused` flips true<->false, both `pause_toggled` edges are observed,
+    and the run is never destroyed — so PC-13's core (ESC no longer quits) is
+    CONFIRMED. But driving it surfaced a NEW finding, PC-17: the pause is
+    COSMETIC. `get_tree().paused` flips yet gameplay keeps running (the player
+    walks ~50px/15-frames while `paused` reads True) because the arena ROOT is
+    `PROCESS_MODE_ALWAYS` (T-058) and every gameplay child inherits it — masked
+    by a vacuous game test (`test_pause_menu.gd:109` probes a node not under the
+    arena). Invariant 2 (no-state-advance-while-paused) correctly FAILS the gate
+    and is filed for a game-side fix.
   * PC-14 (the "locked" boss arena refilled with adds) is fixed by T-061 —
     `trigger_boss()` now calls `BossArena._stop_enemy_spawner()` right after
     `_lock_arena()`, so the one-shot clear is no longer immediately undone by an
@@ -593,17 +603,209 @@ def section_unreachable(gate: Gate, seed: int) -> None:
         "extension filed in integrations/pond/HANDOFF.md.")
 
     # PC-13 (fixed by T-058/T-059): pause is now a real, non-destructive mode.
-    # Reclassified to INFO — its wire assertion is U-008's job. Do NOT leave
-    # prose that says "there is no pause".
+    # Its wire assertion is DRIVEN by section_pause() below (U-008) — the pause
+    # action is re-enabled in the harness and its three invariants are checked
+    # over the wire. This block is a pointer only. Do NOT leave prose that says
+    # "there is no pause".
     print("\n  PC-13: pause --")
     gate.info(
-        "pause is now a real, non-destructive mode (PC-13, fixed T-058/T-059)",
+        "pause no longer quits the process (PC-13, fixed T-058/T-059)",
         "the 'pause' action toggles get_tree().paused and emits "
-        "EventBus.pause_toggled instead of quitting the process; "
-        "input_manager.gd was deleted. Its wire assertion — re-enable the pause "
-        "action in the harness and assert its invariants (tree paused, "
-        "pause_toggled emitted, run NOT destroyed) — lands in U-008, not this "
-        "gate.")
+        "EventBus.pause_toggled instead of quitting; input_manager.gd was "
+        "deleted. The wire assertion is DRIVEN in section_pause() (U-008), "
+        "section 3b below: the ESC toggle round-trips and never ends the run "
+        "(PC-13 core CONFIRMED), but the paused world keeps running underneath "
+        "— NEW finding PC-17 (pause is cosmetic), which correctly fails "
+        "invariant 2 there.")
+
+
+def _pause_toggle_args(events) -> list:
+    """The ordered list of pause_toggled arg-values in one step's event stream.
+    Read straight off the harness EventBus tap — no game logic. Each element is
+    the boolean the game emitted (EventBus.pause_toggled(is_paused))."""
+    out = []
+    for e in (events or []):
+        if e.get("signal") == "pause_toggled":
+            args = e.get("args") or []
+            out.append(bool(args[0]) if args else None)
+    return out
+
+
+def section_pause(gate: Gate, seed: int) -> None:
+    """PC-13 / U-008: the pause action, DRIVEN and asserted over the wire.
+
+    The harness now injects the `pause` action (the ESC toggle only — never a
+    click on the PauseMenu's Quit-to-Menu button, which would end the run). This
+    section drives real `pause` presses and reads `paused` / `events` / `run` /
+    player-pos back from the harness snapshot to assert the invariants the old
+    exclusion note anticipated:
+
+      (1) toggling `pause` flips `paused` true — the ON edge, with
+          EventBus.pause_toggled(true), and the run NOT destroyed (the safety
+          proof that ESC is no longer `get_tree().quit()`);
+      (2) NO game state advances while paused — the player must not move even
+          when fed a strong move input a live player WOULD act on;
+      (3) the pause is DISMISSIBLE — a second ESC edge flips `paused` false again
+          (a clean round-trip, which also proves the un-pause path stays live
+          while the tree is paused), with EventBus.pause_toggled(false), the run
+          still intact.
+
+    Toggle discipline: one toggle per FRESH press edge. `_set_action` only
+    presses on a false->true transition, so an OFF toggle needs the pause action
+    RELEASED (a step that omits `pause`) between the ON and OFF presses. The
+    move-only steps of invariant 2 provide that release naturally; the section
+    never sends `pause=True` on two consecutive steps.
+
+    RESULT over the wire: invariants 1 and 3 PASS — the pause TOGGLE round-trips
+    true<->false, both pause_toggled edges are seen, and the run is never
+    destroyed (PC-13's `get_tree().quit()` is gone). Invariant 2 FAILS and
+    surfaces a NEW finding, PC-17: the pause is COSMETIC. `get_tree().paused`
+    flips true, yet gameplay keeps running underneath — the player walks ~50px
+    per 15 frames while `paused` reads True. Root cause (read from source,
+    corroborating the observed movement): `test_arena_controller.gd:47` sets the
+    arena ROOT to `PROCESS_MODE_ALWAYS` (T-058's fix for keeping ESC alive), and
+    every gameplay node is a child that INHERITS ALWAYS — the player is a scene
+    child, and `enemy_spawner.gd:290` parents each enemy under that same root via
+    `get_parent().add_child(enemy)` — so `paused` never freezes them. The game's
+    own suite masks this: `test_pause_menu.gd:109` probes a node parented under
+    the TEST root (pausable), not under the arena, so it never exercises a node
+    that inherits the arena's ALWAYS. Filed for a game-side fix (a dedicated
+    the-pond task, the PC-13 -> T-058 pattern); until then invariant 2 correctly
+    fails this gate.
+    """
+    print("\n  -- 3b. pause: driven & asserted over the wire (PC-13 / U-008) --")
+    ad = _new_adapter()
+    try:
+        ad.reset(seed=seed, run_number=1)
+        s = snap(ad)
+
+        # Baseline: settle a few idle frames and clear any level-up modal so the
+        # ESC toggle is asserted against a clean COMBAT state (a pending
+        # LevelUpUI itself pauses the tree, and _handle_pause_input's
+        # `if get_tree().paused: return` guard would make an ESC a no-op while
+        # the level-up owns the pause).
+        for _ in range(3):
+            s = take_level_up(ad, s)
+            s = step(ad, 10)
+            if s["player"]["dead"]:
+                break
+        s = take_level_up(ad, s)
+        alive = not s["player"]["dead"]
+        run0 = s.get("run") or {}
+        gate.check(
+            alive and run0.get("phase") == "COMBAT" and bool(run0.get("active"))
+            and not s.get("paused"),
+            "baseline: a live COMBAT run, not paused, before any ESC toggle",
+            f"dead={s['player']['dead']} phase={run0.get('phase')!r} "
+            f"active={run0.get('active')} paused={s.get('paused')}")
+        if not alive:
+            gate.check(False, "pause section reached a live baseline",
+                       "player died during the idle baseline — cannot assert the "
+                       "pause toggle against a live COMBAT run this seed")
+            return
+
+        # --- Invariant 1: clean toggle ON, run not destroyed ----------------------
+        s = step(ad, 10, pause=True)          # single fresh press edge -> one toggle
+        toggles_on = _pause_toggle_args(s.get("events") or [])
+        gate.check(
+            s.get("paused") is True,
+            "ESC toggles the tree PAUSED (round-trip, half 1)",
+            f"paused={s.get('paused')} pause_toggled args this step={toggles_on}")
+        gate.check(
+            True in toggles_on,
+            "EventBus.pause_toggled(true) is emitted on the ESC toggle",
+            f"pause_toggled args observed over the wire={toggles_on}")
+        run_on = s.get("run") or {}
+        run_end_on = s.get("run_end") or {}
+        gate.check(
+            bool(run_on.get("active")) and run_on.get("phase") == "COMBAT"
+            and not run_end_on.get("visible"),
+            "ESC does NOT end the run (safety: no longer get_tree().quit())",
+            f"run.active={run_on.get('active')} phase={run_on.get('phase')!r} "
+            f"run_end.present={run_end_on.get('present')} "
+            f"visible={run_end_on.get('visible')}")
+
+        # Snapshot the world at the moment of the pause (the reference the paused
+        # window must NOT drift from).
+        paused_pos = list(s["player"]["pos"])
+        paused_enemy_count = len(s.get("enemies") or [])
+        paused_stats = dict((s.get("run") or {}).get("stats") or {})
+
+        # --- Invariant 2: NO state advances while paused (PC-17) ------------------
+        # Omit `pause` (releases the action, NO further toggle) and feed a strong
+        # move a live player WOULD act on. A real pause must freeze the player.
+        # `paused` is asserted to hold True across the whole window, so any drift
+        # is movement WHILE PAUSED, not a silent auto-resume.
+        still_paused = True
+        worst_drift = 0.0
+        enemy_delta = 0
+        stats_changed = False
+        for _ in range(4):
+            s = step(ad, 15, move=[1, 0])     # strong move; pause released (no toggle)
+            if not s.get("paused"):
+                still_paused = False
+            worst_drift = max(worst_drift, math.dist(s["player"]["pos"], paused_pos))
+            enemy_delta = max(enemy_delta,
+                              abs(len(s.get("enemies") or []) - paused_enemy_count))
+            if dict((s.get("run") or {}).get("stats") or {}) != paused_stats:
+                stats_changed = True
+        gate.check(
+            still_paused,
+            "the pause FLAG holds True across the paused window (no auto-resume)",
+            f"paused held True across 4 move-steps={still_paused}")
+        # The definitive, NON-vacuous invariant-2 check: the player is fed a
+        # strong move and MUST NOT move while paused. This FAILS -> PC-17.
+        gate.check(
+            worst_drift < 0.5,
+            "NO game state advances while paused: the player is frozen "
+            "(PC-17 — pause is cosmetic, see section docstring)",
+            f"player drifted {worst_drift:.2f}px while paused=True over 4 x15 "
+            f"frames of move=[1,0] (a real pause must hold 0). Gameplay is NOT "
+            f"frozen: root cause read from source is the arena ROOT's "
+            f"PROCESS_MODE_ALWAYS (test_arena_controller.gd:47) inherited by "
+            f"every gameplay child (player; enemies via enemy_spawner.gd:290 "
+            f"get_parent().add_child). Masked by the vacuous test_pause_menu.gd:"
+            f"109 (probe not parented under the arena). "
+            f"[context, NOT independent evidence: the sampled window held "
+            f"{paused_enemy_count} enemies (max delta {enemy_delta}) and no run "
+            f"stats change ({not stats_changed}) — with 0 enemies / no kills "
+            f"those cannot corroborate a freeze; the player-drift IS the signal]"
+            if worst_drift >= 0.5 else
+            f"player held within {worst_drift:.2f}px while paused across 4 x15 "
+            f"frames of move=[1,0] — gameplay truly frozen")
+
+        # --- Invariant 3: dismissible; clean toggle OFF, run intact ---------------
+        s = step(ad, 10, pause=True)          # fresh press edge -> toggle OFF
+        toggles_off = _pause_toggle_args(s.get("events") or [])
+        gate.check(
+            s.get("paused") is False,
+            "a second ESC toggle RESUMES the tree (round-trip, half 2 — the "
+            "un-pause path stays live while paused)",
+            f"paused={s.get('paused')} pause_toggled args this step={toggles_off}")
+        gate.check(
+            False in toggles_off,
+            "EventBus.pause_toggled(false) is emitted on the dismiss toggle",
+            f"pause_toggled args observed over the wire={toggles_off}")
+        # After the dismiss the player still responds to input (control restored).
+        # NB: because of PC-17 the player also moved WHILE paused, so this proves
+        # only that control survives the round-trip, not that pause had frozen it.
+        resume_pos = list(s["player"]["pos"])
+        s2 = step(ad, 30, move=[1, 0])
+        moved = math.dist(s2["player"]["pos"], resume_pos)
+        gate.check(
+            moved > 2.0 and not s2.get("paused"),
+            "control is live after the pause round-trip (player responds to move)",
+            f"player moved {moved:.2f}px after the OFF toggle (threshold 2.0), "
+            f"paused={s2.get('paused')}")
+        run_end2 = s2.get("run_end") or {}
+        gate.check(
+            bool((s2.get("run") or {}).get("active"))
+            and not run_end2.get("visible"),
+            "the run survived the full pause round-trip intact (end-to-end safety)",
+            f"run.active={(s2.get('run') or {}).get('active')} "
+            f"run_end.visible={run_end2.get('visible')}")
+    finally:
+        ad.close()
 
 
 def section_evidence_chain(gate: Gate, seed: int) -> None:
@@ -820,6 +1022,7 @@ def main() -> int:
         section_arenas(gate, seed)
         section_boss(gate, seed)
         section_unreachable(gate, seed)
+        section_pause(gate, seed)
         section_evidence_chain(gate, seed)
 
         # Invariant sweep verdict — R1 parity (verify_round1.py:390). Every
@@ -865,9 +1068,13 @@ def main() -> int:
     print("\nPC-15 is a balance note (count-vs-type HP/DPS asymmetry, the-pond T-062)\n"
           "— the automated driver did not beat the boss this run. PC-12 is a named\n"
           "harness gap: the victory caller now exists (T-057) but no wire op reaches\n"
-          "it. PC-11 (three distinct bosses), PC-13 (real pause), and PC-14 (locked\n"
-          "arena spawner leak, fixed by the-pond T-061) are FIXED and now measured/\n"
-          "reclassified above. See integrations/pond/RESULTS.md.")
+          "it. PC-17 is a NEW finding surfaced by U-008: the pause is COSMETIC —\n"
+          "get_tree().paused flips but gameplay keeps running (the arena root is\n"
+          "PROCESS_MODE_ALWAYS and every gameplay child inherits it; masked by the\n"
+          "vacuous test_pause_menu.gd:109). The pause TOGGLE itself round-trips and\n"
+          "never ends the run (PC-13 core confirmed). PC-11 (three distinct bosses)\n"
+          "and PC-14 (locked arena spawner leak, the-pond T-061) are FIXED and now\n"
+          "measured/reclassified above. See integrations/pond/RESULTS.md.")
     return 1
 
 
