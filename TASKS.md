@@ -211,7 +211,7 @@ and the R1/R2/R3/exploit-hunter ladder scripts were not modified, only subclasse
 structurally unaffected by this task.
 Orchestration: graphify=none — no `graphify-out/graph.json` in the repo root (confirmed via `ls`); task grounded directly in `playtester.py`, the ND adapter/invariants/config, and the  · attempts=1/4.
 
-### L-004 · Wire Pond to a macro-layer structured playtest (upgrade/mutation choices only) — `status: TODO` · `coder: opus` · `after: L-002`
+### L-004 · Wire Pond to a macro-layer structured playtest (upgrade/mutation choices only) — `status: DONE` · `coder: opus` · `after: L-002`
 Real-time per-frame combat was already judged the wrong granularity for an LLM loop (per-frame dodging is not
 a reasoning task) — do **not** attempt frame-by-frame play here. Scope this to the macro layer: the LLM is
 consulted only at level-up decision points, using `PondHarnessAdapter.level_up_pending()` /
@@ -229,6 +229,20 @@ entry point with `--provider ollama`, with the LLM consulted at every `level_up_
 nowhere else; the report records each mutation choice with its `reasoning`/`expected_outcome`; combat between
 level-ups is driven by the existing R1 heuristic/random policy, not reimplemented; R1 still MET with the same
 check count as before this task.
+
+**Delivered (2026-07-21):** Wrote `integrations/pond/playtest_pond.py` (a local `MacroPlaytestPondAdapter`
+subclass, zero changes to `ugt/core/playtester.py` or the base `PondHarnessAdapter`) that isolates the LLM to
+the one reasoning-shaped decision here — the level-up mutation choice — by making `legal_actions()` non-empty
+only when `level_up_pending()` is true, and fast-forwarding all combat inside `reset()`/`apply_legal()` with
+`verify_round1.heuristic_combat_action`, the R1 policy extracted verbatim so both tiers drive combat
+identically. Added `integrations/pond/strategy-guide.md` covering all 19 mutations plus the PC-15
+boss-scaling caveat. An `--provider ollama` run MET the accept bar: 7 level-up decisions across 9 runs (6 by
+death, 4 by truncation), every pick applied a real mutation with grounded `reasoning`/`expected_outcome`,
+invariants clean, 0 bugs; R1 stayed MET 18/18 with the shared-policy extraction. Deliberate scope boundary:
+per-frame combat robustness remains R3's job — this tier's invariant checks fire at level-up decision
+boundaries, not every combat frame — and the paid Anthropic-provider balance verdict is left credit-gated,
+matching L-003's precedent. Full detail in `integrations/pond/RESULTS.md` and `HANDOFF.md`.
+Orchestration: graphify=none — no `graphify-out/graph.json` in the repo root (checked; this is a code-integration task grounded directly in `playtester.py`, `pond_harness.py`, `verify_ · attempts=1/4.
 
 ### L-005 · Wire Tarot-War for `ugt playtest` (existing browser engine, no new drive mode) — `status: TODO` · `coder: sonnet` · `after: —`
 Tarot-War already uses `PlaywrightAdapter` (browser `engine.type`), which `playtest_game()` already supports —

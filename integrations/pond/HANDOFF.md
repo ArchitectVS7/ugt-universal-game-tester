@@ -12,6 +12,17 @@ against an empty `info["result"]` — now wired to the raw snapshot). **Next tie
 (credit-gated) — owns the PC-15 play-skill/balance verdict the robustness gate cannot; plus the
 tracked PC-12 harness-op follow-up below.** The ladder itself needs nothing further.
 
+**L-004 DONE (2026-07-21): macro-layer LLM playtest wired + MET (ollama).** `playtest_pond.py`
+consults the LLM ONLY at the level-up mutation choice (the sole reasoning-shaped decision here) via
+the L-002 `legal_action` mode; combat between level-ups is the REUSED R1 heuristic
+(`verify_round1.heuristic_combat_action`, extracted verbatim — R1 stayed MET 18/18). MET run: 7
+level-up decisions / 9 runs (6 deaths), every pick applied a real mutation (`+1` each), invariants
+clean, 0 bugs. ZERO changes to `ugt/core/playtester.py` — a local subclass (`MacroPlaytestPondAdapter`)
+makes `legal_actions()` non-empty only at a level-up and fast-forwards combat inside
+`reset()`/`apply_legal()`, so the base adapter + whole ladder are untouched. Adds `strategy-guide.md`
+(19 mutations from the `.tres` data + PC-15 caveat). Anthropic-provider run (the balance VERDICT) is
+still credit-gated; the wiring and the ollama smoke are done. See RESULTS.md L-004 entry.
+
 Prior status (R2, superseded): R2 GREEN — MET 45/45 (2026-07-21, the-pond HEAD `92de418`, seed 20260720, godot 4.7.1).
 R1 still MET 18/18; `py_compile` exit 0. This supersedes U-009's 44/47: the game-side gaps that
 44/47 measured were then REPAIRED (repair-the-gaps-before-advancing), and every counted check now

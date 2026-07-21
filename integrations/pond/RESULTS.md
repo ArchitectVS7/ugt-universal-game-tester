@@ -2,6 +2,38 @@
 
 Commit-traceable record. A failed check is data. Game repo: `~/Dev/Games/the-pond/`.
 
+## 2026-07-21 — L-004: macro-layer LLM playtest MET (ollama) — the balance tier is wired
+
+**PLAYTEST MET** (`integrations/pond/playtest_pond.py --provider ollama --model qwen3-coder:30b
+--max-actions 10 --max-steps 150 --seed 20260719`, the-pond HEAD `92de418`, godot 4.7.1). An LLM is
+consulted ONLY at the level-up mutation choice — the one decision class here that is a reasoning task —
+via the L-002 entry point (`playtest_game_with_adapter`, `action_mode="legal_action"`). Result: 7
+level-up decisions across 9 completed runs (6 by **death**, 4 by truncation), **every pick applied a
+real mutation** (mutations_taken delta `+1` on all 7 — the load-bearing, failable check, read from live
+per-run state), every pick carried a grounded `reasoning`/`expected_outcome` (the model cited the
+strategy-guide effects verbatim, e.g. "Toxic Aura 1 dmg/s in 80px", "+20% move speed", "Tough Skin +1
+max HP"), the invariant suite ran (0 violations), 0 bugs flagged, 43.5s.
+
+**Design verdict (the "does it fit L-002?" question the task posed): YES, with ZERO changes to
+`ugt/core/playtester.py`.** The macro framing fits the existing `legal_action` loop via one structural
+trick: `legal_actions()` returns non-empty EXACTLY WHEN `level_up_pending()` is true, and all combat is
+pushed into `reset()`/`apply_legal()`, which fast-forward with the REUSED R1 heuristic
+(`verify_round1.heuristic_combat_action`, extracted verbatim — R1 stayed MET 18/18) to the next
+level-up or a terminal. The generic loop then prompts the LLM at each level-up and nowhere else, and
+builds its prompt from the exact decision-point snapshot. Implemented as a LOCAL subclass
+(`MacroPlaytestPondAdapter`), leaving the base adapter + the whole R1/R2/R3 ladder untouched — the
+L-003 precedent. No `playtester.py` extension was needed; the core LLM-loop contract (delta assertion,
+reasoning/expected/potential_bug fields, bug-report shape) is unchanged — this only ADDS a channel.
+
+**Disclosed coarsening:** the invariant predicates fire at each DECISION BOUNDARY (before = the
+level-up snapshot, after = the next level-up/terminal), not on every intermediate combat frame —
+per-frame robustness stays R3's job. Each predicate can still fail on those boundary snapshots, so it
+is coarser coverage, not a vacuous check. **Disclosed tuning:** `--max-steps 150` lowered only the
+per-episode truncation bound (default 600) for a faster validation; combat driving was NOT touched.
+The `--max-steps` default remains the config's 600, and deaths (6 of 9 runs) confirm the terminal is
+real, not a truncation artifact. Deliverables: `playtest_pond.py`, `strategy-guide.md` (19 mutations,
+grounded in the `.tres` data + the PC-15 boss-scaling caveat), report at `results/playtest-report.json`.
+
 ## 2026-07-21 — R3 GREEN: ExploitHunter MET 11/11 — the trial ladder is COMPLETE
 
 **R3 MET — 11/11** (seed 20260721, the-pond HEAD `92de418`, godot 4.7.1). `integrations/pond/
