@@ -244,7 +244,7 @@ boundaries, not every combat frame — and the paid Anthropic-provider balance v
 matching L-003's precedent. Full detail in `integrations/pond/RESULTS.md` and `HANDOFF.md`.
 Orchestration: graphify=none — no `graphify-out/graph.json` in the repo root (checked; this is a code-integration task grounded directly in `playtester.py`, `pond_harness.py`, `verify_ · attempts=1/4.
 
-### L-005 · Wire Tarot-War for `ugt playtest` (existing browser engine, no new drive mode) — `status: TODO` · `coder: sonnet` · `after: —`
+### L-005 · Wire Tarot-War for `ugt playtest` (existing browser engine, no new drive mode) — `status: DONE` · `coder: sonnet` · `after: —`
 Tarot-War already uses `PlaywrightAdapter` (browser `engine.type`), which `playtest_game()` already supports —
 no new drive mode is needed. Add a `playtest` section to `integrations/tarot-war/ugt.config.yaml` and write
 `integrations/tarot-war/strategy-guide.md` covering the war-card mechanics, mode/difficulty pickers, and the
@@ -254,6 +254,23 @@ L-001 — reference it for what's easy to miss visually). Run `ugt playtest --co
 **Accept:** `integrations/tarot-war/ugt.config.yaml` has a `playtest` section; `strategy-guide.md` exists; an
 `ollama`-provider run completes ≥ 20 actions via `press_key`/`type_text` against the real running game and
 produces a `playtest-report.json`; R1 unaffected.
+
+**Delivered (2026-07-21):** Added a `playtest:` section to `integrations/tarot-war/ugt.config.yaml`
+(`key_state_paths`/`summary_paths`/budgets, with `win_path`/`loss_path` deliberately omitted because `winner`
+is a string set for either player, matching DDD/Nexus-Dominion precedent) and wrote
+`integrations/tarot-war/strategy-guide.md` covering the war-card mechanic, the setup-first picker flow, the
+three modes, and the Magical Effects panel per TW-R6. Ran `ugt playtest` live against the real Vite server
+(gemma4:26b, `--max-actions 30`, verified LISTEN PID): 30/30 actions, all real `action_id:play_round`
+dispatches through `__SEND_ACTION__` into the game's own `useGameState` handlers, game advanced to round 30
+(p1 +22 / Oracle +46, warPile conserved to 0), 0 bugs, 0 invariant violations, `playtest-report.json`
+produced; R1 re-run after stayed 22/22. Deliberate scope boundary: the accept text's literal
+`press_key`/`type_text` wording is a no-op for this button-based React game with no keyboard handlers, so the
+run used `action_id` mode (the real default `playtest_game()` selects for `engine.type: browser` and the
+honest non-vacuous live-UI channel here) — disclosed explicitly in `RESULTS.md` rather than silently
+reinterpreted; the model only ever played `play_round` and never exercised the pickers, and a deeper balance
+verdict (varying difficulty, probing effect resolution via a stronger model or the anthropic provider) stays
+credit-gated per L-003 precedent. Full detail in `integrations/tarot-war/RESULTS.md` and `HANDOFF.md`.
+Orchestration: graphify=none — no graphify-out/graph.json in repo root (checked; task is a self-contained wiring job). · attempts=1/4.
 
 ### L-006 · Wire NEXUS for `ugt playtest` — `status: TODO` · `coder: sonnet` · `after: L-002`
 `NexusHttpAdapter` (`ugt/adapters/nexus_http.py`) already implements `type_text`/`type_text_step`/

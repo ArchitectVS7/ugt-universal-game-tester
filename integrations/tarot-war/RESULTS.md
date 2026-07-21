@@ -19,6 +19,7 @@ transport only — they call the exact `useGameState` callbacks the UI buttons r
 | R2 | 2026-07-07 | `verify_round2.py` | **12/12** — all three modes to completion under per-dispatch invariants, effect coverage with exact accounting, log round-stamping, hard-AI same-seed determinism, reset preserving mode/difficulty | TW-R6, TW-R8 (live) | (pre-RESULTS) | (pre-RESULTS) |
 | R3 | 2026-07-07 | `verify_round3.py` | **7/7 — LADDER COMPLETE.** `ExploitHunter`: 3 seeded episodes (classic 400 steps / endless / survival), phase-aware policy picking mode+difficulty through real pickers + probing refusal paths (mid-game pickers, unmapped id 99), 12 invariants over 418 steps, zero findings, same-seed episode-0 replay byte-identical | — | (pre-RESULTS) | (pre-RESULTS) |
 | L-001 audit | 2026-07-21 | (all three) | vacuous-check audit — see below | 1 tester defect (empty-traj determinism guard), fixed | `a69d805`+ | `61f1c1a` |
+| L-005 | 2026-07-21 | `ugt playtest` (ollama) | **30/30 actions** — LLM (gemma4:26b) drove 30 real `play_round` dispatches through `__SEND_ACTION__` into the game's own handlers; game progressed to round 30 (p1 22 / Oracle 46, warPile conserved to 0); 0 bugs, 0 invariant violations; `playtest-report.json` produced. R1 re-run after = 22/22 (unaffected). | none (balance-tier wired + smoke-run) | (this branch) | `61f1c1a` |
 
 ## Findings registry (migrated from README — R1: 22/22 · R2: 12/12 · R3: 7/7, all 8 findings closed 2026-07-07)
 
@@ -210,3 +211,42 @@ invariant (`inv_ready`…`inv_softlock`, `:171-266`) gets the real `before`/`aft
   `> 0` count.
 - **Defensive `.get("warCardCount", 0)` (R3)** — safe; key unconditionally emitted (grep
   above).
+
+---
+
+## L-005 — LLM balance-playtest tier wired (2026-07-21)
+
+**Task:** wire tarot-war for `ugt playtest` (the "is it a good game?" tier). No new drive mode:
+tarot-war already uses `engine.type: browser` → `PlaywrightAdapter`, which `playtest_game()`
+supports directly. Added a `playtest:` section to `ugt.config.yaml` (key_state_paths /
+summary_paths / budgets, `win_path`/`loss_path` deliberately omitted — `winner` is a STRING
+set for EITHER player, so `bool(winner)` would report a "win" whenever anyone won; matches
+DDD / Nexus-Dominion precedent) and wrote `strategy-guide.md` (war-card mechanic, setup-first
+picker flow, the three modes, and the Magical Effects panel per TW-R6).
+
+**Run (live):** `ugt playtest --config integrations/tarot-war/ugt.config.yaml
+--strategy-guide integrations/tarot-war/strategy-guide.md --provider ollama` (gemma4:26b,
+`--max-actions 30`) against the real Vite server on :5173 (LISTEN PID verified as the correct
+tarot-war vite). Completed in 1210s: **30/30 actions, all `action_id:play_round`** — real
+`__SEND_ACTION__` dispatches through the game's own `useGameState` handlers, not no-op waits.
+Game advanced to round 30 (p1 score +22, Oracle +46, `warPile` conserved back to 0). **0
+potential bugs, 0 invariant violations, 0 novel behaviors.** Report at
+`results/playtest-report.json` (`summary.actions_taken == 30`, `action_counts ==
+{"action_id:play_round": 30}`). R1 re-run immediately after = **22/22** (config change is a
+single additive top-level key; R1 builds its own config shim).
+
+**⚠️ Channel-substitution disclosure (not silently reinterpreting the accept line).** The
+task's accept text says "≥20 actions via `press_key`/`type_text`." Tarot-war is a
+button-based React game with **no keyboard handlers** — `press_key`/`type_text` would land as
+silent no-ops (and the contradiction detector would correctly flag them). The honest,
+non-vacuous live-UI channel for this browser game is **`action_id` mode** (the default
+`playtest_game` selects for `engine.type: browser`), which dispatches through
+`__SEND_ACTION__` into the exact real UI handlers. So this run drove `action_id`; treat
+"press_key/type_text" as the schema's generic browser-input clause, whose real-handler
+equivalent here is `action_id`. A contrived `press_key` run would have been vacuous.
+
+**Model-competence observation (data, not a task failure):** gemma4:26b played only
+`play_round` for all 30 steps — it never exercised the mode/difficulty pickers (which apply
+only in `setup`, and step 1 already left setup). The ≥20-real-dispatch bar is met; a deeper
+balance verdict (varying difficulty to compare Oracle strength, probing effect resolution)
+wants a stronger model / the anthropic provider, which stays credit-gated.

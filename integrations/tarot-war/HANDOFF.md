@@ -46,5 +46,12 @@ score) — a balance note for the LLM-playtest tier, not a defect.
 
 ## What is NOT done
 
-- **LLM balance-playtest tier** (`ugt playtest`) — the "is it a good game?" tier — has not
-  been run against tarot-war (credit-gated).
+- **LLM balance-playtest tier** (`ugt playtest`) — now WIRED + smoke-run (L-005, 2026-07-21).
+  `ugt.config.yaml` has a `playtest:` section and `strategy-guide.md` exists; an ollama run
+  (gemma4:26b, `--max-actions 30`) completed 30 real `play_round` dispatches through
+  `__SEND_ACTION__` and produced `results/playtest-report.json` (0 bugs, 0 invariant
+  violations). Browser button game → `action_id`/`__SEND_ACTION__` is the real-handler
+  channel; `press_key` would be vacuous here (see RESULTS.md L-005 for the full disclosure).
+  Still open: a DEEPER balance verdict — a stronger model / the anthropic provider (credit-
+  gated) to actually vary difficulty and probe effect resolution; gemma4:26b only played
+  `play_round` the whole run.
