@@ -1,6 +1,62 @@
 # DDD × UGT — resume here
 
-**Status (2026-07-22, L-010 — READ THIS FIRST): the seat-swapped pooled balance batch
+**Status (2026-07-22, L-013 — READ THIS FIRST): due-diligence Haiku 4.5 re-run of
+L-012's matchup matrix — Blitzblade's win rate improves with a stronger model,
+Swarm's does NOT move (0/15 wins across BOTH models).** Same 7-run design (see
+L-012 below) re-run on `anthropic/claude-haiku-4-5-20251001`. 15 more completed
+matches, 0 bugs, 0 invariant violations (30/30 clean across both model tiers).
+Blitzblade: gemma 2W–4L → Haiku 3W–3L (first-ever win vs tier3). **Swarm: 0 wins in
+7 gemma matches AND 0 wins in 7 Haiku matches — a real model upgrade moved
+Blitzblade's needle and did not move Swarm's at all.** That shifts weight away from
+"the LLM just plays Swarm badly" (D-L6 hypothesis 2) and toward the deck or the
+graveyard-recursion mechanic itself (hypotheses 1/3) — but does NOT resolve which,
+and does not confirm "Swarm is underpowered" outright; `apps/probe`'s own GREEN
+K/L/O/P parity gates (DDD's AI piloting BOTH decks) remain the standing tension.
+Full writeup: RESULTS.md **L-013**. Artifacts reorganized into
+`results/batch-{seat0-blitzblade,gemma-seat1,haiku-seat0,haiku-seat1}/` — the
+script now tags every output filename with the resolved model name after an early
+run clobbered one gemma seat-1 JSON artifact (numbers preserved, raw file lost).
+
+**Status (2026-07-22, L-012): a fixed-opponent matchup smoke test
+(gemma4:26b vs DDD's own tier1/2/3 AI, not self-play) reproduces the Blitzblade-over-
+Swarm asymmetry, but the CAUSE is still open — deck, pilot, or the graveyard-
+recursion mechanic itself.** New tooling (both additive, no protocol changes): DDD
+repo `packages/ai/bin/choose-move.mjs` exposes `@ddd/ai`'s real tier1/2/3 strategies
+as a stdio move-picker; UGT repo `DddHarnessAdapter.seat_view()` +
+`integrations/ddd/playtest_ddd_matchup.py` let the LLM play ONE seat against that
+AI (or DDD's engine AI plays the other) instead of the same LLM playing both. 7 runs
+(40 LLM actions each), 15 completed matches, 0 bugs, 0 invariant violations. LLM-as-
+Blitzblade 2W–4L; **LLM-as-Swarm 0W–8L with zero exceptions**, including losing to
+pure-`random`-piloted Blitzblade — same opponent tier, same model, only the deck
+flipped. The bb-side difficulty gradient (crushes random, loses worse to tier3 than
+greedy) is a positive signal that L-011's fixes are doing real work. **Do not treat
+this as "Swarm is underpowered"** — the design confounds deck balance with per-deck
+LLM skill, and it is in direct tension with `apps/probe`'s own GREEN K/L parity
+gates (matched-skill mirror play). Next: re-run the identical 7-run matrix on
+Anthropic Haiku 4.5 to check whether the asymmetry is model-specific before drawing
+any deck or mechanic conclusion. Full writeup: RESULTS.md **L-012** (see D-L6 for the
+three live hypotheses).
+
+**Status (2026-07-22, L-011): the L-010 batches were ALSO
+information-starved on the read layer, the harness + guide are now fixed, and LLM
+playtest re-runs are PAUSED pending an explicit user go.** A design-review pass on
+L-010 found the pilot was never shown the engine's PUBLIC `echo` ghost (the adapter
+dropped it — 0 of 1,650 reasonings mention echo) and was never taught the rules that
+make reads possible (the strategy guide named `stance` as a bare field; no type
+triangle, no stance modifiers/regen/transition, no chains). Fixes (UGT-side):
+`_seat()` now passes through `echo`/`chain`/`statuses`/`modifiers` (all PUBLIC per
+DDD `state/types.ts`), and the strategy guide teaches §4.1 + §6 plus keyword
+meanings ("scales" = own-graveyard archetype count; HAND-destination returns are
+cap-truncated) and permits CONCEDE only at provably lost positions (guide budget
+6000→11000). Full ladder re-run GREEN after the change: spike 10/10 · smoke 5/5 ·
+R1 11/11 · R2 26/26 · R3 32/32, zero findings. The companion design recommendation
+(ratify read-game identity; Feint keyword + forced-stance riders; escalating-
+commitment sweep; declared stance shelved-but-recorded) is filed in the DDD repo at
+`STANCE-DESIGN-RECOMMENDATION.md`. **Do not pool any future batch with L-010
+numbers (different information regime), and do not start those batches without the
+user's go.** Full writeup: RESULTS.md **L-011**.
+
+**Status (2026-07-22, L-010): the seat-swapped pooled balance batch
 is DONE, and it contradicts DDD's own authoritative balance gate.** Pooled over 49
 matches (2 cells × 8 runs × 100 actions, Haiku 4.5, paired seeds): **Blitzblade 89.8%**
 (95% CI 78.2–95.6%), while `apps/probe`'s gated skilled-play measurement reports 51.7%

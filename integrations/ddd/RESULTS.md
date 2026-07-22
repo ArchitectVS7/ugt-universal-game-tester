@@ -577,3 +577,228 @@ The T6.2-oriented balance read now needs the 4-cell (or at minimum seat-swapped
 `apps/ladder/bin/ladder.mjs`'s own design — with competent, non-leaking play this
 time. The L-008 numbers must not be pooled with post-L-009 batches (different
 policy). DDD T6.3's conformance audit #2 remains untouched.
+
+## L-011: The read layer was invisible — echo/rules starvation fixed; design recommendation filed; LLM re-runs PAUSED (2026-07-22)
+
+A design-review pass over L-010 (user questions: did the pilot use the stance
+system? is Swarm mispositioned against the rules?) found that the L-010 batches
+measured play **without the game's read layer** — the same information-starvation
+class as L-009, one level up:
+
+**D-L4 · the adapter dropped the engine's PUBLIC `echo` ghost (and `chain`).**
+`state/types.ts` marks `echo` (last played card's `{cardType, focusCost}`),
+`chain` (rolling last-3 played types + completedThisTurn), `statuses` and
+`modifiers` all PUBLIC; `playerView.ts` serves them to both seats; `_seat()`
+discarded all four. Echo is half of the ratified Wave-1 "Stance + Echo" pair —
+**0 of L-010's 1,650 reasonings mention echo**. Fixed: `_seat()` passes all four
+through. (No redaction needed — public by the engine's own annotations.)
+
+**D-L5 · the strategy guide named `stance` but taught no rules.** No type triangle
+(+5 counter — §4.1, the game's core skill), no stance modifiers/regen/transition
+(§6.1), no echo (§6.2), no chains (§6.3), no definition of "scales"/"counters up"
+(= own-graveyard archetype count), no warning that HAND-destination returns are
+cap-truncated (D-L2). Measured consequence in L-010: 745/1,650 reasonings mention
+stance but ~zero use its mechanics (0 transition-rule, 0 regen, 1 triangle-ish);
+the guide's own "predict only with a real read" instruction made the LLM decline
+prediction variants 111 times vs ~27 takes — correctly, since it was never told
+stance/echo ARE the read. Stance-occupancy reconstruction from the logs: LLM bb
+sat AGGRESSIVE **63.9%** while LLM sw played DEFENSE-stance only 17.1% — the +5
+counter against a telegraphing opponent was never collected. Fixed: guide rewritten
+to teach §4.1 + §6 + keyword semantics + read-based prediction guidance; CONCEDE
+text now permits resignation at provably lost positions (both L-010 concessions
+were correct play); `playtest.guide_char_budget` 6000→11000 (guide is 9,446 chars —
+truncation would re-create the defect).
+
+**Interpretation guardrails:** L-010's 89.8% is a *rules-blind-pilot* number on top
+of its other caveats — it must not be pooled with any post-L-011 batch, and the
+D-L1 pilot-sensitivity finding is expected to *shrink* (by how much is exactly what
+the next batch measures). This also sharpens the D-L1 open question: greedy/tier-3
+reach parity precisely because `@ddd/ai`'s evaluator prices the triangle, the
+stance transition (engine's own `nextStance`), and stance regen — they were the
+informed pilots; the LLM tier was the uninformed one by accident.
+
+**Design outcome (game-side, recorded not implemented):** the full recommendation
+is filed at DDD repo root `STANCE-DESIGN-RECOMMENDATION.md`, pending ratification:
+(1) ratify the read-game identity (post-D19 stance is informationally redundant
+with echo — `stance = f(echo.cardType)` — and the game has no deception channel;
+its depth is valuation + reads, VGC-style); (2) add a **Feint keyword** (2–3 cards
+whose Echo lies about type; a Feint card's stance follows its SHOWN type — restores
+stance's independent information) plus the already-ratified-but-unbuilt
+**forced-stance riders**; (3) sweep **escalating commitment** (+1/+2/+3 for
+consecutive same-type) as a tuning experiment; (4) **declared stance** (an active
+pre-reveal stance action — the original design intuition) stays on the shelf,
+recorded for future experimentation behind an `enabledWaves` flag, only if 2–3 test
+flat; (5) stance removal/rework remains an open option if the riders don't earn it.
+
+**Validation:** full ladder re-run green after the adapter change — spike 10/10 ·
+smoke 5/5 · R1 11/11 · R2 26/26 · R3 32/32, zero findings, same-seed replay
+byte-identical. In-process assertions: `echo`/`chain`/`statuses`/`modifiers`
+present in the normalized state with live values (echo `{'cardType': 'EFFECT',
+'focusCost': 3}` after 8 plies, stance consistent with it), guide 9,446 ≤ 11,000.
+
+**⏸ LLM playtest re-runs are PAUSED by user instruction** — the harness and guide
+are ready, but no balance batch (and no model-strength cell) runs until the user
+gives the go, so the next batch can be designed around which stance experiment (if
+any) lands first.
+
+## L-012: Fixed-opponent matchup smoke test — Blitzblade dominance reproduces against DDD's own AI, independent of self-play; cause (deck / pilot / mechanic) undetermined (2026-07-22)
+
+User-authorized, scoped go: not the paused pooled balance batch, but a smoke test to
+sanity-check L-011's fixes on a cheap local model, plus an explicit ask to stop
+measuring the LLM against ITSELF and see how it does against a genuinely distinct
+opponent — DDD's own AI ladder.
+
+**New tooling (both repos, both additive, no protocol changes):**
+- DDD repo: `packages/ai/bin/choose-move.mjs` (+ `packages/ai/bin/ts-resolve-hook.mjs`,
+  + `packages/ai/package.json` `"choose-move"` script) — a new stdio service exposing
+  `@ddd/ai`'s REAL tier1 `uniformRandomStrategy` / tier2 `greedyStrategy` / tier3
+  `onePlyStrategy` as a stateless move-picker: `{tier, view, rngSeed}` in,
+  `{action}` out. Verified structurally sound: `chooseAction(view, index, rng)` is a
+  pure function of a seat's own `PlayerView` (no engine-internal state needed), and
+  that `PlayerView` is the EXACT shape `packages/harness`'s `create`/`act` responses
+  already return — so no wire protocol change was needed, and the chosen actions were
+  confirmed to round-trip through the harness's own `act` op (accepted, not just
+  well-formed). `packages/harness` itself is untouched.
+- UGT repo: `DddHarnessAdapter.seat_view(seat)` (pure cache accessor, zero new
+  requests) + new script `integrations/ddd/playtest_ddd_matchup.py`, which reuses
+  `ugt/core/playtester.py`'s existing prompt builder / delta / bug / invariant
+  machinery verbatim and only branches at the point of deciding a move: the LLM's own
+  seat goes through the normal `_build_legal_prompt` → `llm.choose_action` →
+  `apply_legal` path; the opponent's seat (when not `self`) goes through
+  `seat_view` → the DDD-side chooser → `apply_legal` on the returned Action — the SAME
+  submission call either way, so nothing downstream (invariants, delta computation,
+  bug detection) had to change.
+
+**Isolation, raised explicitly by the user for `--opponent self`:** confirmed by
+reading, not just assumed — every LLM call is one stateless request built by
+`_build_legal_prompt`; it carries only the current normalized state (public
+`p0`/`p1` fields only — `_seat()` never includes hand contents for EITHER seat) and
+the ACTING seat's own legal-action list (the only place hand-card identity appears,
+scoped to that seat). The recent-actions summary shown in every prompt carries the
+action's index and a fog-of-war-redacted delta, never the free-text `reasoning` a
+prior decision produced. So even under `self`, "the seat about to move" is never
+shown "the other seat's" prior internal reasoning or hand — only the same public
+reveal a real opponent would see. No code changed to satisfy this; it was already
+true, and is now stated in the new script's docstring so it stays true on purpose.
+
+**Method:** `gemma4:26b` (ollama), 40 LLM actions per run (opponent moves are free,
+not counted), 7 runs: LLM on seat 0 (bb_competitive) vs {random, greedy, tier3, self},
+and LLM on seat 1 (sw_competitive) vs {random, greedy, tier3} (`self` skipped for the
+seat-1 batch — it is already seat-symmetric, not a real swap). 15 completed matches,
+**0 bugs flagged, 0 invariant violations** across all 160 LLM decisions and every
+matching opponent move.
+
+### Results
+
+| opponent | LLM = bb_competitive (seat 0) | LLM = sw_competitive (seat 1) |
+|---|---|---|
+| random (tier1) | **2–0** (14–0, 1–0) | **0–2** (0–20, 0–20) |
+| greedy (tier2) | 0–2 (0–5, 0–1) | **0–3** (0–28, 0–21, 0–27) |
+| tier3 (onePly) | 0–2 (0–11, 0–28) | **0–3** (0–29, 0–28, 0–29) |
+| self (both LLM) | bb won 19–0 | — |
+
+LLM-as-Blitzblade: 2W–4L. **LLM-as-Swarm: 0W–8L, no exceptions.** The cleanest single
+comparison holds the opponent tier fixed: vs `random`, LLM/bb beats random/sw 2–0,
+while LLM/sw loses to random/bb 0–2 — same opponent skill, same model, only the deck
+flips, and the whole outcome flips with it.
+
+**The difficulty gradient on the bb side is itself a positive signal for L-011**: LLM/bb
+crushes the weakest opponent, then loses to greedy, then loses by wider HP margins to
+tier3 (the stronger, opponent-modelling tier). A pilot not actually using the newly
+exposed `echo`/`chain`/stance fields would be expected to perform roughly flat across
+opponent strength, not track it. That gradient is evidence L-011's fixes are doing
+real work, independent of the sw finding below.
+
+## D-L6 · Cause of the bb/sw asymmetry is UNDETERMINED — three live hypotheses, not one
+
+This experiment's design cannot by itself distinguish:
+
+1. **Deck problem** — Swarm really is the weaker archetype, consistent in direction
+   with L-010's pre-L-011 89.8% figure (a different measurement, different
+   information regime, not to be pooled with this one, but pointing the same way).
+2. **Pilot/strategy problem** — the LLM specifically misplays Swarm's graveyard-
+   recursion/economy game (multi-step sequencing: fill graveyard, THEN scale, THEN
+   recur at the right moment) worse than it plays Blitzblade's more legible
+   aggression, independent of the deck's true power. A smaller local model may simply
+   find Swarm's plan harder to execute correctly.
+3. **Mechanic problem** — graveyard recursion, Swarm's core identity, may not be a
+   viable strategy in this ruleset AT ALL regardless of pilot skill. This is a more
+   serious possibility than (1): it would mean one shipped archetype's whole plan
+   doesn't function, not that its numbers need a tweak. D-L2 (L-010) is a standing,
+   already-confirmed partial mechanism in this direction: Swarm sits at the 7-card
+   hand cap 82% of the time, so its "return 2/3 from graveyard" cards almost always
+   return only ONE card — this run doesn't re-measure that, but is consistent with it
+   biting.
+
+**This experiment cannot rule any of the three out, and critically, it is IN TENSION
+with `apps/probe`'s own gates K/L (greedy-v-greedy, tier3-v-tier3 — matched-skill
+MIRROR play), which currently read GREEN in the 45–55% parity band.** That tension is
+the actual finding: either the LLM's Swarm play is meaningfully worse than DDD's own
+tier2/tier3 Swarm play (supporting hypothesis 2, since probe's own AI pilots both
+decks competently and finds parity), or probe's mirrored-skill design is not
+sensitive to whatever this experiment is catching. Do not read this entry as "Swarm
+is underpowered" — that claim is NOT what this data supports on its own.
+
+**Sample size:** 15 matches, 0–3 per cell — smoke-level. The effect is large (8/8
+Swarm losses, zero exceptions across three different opponent skill levels) and
+therefore unlikely to be pure noise, but this is not a substitute for a proper batch.
+
+**Next:** re-run this exact 7-run matrix on `anthropic/claude-haiku-4-5-20251001`
+(same script, `--provider anthropic`) to check whether hypothesis 2 is model-specific
+(gemma4:26b being worse at Swarm's sequencing than a stronger model) or holds under a
+materially more capable pilot too — due diligence before treating this as a deck
+finding rather than a pilot-competence one.
+
+**Artifacts:** `integrations/ddd/results/batch-seat0-blitzblade/` (gemma, LLM=bb) and
+`batch-gemma-seat1/` (gemma, LLM=sw). Note: the script originally wrote a FIXED
+filename per opponent with no model/seat tag, so the very first gemma seat-1
+`random` run's raw JSON was overwritten by the later Haiku seat-1 `random` run
+before it could be archived — the summary numbers survived (recorded above and in
+HANDOFF.md), but that one raw artifact is gone. Fixed going forward: `out_path` now
+includes the resolved model name, so this class of collision cannot recur.
+
+## L-013: Haiku 4.5 re-run — Blitzblade improves with model strength, Swarm does not move (0/15 wins across both models); hypothesis weight shifts away from pure pilot skill (2026-07-22)
+
+Due-diligence re-run of the exact L-012 7-run matrix on
+`anthropic/claude-haiku-4-5-20251001` (materially stronger than gemma4:26b), same
+script, same opponents, same seats. 15 more completed matches, **0 bugs, 0
+invariant violations** (30 completed matches and 0 defects total across both model
+tiers now).
+
+| opponent | Haiku = bb_competitive (seat 0) | Haiku = sw_competitive (seat 1) |
+|---|---|---|
+| random (tier1) | 2–0 (13–0, 2–0) | 0–2 (0–16, 0–3) |
+| greedy (tier2) | 0–2 (0–9, 0–12) | 0–3 (5–20, 0–10, 0–26) |
+| tier3 (onePly) | **1–1** (10–0 win, 0–28 loss) | 0–2 (0–19, 0–22) |
+| self (both LLM) | bb won 10–0 | — |
+
+**The load-bearing comparison is model-over-model, not opponent-over-opponent:**
+Blitzblade's record improved with the stronger model (gemma **2W–4L → Haiku 3W–3L**,
+including its first-ever win against tier3), while **Swarm's did not move at all —
+0 wins in 7 gemma matches, 0 wins in 7 Haiku matches, 0/15 total**, across three
+opponent skill levels and two materially different model tiers. If hypothesis 2
+(D-L6 — "the LLM is specifically bad at Swarm's sequencing") were the primary
+driver, a real model upgrade should have moved Swarm's win count off zero the same
+way it moved Blitzblade's. It didn't move at all.
+
+**Reading on the three D-L6 hypotheses:** this narrows, but does not close, the
+question. Weight shifts away from (2) pure pilot competence and toward (1) deck
+power or (3) the recursion mechanic itself — both of which a smarter GENERALIST
+model piloting the SAME strategy guide would not necessarily fix, since neither is
+a "the model didn't understand the rules" problem. It does not confirm (1) over (3)
+or vice versa: Haiku's Swarm losses were somewhat closer on HP margin than gemma's
+in a couple of cells (greedy: 5–20 vs gemma's 0–28/0–21/0–27 shutouts) — a hint of
+*some* execution improvement, just not enough to flip a single result. Still
+consistent with D-L2 (L-010): Swarm's core recursion cards are structurally capped
+by the 7-card hand limit regardless of who is piloting them.
+
+**Still open:** whether (1) or (3) — or both — is the operative cause remains
+undetermined by this experiment's design, which (per D-L6) confounds deck balance
+with per-deck pilot skill by construction (the opponent always plays whichever deck
+the LLM isn't). Disentangling would need either DDD's own AI piloting BOTH decks
+(which `apps/probe`'s K/L/O/P gates already do, and report GREEN — the standing
+tension this entry does not resolve), or a game-side read on whether Swarm has any
+winning line against a competent Blitzblade at all, independent of who executes it.
+
+**Artifacts:** `integrations/ddd/results/batch-haiku-seat0/`,
+`integrations/ddd/results/batch-haiku-seat1/`.

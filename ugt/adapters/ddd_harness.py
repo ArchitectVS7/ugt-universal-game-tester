@@ -538,6 +538,17 @@ class DddHarnessAdapter(BaseAdapter):
             enriched.append(action)
         return enriched
 
+    def seat_view(self, seat: int) -> dict:
+        """The engine's own raw `PlayerView` for `seat`, as last returned by
+        `create`/`act` — the exact shape `packages/harness`'s wire protocol
+        exposes (fog-of-war already applied by the engine). Pure cache read, no
+        request. This is NOT the redacted `p0`/`p1` dict `_normalize` builds for
+        the LLM prompt (which strips even hand identity) — it is the fuller view
+        `@ddd/ai`'s strategies need, and it is exactly what this seat is entitled
+        to see, never the other seat's."""
+        views = self._views or [{}, {}]
+        return views[seat] if seat < len(views) else {}
+
     def apply_legal(self, action, legal_count=None):
         """Apply ONE legal action object verbatim and return the standard
         (state, terminated, truncated, info) 4-tuple.
@@ -744,6 +755,16 @@ class DddHarnessAdapter(BaseAdapter):
             "hp": me.get("hp"),
             "focus": me.get("focus"),
             "stance": me.get("stance"),
+            # PUBLIC prediction-layer fields (rulebook §6.2/§6.3) — the engine
+            # marks all four PUBLIC in state/types.ts. Dropping them starved the
+            # LLM tier of the game's entire read layer (L-011): echo is the
+            # opponent's last card's {cardType, focusCost} ghost, chain.history
+            # its rolling last-3 played types. statuses/modifiers are the live
+            # Burn ticks / future-cost deltas a real client shows.
+            "echo": me.get("echo"),
+            "chain": me.get("chain"),
+            "statuses": me.get("statuses"),
+            "modifiers": me.get("modifiers"),
             "handCount": len(me.get("hand", []) or []),
             "deckCount": me.get("deckCount"),
             "graveyardCount": len(me.get("graveyard", []) or []),

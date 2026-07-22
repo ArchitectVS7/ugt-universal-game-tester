@@ -110,9 +110,11 @@ action_space:
 # feeds the prompt's KEY VALUES line and the per-run summary. The trial/exploit
 # ladder ignores this block entirely.
 playtest:
-  # 6000: the guide now carries the full card reference for both competitive
-  # decks (~4.5k chars total) — the 2000 default would truncate it mid-deck.
-  guide_char_budget: 6000
+  # 11000: the guide carries the full card reference for both competitive decks
+  # (~4.5k chars) PLUS, since L-011, the actual rules of the read layer (type
+  # triangle, stance, echo, chains, keyword meanings — ~4k more). Truncating it
+  # re-creates the blind-play defect L-009/L-011 exist to prevent.
+  guide_char_budget: 11000
   # Fog of war (L-009): the engine's redacted opponent view exposes only
   # hasCommitted — never WHAT was committed. The adapter's normalized state
   # carries the god-view committedKind/committedCard because the card-
