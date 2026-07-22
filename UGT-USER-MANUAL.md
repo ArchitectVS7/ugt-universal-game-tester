@@ -10,9 +10,12 @@
 
 ## Methodology & Hard-Won Lessons (read before onboarding a new game)
 
-These are the reusable principles distilled from wiring up the first five games (SpacerQuest, Warzones,
-Tarot-war, NEXUS, DDD). They apply to **every** game you plug into UGT — internalize them before writing a
-single adapter line.
+> **Canonical source: [`LESSONS.md`](LESSONS.md).** That file is the cross-game lessons registry — every rule
+> here plus the LLM-playtest pre-flight audit (section B) and the operational discipline rules (section C),
+> each with its evidence and source. Read it before onboarding a game, before advancing a ladder rung, and
+> before any LLM playtest run. New lessons go there, not here.
+
+The core methodology, in brief (full text + evidence in `LESSONS.md` §A):
 
 1. **Drive the REAL game, never a re-implementation.** The single biggest failure mode: building an adapter/bridge
    that reimplements game logic (travel, combat, economy) instead of calling the running game. Whatever the bridge

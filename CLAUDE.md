@@ -4,6 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Start here
 
+**Read `LESSONS.md` before any test run.** It is the canonical cross-game lessons registry: §A core
+methodology, **§B the LLM-playtest pre-flight information-integrity audit (P1–P9) — mandatory before any
+balance batch**, §C operational discipline. Every rule there was paid for by a run that went wrong; two
+multi-hour DDD balance batches measured the wrong thing because §B did not exist yet. New generalizable
+findings get promoted into it from `integrations/<game>/RESULTS.md`.
+
 **Read `PLAN-FORWARD.md` before doing anything else in this repo.** It has the current direction (the
 trial-ladder methodology, the game integrations completed so far, the next steps) and links to the memory
 notes with full history. The core lesson learned the hard way: **the tester must drive the real running game,

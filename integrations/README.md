@@ -22,6 +22,16 @@ driver) is a separate, later tier layered on top once the ladder is green, and i
 | **tarot-war** — **paused, human dev season** | 2-player tarot card-battle web game (React/Vite); browser via `PlaywrightAdapter` + the game's own `src/ugt-hooks.ts` | FULL LADDER COMPLETE — R1 22/22 · R2 12/12 · R3 7/7, zero findings, byte-identical 400-step replay | 8 findings (TW-R1..TW-R8) ALL fixed & verified upstream, incl. a critical war-resolution card-duplication bug; game suite 434→448. LLM playtest wired+smoke-run (`ugt playtest`, ollama, 30/30 real dispatches, 0 bugs). **Owner is expanding this game with a dedicated human-dev season starting 2026-07-21 — testing paused (including the deeper balance verdict that was open) until that expansion lands.** | [integrations/tarot-war/README.md](tarot-war/README.md) |
 | **warzones** — **paused, active dev** | Space-trading/combat web game (Phaser 3); browser via `PlaywrightAdapter` + the game's own `src/ugt-hooks.ts` | FULL LADDER COMPLETE — R1 23/23 · R2 12/12 · R3 (`verify_round10.py`) 6/6, zero findings | 9 findings (WZ-R1..WZ-R9), 8 fixed & verified upstream incl. a critical combat-destroys-run bug and an empty commodity registry; 1 (WZ-R3, ContractScene never launched) remains open, scoped out of the game's v0.8. Game suite 2,414/2,414 green post-fix. LLM playtest was never wired (game entered active development before that work started) — do not wire or retest until the owner signals it has stabilized. | [integrations/warzones/README.md](warzones/README.md) |
 
+## Before running the LLM playtest tier on any game
+
+Work through **`LESSONS.md` §B — the pre-flight information-integrity audit (P1–P9)** and write a cited
+disposition for each check. It exists because two multi-hour DDD balance batches (L-008, L-011) each measured
+a pilot that could not see the game — blind to card identities, then to the game's public read layer and the
+rules that create its skill — while reporting `PLAYTEST MET`, zero violations and a confident win rate.
+`integrations/nexus/RESULTS.md` L-014 is the worked example: three starvation defects found and fixed *before*
+the batch, one of which (a 600-char terminal budget against a 1,666-char `scan`) was hiding every low-security
+target from the pilot.
+
 ## Notes for readers
 
 - `spacerquest_old` (the retired 1991-BBS-style Museum Edition) was **deleted from this repo on 2026-07-21**,

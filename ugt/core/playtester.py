@@ -295,6 +295,16 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
     action_counts = {}
     episode_resets = 0
     noop_streaks = {}  # action -> consecutive no-material-delta count (contradiction detector)
+    # action -> {tries, productive, last_step, display_only}: the CUMULATIVE record shown
+    # back to the agent each step (LESSONS.md P10). noop_streaks resets on any productive
+    # step and the recent-actions window slides, so neither survives an interleaved loop.
+    action_ledger = {}
+    # (action, context) -> {text, step}: the LATEST terminal output each action produced,
+    # so terminal-only knowledge (NEXUS security levels / vuln names / file lists) survives
+    # past the single rolling buffer. Populated one step late: at the top of iteration N+1
+    # the fetched terminal_text IS the output of action N, so no extra adapter call.
+    terminal_recall = {}
+    _pending_recall = None  # (key, step) awaiting its output on the next iteration
     ended_early = None
     # Shared mutable context for stateful invariants (exploit-hunter semantics:
     # one ctx per episode — cleared whenever the game resets mid-run).
@@ -324,16 +334,22 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
             terminal_text = ""
             prompt = _build_legal_prompt(config, strategy_guide, current_state,
                                          legal_list, action_log, playtest_cfg,
-                                         noop_streaks=noop_streaks)
+                                         noop_streaks=noop_streaks, ledger=action_ledger)
         else:
             terminal_text = adapter.get_terminal_text(terminal_budget)
+            if _pending_recall and terminal_text:
+                _pk, _ps = _pending_recall
+                terminal_recall[_pk] = {"text": terminal_text, "step": _ps}
+            _pending_recall = None
             if action_mode == "text":
                 prompt = _build_terminal_prompt(config, strategy_guide, current_state,
                                                 terminal_text, action_log, playtest_cfg,
-                                                noop_streaks=noop_streaks)
+                                                noop_streaks=noop_streaks, ledger=action_ledger,
+                                                recall=terminal_recall)
             else:
                 prompt = _build_prompt(config, strategy_guide, current_state, terminal_text, action_log,
-                                       noop_streaks=noop_streaks)
+                                       noop_streaks=noop_streaks, ledger=action_ledger,
+                                       recall=terminal_recall)
 
         try:
             llm_action = llm.choose_action(prompt)
@@ -550,6 +566,23 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         # token of `value`, so `"ls"` also exempts `"ls -la"` if a model ever types that variant.
         _display_only_verbs = set(playtest_cfg.get("display_only_verbs") or [])
         _verb = value.split(None, 1)[0] if isinstance(value, str) and value else value
+        # Key the ledger by (action, CONTEXT) so location-scoped recon is not conflated:
+        # `ls` at four different servers is four legitimate observations, not one repeat.
+        # `playtest.action_context_path` names the state field that defines "where you are"
+        # (NEXUS: currentServerId). Absent -> context None, i.e. plain per-action keying.
+        _ctx_path = playtest_cfg.get("action_context_path")
+        _ctx = _resolve_path(before_state, str(_ctx_path)) if _ctx_path else None
+        _led = action_ledger.setdefault(
+            (str(value), None if _ctx is None else str(_ctx)),
+            {"tries": 0, "productive": 0, "last_step": step_num, "display_only": False})
+        _pending_recall = ((str(value), None if _ctx is None else str(_ctx)), step_num)
+        _led["tries"] += 1
+        _led["last_step"] = step_num
+        if _verb in _display_only_verbs:
+            _led["display_only"] = True
+        elif material_delta:
+            _led["productive"] += 1
+
         if _verb in _display_only_verbs:
             pass
         elif not material_delta and action_type in ("action_id", "press_key", "type_text", "end_turn", "legal_action"):
@@ -937,6 +970,142 @@ def _make_bug_report(step, source, description, action_log, current_action,
     return report
 
 
+def _action_ledger_block(ledger, cap=24):
+    """Render what the agent has ESTABLISHED so far this run — cumulative situational
+    knowledge, not a repetition penalty.
+
+    LESSONS.md P10 ("the pilot needs memory, not just state"). The prompt otherwise shows
+    only the current turn plus a short sliding window, so anything learned earlier is
+    simply gone: on NEXUS 2026-07-22 a 40-step run cycled the same six-step loop over the
+    same two servers five times with **zero** consecutive repeats, so `noop_streaks`
+    (which counts only CONSECUTIVE no-delta repeats and resets on any productive step)
+    never fired, and the recent-actions window had slid past every repeat before the next
+    one was chosen. The cumulative counts already existed in `action_counts` for the
+    report and were never shown back to the agent.
+
+    IMPORTANT — this block must NOT read as "do not repeat yourself". Repetition is
+    correct play in most games: location-scoped recon (NEXUS `ls`/`scan`/`analyze`) SHOULD
+    be re-run every time the agent reaches a new place, and penalising that would suppress
+    the exact behaviour the game wants. That is why entries are keyed by CONTEXT
+    (`playtest.action_context_path`, e.g. `currentServerId`) — `ls` at four different
+    servers reads as four separate, legitimate observations, while `ls` four times at the
+    SAME server is visible as such and the agent can draw its own conclusion. The block
+    reports; it does not instruct.
+
+    Display-only verbs (`playtest.display_only_verbs`) are labelled, not scored as
+    unproductive: their payload lands in terminal text by design.
+
+    Bounded by DISTINCT (action, context) count, capped at `cap` with any overflow
+    disclosed, so it does not grow with run length.
+    """
+    if not ledger:
+        return ""
+    entries = sorted(ledger.items(), key=lambda kv: (-kv[1]["last_step"], -kv[1]["tries"]))
+    lines = []
+    for key, rec in entries[:cap]:
+        action, ctx = key if isinstance(key, tuple) else (key, None)
+        where = f" at {ctx}" if ctx else ""
+        times = f"{rec['tries']}x" if rec["tries"] > 1 else "once"
+        if rec.get("display_only"):
+            detail = "output was shown in the terminal"
+        elif rec["productive"] == 0:
+            detail = "no state change"
+        elif rec["productive"] == rec["tries"]:
+            detail = "changed state"
+        else:
+            detail = f"changed state {rec['productive']}/{rec['tries']}"
+        lines.append(f"  step {rec['last_step']:>3}: {action!r}{where} — {times}, {detail}")
+    if len(entries) > cap:
+        lines.append(f"  … and {len(entries) - cap} earlier action(s) not listed")
+    return (
+        "## What you have already established this run\n"
+        "(Everything you have done, including steps older than Recent Actions. Re-running a\n"
+        "command somewhere NEW is normal and often correct play; this is here so you keep\n"
+        "what you have already learned.)\n"
+        + "\n".join(lines) + "\n\n"
+    )
+
+
+def _terminal_recall_block(recall, budget):
+    """Replay the most recent terminal output the agent saw for each distinct
+    (action, context) it has run — bounded by `playtest.terminal_recall_budget` chars.
+
+    LESSONS.md P10, the deeper half. In some games the read layer lives ONLY in terminal
+    output, never in structured state: NEXUS exposes `discoveredServers` as bare IPs, so a
+    server's SECURITY LEVEL (from `scan`), its VULNERABILITY NAMES (from `analyze`, the sole
+    source, and `exploit` needs an exact match) and its FILE LIST (from `ls`) are printed
+    once and then lost when the single rolling terminal buffer moves on. The agent is left
+    re-running recon not because it is looping, but because it genuinely no longer knows —
+    and re-running recon is the correct response to not knowing.
+
+    Retaining the LATEST output per (action, context) keeps that knowledge available without
+    replaying the whole session: superseded outputs for the same key are overwritten, and the
+    budget drops the oldest entries first. Default 0 = off, so games whose state already
+    carries their read layer are unaffected.
+    """
+    if not recall or budget <= 0:
+        return ""
+    items = sorted(recall.items(), key=lambda kv: -kv[1]["step"])
+    chunks, used = [], 0
+    for key, rec in items:
+        action, ctx = key if isinstance(key, tuple) else (key, None)
+        where = f" at {ctx}" if ctx else ""
+        text = (rec["text"] or "").strip()
+        if not text:
+            continue
+        chunk = f"### step {rec['step']}: {action!r}{where}\n{text}\n"
+        if used + len(chunk) > budget:
+            break
+        chunks.append(chunk)
+        used += len(chunk)
+    if not chunks:
+        return ""
+    dropped = len(items) - len(chunks)
+    tail = f"(+{dropped} older output(s) no longer retained)\n" if dropped > 0 else ""
+    return ("## Earlier terminal output you have seen (most recent first)\n"
+            "These are the results of things you already did — the details here are still\n"
+            "valid unless the game has changed them since.\n"
+            + "\n".join(chunks) + tail + "\n")
+
+
+def _objective_block(playtest_cfg):
+    """Optional `playtest.objective`: one line stating what WINNING means, rendered high
+    in the prompt. The strategy guide states the goal too, but it sits at the BOTTOM of
+    the prompt behind a full state dump and the terminal buffer — a long way from where
+    the model commits to its next action. Game-agnostic: the text is entirely config."""
+    objective = (playtest_cfg or {}).get("objective")
+    if not objective:
+        return ""
+    return f"## Your objective\n{str(objective).strip()}\n\n"
+
+
+def _available_actions_line(playtest_cfg, current_state, fallback):
+    """The verb list shown to the agent: ALWAYS the full vocabulary, plus — when the game
+    maintains its own live unlock list — an annotation naming what it currently reports as
+    unlocked.
+
+    ⚠️ This knob originally REPLACED the vocabulary with the game's live list, on the
+    reasoning that the agent should never be advertised a verb the game will refuse. Live
+    probing on NEXUS 2026-07-22 showed that is dangerous: `unlockedCommands` there is a
+    *hack-verb* unlock list (scan/connect/ls/cat/exploit/crack/escalate/backdoor/…) that
+    omits `status`, `missions`, `accept`, `talk`, `choose` — and omitted the newly added
+    `market`/`buy` entirely, which would have hidden a brand-new economy from the pilot.
+    A partial list used as a replacement is an information-starvation defect (P1); used as
+    an annotation it cannot hide anything. Annotate, never replace.
+
+    Absent path, unresolvable path, or a non-list value → plain `fallback`, so games
+    without such a field are unaffected.
+    """
+    path = (playtest_cfg or {}).get("available_actions_path")
+    if path:
+        live = _resolve_path(current_state, str(path))
+        if isinstance(live, (list, tuple)) and live:
+            names = ", ".join(str(v) for v in live)
+            return (f"{fallback}\n  (the game currently reports these as unlocked: {names} — "
+                    f"this list may be partial, so it does not rule out the others)")
+    return fallback
+
+
 def _noop_warning_block(noop_streaks, threshold=2):
     """Render a '## Warnings' section for any action whose last `threshold`+ attempts
     produced no material state change — the SAME counter the contradiction detector
@@ -957,6 +1126,38 @@ def _noop_warning_block(noop_streaks, threshold=2):
     if not lines:
         return ""
     return "## Warnings\n" + "\n".join(lines) + "\n\n"
+
+
+_TRUNCATION_WARNED = set()
+
+
+def _fit(text, budget, what, tail=False):
+    """Apply a prompt char budget, and SAY SO the first time it actually bites.
+
+    LESSONS.md P3 ("truncation is silent starvation"): the budgets are the quietest
+    way to blind a pilot — the guide's rules or the terminal's read layer just stop
+    existing partway through, the run still reports PLAYTEST MET, and the resulting
+    balance number is measuring a player who was never told the rules. Two DDD
+    batches (L-009, L-011) were lost to exactly this before the budgets were raised
+    2000→6000→11000. Warn once per (what, budget) per process so a long run does not
+    spam, but never truncate silently.
+
+    `tail=True` keeps the END of the text (terminal output — the newest lines);
+    otherwise the START is kept (the guide reads top-down).
+    """
+    text = text or ""
+    if len(text) <= budget:
+        return text
+    key = (what, budget)
+    if key not in _TRUNCATION_WARNED:
+        _TRUNCATION_WARNED.add(key)
+        kept = "last" if tail else "first"
+        print(
+            f"[WARN] {what} TRUNCATED: {len(text)} chars > budget {budget} — the LLM sees only the "
+            f"{kept} {budget}. Raise `playtest.{'terminal' if tail else 'guide'}_char_budget` in "
+            f"ugt.config.yaml, or the pilot is playing without part of it (LESSONS.md P3)."
+        )
+    return text[-budget:] if tail else text[:budget]
 
 
 def _redaction_paths(playtest_cfg):
@@ -996,17 +1197,21 @@ def _redact_delta(delta, paths):
     return {k: v for k, v in delta.items() if k not in hidden}
 
 
-def _recent_actions_summary(action_log, redact):
-    """The last-5-actions block shared by all prompt builders, with fog-of-war
-    paths removed from the displayed deltas."""
-    recent_log = action_log[-5:] if len(action_log) > 5 else action_log
+def _recent_actions_summary(action_log, redact, window=5):
+    """The recent-actions block shared by all prompt builders, with fog-of-war paths
+    removed from the displayed deltas. `window` is `playtest.history_window` (default
+    5). It is a SLIDING window, so it can only reveal a behavioural cycle shorter than
+    itself — the cumulative `_action_ledger_block` is what covers longer ones."""
+    window = max(1, int(window or 5))
+    recent_log = action_log[-window:] if len(action_log) > window else action_log
     return "\n".join(
         f"  Step {e['step']}: {e['action']} → {_redact_delta(e.get('state_delta', {}), redact)}"
         for e in recent_log
     ) or "  (no actions taken yet)"
 
 
-def _build_prompt(config, strategy_guide, current_state, terminal_text, action_log, noop_streaks=None):
+def _build_prompt(config, strategy_guide, current_state, terminal_text, action_log, noop_streaks=None,
+                  ledger=None, recall=None):
     playtest_cfg = config.data.get("playtest", {}) if isinstance(config.data, dict) else {}
     guide_budget = int(playtest_cfg.get("guide_char_budget", 2000))
     terminal_budget = int(playtest_cfg.get("terminal_char_budget", 400))
@@ -1018,7 +1223,7 @@ def _build_prompt(config, strategy_guide, current_state, terminal_text, action_l
         name = action_def.get("name", str(action_id)) if isinstance(action_def, dict) else str(action_def)
         action_lines.append(f"  {action_id}: {name}")
 
-    recent_summary = _recent_actions_summary(action_log, redact)
+    recent_summary = _recent_actions_summary(action_log, redact, playtest_cfg.get('history_window', 5))
 
     action_name_list = ", ".join(
         (action_def.get("name", str(aid)) if isinstance(action_def, dict) else str(action_def))
@@ -1032,18 +1237,22 @@ def _build_prompt(config, strategy_guide, current_state, terminal_text, action_l
         f"Do NOT use 'diagnose' for episode resets. Continue playing from the current state.\n\n"
         f"VALID action names (use one as value when action_type=action_id):\n"
         f"  {action_name_list}\n\n"
-        f"## Current State\n"
+        + _objective_block(playtest_cfg)
+        + f"## Current State\n"
         + _key_values_line(playtest_cfg, current_state)
         + f"```json\n{json.dumps(_redact_state(current_state, redact), indent=2, default=str)}\n```\n\n"
         f"## Recent Actions\n{recent_summary}\n\n"
         + _noop_warning_block(noop_streaks)
-        + f"## Terminal Output\n```\n{terminal_text[-terminal_budget:]}\n```\n\n"
-        f"## Strategy Guide\n{strategy_guide[:guide_budget]}\n\n"
+        + _action_ledger_block(ledger)
+        + _terminal_recall_block(recall, int(playtest_cfg.get('terminal_recall_budget', 0)))
+        + f"## Terminal Output\n```\n{_fit(terminal_text, terminal_budget, 'Terminal output', tail=True)}\n```\n\n"
+        f"## Strategy Guide\n{_fit(strategy_guide, guide_budget, 'Strategy guide')}\n\n"
         f"Respond JSON only. Use action_type=\"action_id\" and value=<one of the action names above>."
     )
 
 
-def _build_legal_prompt(config, strategy_guide, current_state, legal_list, action_log, playtest_cfg, noop_streaks=None):
+def _build_legal_prompt(config, strategy_guide, current_state, legal_list, action_log, playtest_cfg,
+                        noop_streaks=None, ledger=None, recall=None):
     """Prompt for legal_action mode: the adapter's own structured state (serialized
     JSON — the exact shape the game's ladder scripts read) plus its live legal-action
     list. Game-agnostic: each legal action is dumped as its raw JSON, with no
@@ -1058,26 +1267,29 @@ def _build_legal_prompt(config, strategy_guide, current_state, legal_list, actio
         f"  {i}: {json.dumps(a, default=str)}" for i, a in enumerate(legal_list)
     ) or "  (no legal actions)"
 
-    recent_summary = _recent_actions_summary(action_log, redact)
+    recent_summary = _recent_actions_summary(action_log, redact, playtest_cfg.get('history_window', 5))
 
     upper = len(legal_list) - 1
     return (
         f"You are playtesting {project}. Choose the best next action.\n\n"
         f"NOTE: If you see EPISODE_RESET in recent actions, the previous episode "
         f"ended normally (win/draw/step limit) and the game restarted — NOT a bug.\n\n"
-        f"## Current State\n"
+        + _objective_block(playtest_cfg)
+        + f"## Current State\n"
         + _key_values_line(playtest_cfg, current_state)
         + f"```json\n{json.dumps(_redact_state(current_state, redact), indent=2, default=str)}\n```\n\n"
         f"## LEGAL ACTIONS (respond with action_type=\"legal_action\", value=<the NUMBER>)\n"
         f"{legal_lines}\n\n"
         f"## Recent Actions\n{recent_summary}\n\n"
         + _noop_warning_block(noop_streaks)
-        + f"## Strategy Guide\n{strategy_guide[:guide_budget]}\n\n"
+        + _action_ledger_block(ledger)
+        + f"## Strategy Guide\n{_fit(strategy_guide, guide_budget, 'Strategy guide')}\n\n"
         f"Respond JSON only. action_type=\"legal_action\", value=\"<index 0..{upper}>\"."
     )
 
 
-def _build_terminal_prompt(config, strategy_guide, current_state, terminal_text, action_log, playtest_cfg, noop_streaks=None):
+def _build_terminal_prompt(config, strategy_guide, current_state, terminal_text, action_log, playtest_cfg,
+                           noop_streaks=None, ledger=None, recall=None):
     """Prompt for "text" mode: the LLM drives the game by TYPING a raw command line
     (action_type="type_text"), exactly as a human at the terminal would. The adapter's
     own get_terminal_text output and structured state are shown; the command vocabulary
@@ -1097,7 +1309,7 @@ def _build_terminal_prompt(config, strategy_guide, current_state, terminal_text,
     ) or "(see the strategy guide)"
 
     redact = _redaction_paths(playtest_cfg)
-    recent_summary = _recent_actions_summary(action_log, redact)
+    recent_summary = _recent_actions_summary(action_log, redact, playtest_cfg.get('history_window', 5))
 
     return (
         f"You are playtesting {project} at its TERMINAL. Type ONE command line to play.\n\n"
@@ -1107,13 +1319,16 @@ def _build_terminal_prompt(config, strategy_guide, current_state, terminal_text,
         f"  {command_names}\n"
         f"  (Which files / servers / missions / targets to name as arguments is in the "
         f"Strategy Guide below — read the Current State to fill in REAL arguments.)\n\n"
-        f"## Current State\n"
+        + _objective_block(playtest_cfg)
+        + f"## Current State\n"
         + _key_values_line(playtest_cfg, current_state)
         + f"```json\n{json.dumps(_redact_state(current_state, redact), indent=2, default=str)}\n```\n\n"
         f"## Recent Actions\n{recent_summary}\n\n"
         + _noop_warning_block(noop_streaks)
-        + f"## Terminal Output\n```\n{terminal_text[-terminal_budget:]}\n```\n\n"
-        f"## Strategy Guide\n{strategy_guide[:guide_budget]}\n\n"
+        + _action_ledger_block(ledger)
+        + _terminal_recall_block(recall, int(playtest_cfg.get('terminal_recall_budget', 0)))
+        + f"## Terminal Output\n```\n{_fit(terminal_text, terminal_budget, 'Terminal output', tail=True)}\n```\n\n"
+        f"## Strategy Guide\n{_fit(strategy_guide, guide_budget, 'Strategy guide')}\n\n"
         f"Respond JSON only. Use action_type=\"type_text\" and "
         f"value=\"<the full command line to type>\"."
     )

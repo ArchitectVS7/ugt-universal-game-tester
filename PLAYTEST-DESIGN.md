@@ -9,6 +9,12 @@
 > project actually works today: Python, driving the **real** `spacerquest-web` server via `RealClientAdapter`,
 > not a TypeScript harness or a bridge reimplementation.
 
+> **Before running this tier against any game, work through `LESSONS.md` §B — the pre-flight
+> information-integrity audit (P1–P9).** It is the accumulated cost of the DDD balance rounds: a playtest can
+> report `PLAYTEST MET`, zero violations and a confident win rate while the pilot is blind to card identities,
+> to the game's public read layer, or to the rules that create its skill. Every check there needs a written,
+> cited disposition before a batch is worth running.
+
 ## Where this fits today
 
 `ugt playtest` (`ugt/core/playtester.py`) already implements the core LLM-action contract described below
