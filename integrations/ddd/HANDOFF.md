@@ -1,6 +1,24 @@
 # DDD × UGT — resume here
 
-**Status (2026-07-21, batch): first multi-run LLM balance batch done — 92.6% seat-0
+**Status (2026-07-21, evening — READ THIS FIRST): the L-008 batch was measuring
+BLIND play; 3 UGT-side harness defects found + fixed (RESULTS.md L-009). Do NOT run
+the seat-swap mirror batch against the old harness, and do NOT pool L-008's numbers
+with anything post-fix.** The L-008 prompt carried zero card identity (opaque
+`instanceId`s only), leaked the first mover's committed card-vs-pass bit to the
+second mover (the engine's own wire view hides it), and `apply_legal` sent
+`targets: []` verbatim so sw's targeted cards played blank (the L-007 defect
+replayed UGT-side). Fixes: `legal_actions()` now fills targets and annotates
+`_card`/`_hand` defIds (stripped before the wire); new game-agnostic
+`playtest.redact_state_fields` knob hides fog-of-war fields from the prompt only
+(invariants keep the god view); strategy guide now carries the full two-deck card
+reference (guide budget 2000→6000). Full ladder re-run green after the changes
+(spike 10/10 · smoke 5/5 · R1 11/11 · R2 26/26 · R3 32/32), and the post-fix
+sanity run (24 actions, gemma4:26b) is card-aware and MET — reasoning names real
+cards/costs/seats, and the match ran as a contest (P0 30→8 vs P1 30→5) instead of
+a blowout. **Next step: the 4-cell (or 2-cell mirrored) pooled batch per the AI
+ladder's own design — fresh numbers only, never pooled with L-008.**
+
+**Status (2026-07-21, batch — superseded by L-009 above): first multi-run LLM balance batch done — 92.6% seat-0
 (bb_competitive) win rate over 27 matches, 0 bugs, 0 invariant violations, BUT this
 number is CONFOUNDED with seat/turn-order and is NOT yet comparable to T6.2's pooled
 "Blitzblade ~36%" figure.** `playtest_ddd.py --runs 8 --max-actions 100`
@@ -62,9 +80,10 @@ refuses one too.
    `press_key`/`get_terminal_text` on `DddHarnessAdapter` — the harness is structured
    JSON, not a terminal), now with `--runs N` for a real multi-run batch. First batch
    (8×100 actions): 0 bugs, 0 invariant violations, 27 KO matches, but a 92.6% seat-0
-   win rate that's confounded with seat/turn-order (see L-008) — **the seat-swapped
-   mirror batch is the only thing still open here**, not a "deeper run" in the
-   abstract; it's a specific, cheap, already-scoped follow-up.
+   win rate that's confounded with seat/turn-order (L-008) — and, worse, was measured
+   under BLIND play with sw's targeted cards blanked (L-009; fixed). **Still open
+   here: the 4-cell (or 2-cell mirrored) pooled batch, run only against the L-009
+   harness** — L-008's numbers can't be pooled with it (different policy).
 2. **DDD T6.3's conformance audit #2** (fresh read-only rulebook-vs-engine pass). The
    R1 half of that task is met; the audit half is untouched.
 3. ~~**DDD T6.0(b)/(c)**~~ **RESOLVED upstream** (DDD `7a246d74`, T6.0 DONE):

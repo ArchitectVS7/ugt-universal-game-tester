@@ -230,6 +230,14 @@ balance read is wanted.
 
 ## L-008: First multi-run LLM balance batch (2026-07-21) — 92.6% seat-0 win rate, CONFOUNDED with seat/turn-order, not yet comparable to T6.2's 36%
 
+> ⚠️ **Superseded caveat (L-009, same day):** the seat/turn-order confound below is
+> real but UNDERSTATES the problem. The batch also measured **blind play** (the
+> prompt never carried any card identity) and **sw's targeted cards were played
+> blank** (`apply_legal` never filled targets). The 92.6% figure is a
+> blind-policy/single-cell/handicapped-sw artifact and is not usable for balance
+> even after seat-swap pooling — read L-009 before acting on anything in this
+> section.
+
 `playtest_ddd.py` gained `--runs N` (threads straight through to the existing
 `playtest_game_with_adapter(..., runs=N)` / `_aggregate_runs` machinery in
 `ugt/core/playtester.py` — no new aggregation code needed, this is exactly
@@ -283,8 +291,82 @@ seat bias and is the actual prerequisite for any T6.2 balance verdict from this 
 Raw data: `integrations/ddd/results/playtest-run-{1..8}.json`,
 `playtest-batch-analysis.json` (all gitignored via root `results/`).
 
+## L-009: The L-008 batch was measuring BLIND play — 3 harness defects found + fixed before any further balance batch (2026-07-21)
+
+A test-of-the-test pass over the L-008 data and the playtest channel, prompted by
+the question "is this data decisive?" Answer: no — and the seat-swap mirror batch
+L-008 recommended would have burned another ~90 min measuring the wrong thing.
+Three defects, all UGT-side (the game exposes everything needed; the harness
+dropped it on the floor):
+
+**D-L1 (information starvation — the big one): the LLM never saw a single card
+identity.** The normalized state (`ddd_harness.py::_seat`) exposes only counts
+(`handCount` etc.), and the legal list relays the engine's raw actions, which carry
+only opaque `instanceId` ints. So every "choice" between cards was a blind pick
+among integers — the LLM even said so mid-run (run 1 step 4 reasoning: *"the
+current state shows no specific cards in hand are visible to me via the JSON"*).
+The harness view carries `defId` per own-hand card the whole time; the adapter
+discarded it. **Fix:** `legal_actions()` now annotates each COMMIT_SELECTION with
+`_card` (its defId) and each MULLIGAN with `_hand` (the hand's defIds), stripped by
+`send_raw_action` before the wire (underscore prefix = display-only convention);
+`strategy-guide.md` gained a full card reference for both competitive decks
+(generated from `packages/content/data/base/manifest.json`), and
+`playtest.guide_char_budget` rose 2000→6000 so it isn't truncated.
+
+**D-L2 (fog-of-war leak to the second mover):** the engine's redacted opponent
+view exposes only `hasCommitted` — never card-vs-pass — and the rulebook's T3.5
+audit ruling makes prediction secrecy explicit. But the adapter's god-view state
+(needed by the card-conservation invariant, whose sum includes `committedCard`)
+handed the always-second seat 1 `p0.committedKind: "CARD"` in every prompt.
+Harmless while the LLM was blind; would corrupt the prediction game the moment it
+isn't. **Fix (game-agnostic core knob):** `playtest.redact_state_fields` — dotted
+paths dropped ONLY from what the LLM is shown (state JSON + recent-action delta
+summaries, all three prompt builders); logs, invariants, and reports keep the full
+state. DDD's config redacts `p0/p1.committedKind` + `committedCard`.
+
+**D-L3 (playtest path replayed the L-007 wire defect): `apply_legal` sent legal
+actions verbatim with `targets: []`.** The DDD harness contract
+(`packages/harness/src/router.ts`: "`legalActions` always reports `targets: []`…
+the `targets` op is the ONLY way a wire client can discover" eligible ids) means a
+verbatim send plays every targeted card blank — exactly the "7 of 40 Swarm cards
+played blank" defect L-007 got fixed upstream, this time on the UGT side. The
+exploit-hunter path (`_select`) has always called `fill_targets`; the playtest path
+never did, and the engine accepts empty targets silently (hence 0
+`inv_no_error_on_legal` violations in L-008 while sw — always seat 1 — played its
+graveyard-return package blank). **Fix:** `legal_actions()` fills targets at
+enumeration time, so the LLM sees the action it is actually choosing.
+
+**What the L-008 data still cleanly established** (from a delta-signature
+reconstruction of all 800 actions): the LLM played BOTH seats identically —
+seat 0 committed a card in 363/366 non-mulligan decisions, seat 1 in ~365/366,
+mulligans 34/34, zero invalid indices, zero concedes — so the blowout was not an
+LLM-behavior asymmetry; and the channel itself is robust (800/800 valid legal picks
+from a local 26B model). The 92.6% is a real observation about *blind always-commit
+play at one deck×seat cell with sw's targeted cards blanked* — i.e. about nothing a
+balance verdict can use.
+
+**Validation after the fixes:** full ladder re-run green — spike 10/10 · smoke 5/5
+· R1 11/11 · R2 26/26 · R3 32/32 (R3 matters most here: `send_raw_action` is the
+refusal-probe + replay channel and now strips annotation keys; the prompt-side
+redaction adds no invariant regressions because the state object is untouched).
+In-process prompt assertions: `_card`/`_hand` present, `committedKind`/
+`committedCard` absent from the prompt while `hasCommitted` and the god-view state
+survive, guide not truncated, annotated actions apply cleanly.
+
+**Sanity run (post-fix, ollama/gemma4:26b, 24 actions): PLAYTEST MET, and the play
+is now visibly card-aware** — every step's logged reasoning names real cards and
+costs ("Playing bb_battle_instinct…", "sw_feeding_frenzy is a power…", "I am
+playing as P1 (seat 1). I have 3 focus available"), chosen indices are varied
+rather than low-index-biased, and the single match ran as an actual contest (P0
+30→8 HP vs P1 30→5 at the 24-action cutoff) instead of an L-008-style blowout.
+0 invariant violations, 0 bugs; one step lost to a malformed (non-JSON) local-model
+reply, safely skipped by the loop. One 24-action run proves the channel, not the
+balance.
+
 ## Next tier
 
-The seat-swapped follow-up batch above, pooled with this one, is the immediate next
-step toward an actual T6.2 balance verdict. DDD T6.3's conformance audit #2 remains
-untouched.
+The T6.2-oriented balance read now needs the 4-cell (or at minimum seat-swapped
+2-cell) pooled batch matching
+`apps/ladder/bin/ladder.mjs`'s own design — with competent, non-leaking play this
+time. The L-008 numbers must not be pooled with post-L-009 batches (different
+policy). DDD T6.3's conformance audit #2 remains untouched.

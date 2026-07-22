@@ -959,21 +959,66 @@ def _noop_warning_block(noop_streaks, threshold=2):
     return "## Warnings\n" + "\n".join(lines) + "\n\n"
 
 
+def _redaction_paths(playtest_cfg):
+    """Config knob `playtest.redact_state_fields`: dot-separated state paths whose
+    values the game's own wire protocol HIDES from the acting player (fog of war)
+    but the adapter's normalized state must carry for machine checks — e.g. DDD's
+    card-conservation invariant needs the god-view `committedCard` term, while the
+    engine's redacted opponent view exposes only `hasCommitted`. These paths are
+    dropped ONLY from what the LLM is shown (the state JSON and the recent-action
+    delta summaries); logs, invariants and reports keep the full state."""
+    return [str(p) for p in (playtest_cfg or {}).get("redact_state_fields") or []]
+
+
+def _redact_state(state, paths):
+    """A deep copy of `state` with each dotted path removed. No paths → `state`
+    unchanged (no copy)."""
+    if not paths or not isinstance(state, dict):
+        return state
+    redacted = json.loads(json.dumps(state, default=str))
+    for path in paths:
+        parts = path.split(".")
+        node = redacted
+        for part in parts[:-1]:
+            node = node.get(part) if isinstance(node, dict) else None
+            if node is None:
+                break
+        if isinstance(node, dict):
+            node.pop(parts[-1], None)
+    return redacted
+
+
+def _redact_delta(delta, paths):
+    """Delta dicts are already flattened to dotted keys — drop exact matches."""
+    if not paths or not isinstance(delta, dict):
+        return delta
+    hidden = set(paths)
+    return {k: v for k, v in delta.items() if k not in hidden}
+
+
+def _recent_actions_summary(action_log, redact):
+    """The last-5-actions block shared by all prompt builders, with fog-of-war
+    paths removed from the displayed deltas."""
+    recent_log = action_log[-5:] if len(action_log) > 5 else action_log
+    return "\n".join(
+        f"  Step {e['step']}: {e['action']} → {_redact_delta(e.get('state_delta', {}), redact)}"
+        for e in recent_log
+    ) or "  (no actions taken yet)"
+
+
 def _build_prompt(config, strategy_guide, current_state, terminal_text, action_log, noop_streaks=None):
     playtest_cfg = config.data.get("playtest", {}) if isinstance(config.data, dict) else {}
     guide_budget = int(playtest_cfg.get("guide_char_budget", 2000))
     terminal_budget = int(playtest_cfg.get("terminal_char_budget", 400))
+
+    redact = _redaction_paths(playtest_cfg)
 
     action_lines = []
     for action_id, action_def in config.action_mappings.items():
         name = action_def.get("name", str(action_id)) if isinstance(action_def, dict) else str(action_def)
         action_lines.append(f"  {action_id}: {name}")
 
-    recent_log = action_log[-5:] if len(action_log) > 5 else action_log
-    recent_summary = "\n".join(
-        f"  Step {e['step']}: {e['action']} → {e.get('state_delta', {})}"
-        for e in recent_log
-    ) or "  (no actions taken yet)"
+    recent_summary = _recent_actions_summary(action_log, redact)
 
     action_name_list = ", ".join(
         (action_def.get("name", str(aid)) if isinstance(action_def, dict) else str(action_def))
@@ -989,7 +1034,7 @@ def _build_prompt(config, strategy_guide, current_state, terminal_text, action_l
         f"  {action_name_list}\n\n"
         f"## Current State\n"
         + _key_values_line(playtest_cfg, current_state)
-        + f"```json\n{json.dumps(current_state, indent=2, default=str)}\n```\n\n"
+        + f"```json\n{json.dumps(_redact_state(current_state, redact), indent=2, default=str)}\n```\n\n"
         f"## Recent Actions\n{recent_summary}\n\n"
         + _noop_warning_block(noop_streaks)
         + f"## Terminal Output\n```\n{terminal_text[-terminal_budget:]}\n```\n\n"
@@ -1007,15 +1052,13 @@ def _build_legal_prompt(config, strategy_guide, current_state, legal_list, actio
     playtest_cfg = playtest_cfg or {}
     guide_budget = int(playtest_cfg.get("guide_char_budget", 2000))
 
+    redact = _redaction_paths(playtest_cfg)
+
     legal_lines = "\n".join(
         f"  {i}: {json.dumps(a, default=str)}" for i, a in enumerate(legal_list)
     ) or "  (no legal actions)"
 
-    recent_log = action_log[-5:] if len(action_log) > 5 else action_log
-    recent_summary = "\n".join(
-        f"  Step {e['step']}: {e['action']} → {e.get('state_delta', {})}"
-        for e in recent_log
-    ) or "  (no actions taken yet)"
+    recent_summary = _recent_actions_summary(action_log, redact)
 
     upper = len(legal_list) - 1
     return (
@@ -1024,7 +1067,7 @@ def _build_legal_prompt(config, strategy_guide, current_state, legal_list, actio
         f"ended normally (win/draw/step limit) and the game restarted — NOT a bug.\n\n"
         f"## Current State\n"
         + _key_values_line(playtest_cfg, current_state)
-        + f"```json\n{json.dumps(current_state, indent=2, default=str)}\n```\n\n"
+        + f"```json\n{json.dumps(_redact_state(current_state, redact), indent=2, default=str)}\n```\n\n"
         f"## LEGAL ACTIONS (respond with action_type=\"legal_action\", value=<the NUMBER>)\n"
         f"{legal_lines}\n\n"
         f"## Recent Actions\n{recent_summary}\n\n"
@@ -1053,11 +1096,8 @@ def _build_terminal_prompt(config, strategy_guide, current_state, terminal_text,
         for k, a in action_mappings.items()
     ) or "(see the strategy guide)"
 
-    recent_log = action_log[-5:] if len(action_log) > 5 else action_log
-    recent_summary = "\n".join(
-        f"  Step {e['step']}: {e['action']} → {e.get('state_delta', {})}"
-        for e in recent_log
-    ) or "  (no actions taken yet)"
+    redact = _redaction_paths(playtest_cfg)
+    recent_summary = _recent_actions_summary(action_log, redact)
 
     return (
         f"You are playtesting {project} at its TERMINAL. Type ONE command line to play.\n\n"
@@ -1069,7 +1109,7 @@ def _build_terminal_prompt(config, strategy_guide, current_state, terminal_text,
         f"Strategy Guide below — read the Current State to fill in REAL arguments.)\n\n"
         f"## Current State\n"
         + _key_values_line(playtest_cfg, current_state)
-        + f"```json\n{json.dumps(current_state, indent=2, default=str)}\n```\n\n"
+        + f"```json\n{json.dumps(_redact_state(current_state, redact), indent=2, default=str)}\n```\n\n"
         f"## Recent Actions\n{recent_summary}\n\n"
         + _noop_warning_block(noop_streaks)
         + f"## Terminal Output\n```\n{terminal_text[-terminal_budget:]}\n```\n\n"

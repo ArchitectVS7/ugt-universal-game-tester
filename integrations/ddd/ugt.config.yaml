@@ -106,7 +106,20 @@ action_space:
 # feeds the prompt's KEY VALUES line and the per-run summary. The trial/exploit
 # ladder ignores this block entirely.
 playtest:
-  guide_char_budget: 2000
+  # 6000: the guide now carries the full card reference for both competitive
+  # decks (~4.5k chars total) — the 2000 default would truncate it mid-deck.
+  guide_char_budget: 6000
+  # Fog of war (L-009): the engine's redacted opponent view exposes only
+  # hasCommitted — never WHAT was committed. The adapter's normalized state
+  # carries the god-view committedKind/committedCard because the card-
+  # conservation invariant needs them; hide them from the LLM prompt so the
+  # second mover cannot see the first mover's card-vs-pass bit (the exact
+  # information DDD's prediction mechanic plays around).
+  redact_state_fields:
+    - p0.committedKind
+    - p0.committedCard
+    - p1.committedKind
+    - p1.committedCard
   key_state_paths:
     - { path: "p0.hp", label: "P0 HP", note: "0-30" }
     - { path: "p1.hp", label: "P1 HP", note: "0-30" }

@@ -472,6 +472,10 @@ class DddHarnessAdapter(BaseAdapter):
         corrupting the run.
         """
         before = self._hash_stream[-1] if self._hash_stream else None
+        if isinstance(action, dict):
+            # Underscore-prefixed keys are display-only annotations added by
+            # legal_actions() (_card/_hand) — never part of the wire action.
+            action = {k: v for k, v in action.items() if not k.startswith("_")}
         resp = self._request({
             "op": "act",
             "matchId": self._match_id,
@@ -497,13 +501,42 @@ class DddHarnessAdapter(BaseAdapter):
     # fabricated effects (the sim_bridge discipline this file enforces).
     def legal_actions(self):
         """Legal action objects for the seat the engine is waiting on — the SAME
-        list the ladder scripts read via `_legal`. Returns [] when the match has
-        ended (no pending seat). Pure relay; the engine is authoritative."""
+        list the ladder scripts read via `_legal`, made playable-as-shown for a
+        wire client. Returns [] when the match has ended (no pending seat).
+
+        Two enrichments, both relays of the harness's own responses (never
+        fabricated):
+
+        - COMMIT_SELECTION actions get `targets` filled via `fill_targets` —
+          the engine's `legalActions` always reports `targets: []` and its
+          `targets` op is the only way a wire client discovers eligible ids
+          (harness router.ts contract). Sending the raw list entry verbatim
+          replays the L-007 "targeted cards played blank" wire defect on this
+          side of the wire; the exploit-hunter path (`_select`) has always
+          filled, this brings `apply_legal` to parity. They also get an
+          `_card` annotation: the card's `defId` from the seat's OWN hand view
+          (fog-of-war safe — it is the acting player's own hand).
+        - MULLIGAN actions get a `_hand` annotation listing the hand's defIds,
+          so a mulligan decision can actually be made on card identity.
+
+        Underscore-prefixed keys are display-only for the LLM prompt and are
+        stripped by `send_raw_action` before anything reaches the engine."""
         seat = self._pending_seat()
         if seat is None:
             return []
         actions, _ = self._legal(seat)
-        return actions
+        views = self._views or []
+        hand = (views[seat].get("me", {}).get("hand") or []) if seat < len(views) else []
+        hand_defids = [c.get("defId") for c in hand]
+        enriched = []
+        for action in actions:
+            if action.get("t") == "COMMIT_SELECTION":
+                action = self.fill_targets(seat, action)
+                action = {**action, "_card": self.defid_of(seat, action.get("instanceId"))}
+            elif action.get("t") == "MULLIGAN":
+                action = {**action, "_hand": hand_defids}
+            enriched.append(action)
+        return enriched
 
     def apply_legal(self, action, legal_count=None):
         """Apply ONE legal action object verbatim and return the standard
