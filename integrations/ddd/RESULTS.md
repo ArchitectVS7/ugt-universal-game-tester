@@ -416,9 +416,159 @@ match's HP track and turn count from the action logs:
 
 ### Cell B — reversed (`batch-rev`: sw_competitive = seat 0, bb_competitive = seat 1)
 
-Running. `engine.decks` is flipped in `ugt.config.yaml` for this cell and **must be
-flipped back to `["bb_competitive", "sw_competitive"]` afterwards** — every ladder
-script's pinned expectation was recorded under the forward order.
+8/8 runs, 800/800 actions, **0 invariant violations**, 1 bug flagged (a false
+positive — see below). 24 completed matches.
+
+| seat 0 (sw_competitive) | seat 1 (bb_competitive) | via |
+|---|---|---|
+| 4/24 = 16.7% | 20/24 = **83.3%** | 23 KNOCKOUT, 1 CONCESSION |
+
+`engine.decks` has been restored to the forward order, and the **full ladder re-run
+green afterwards** to prove the restore is faithful: spike 10/10 · smoke 5/5 · R1
+11/11 · R2 26/26 · R3 32/32.
+
+### Pooled result (49 matches)
+
+| pooled by | rate | 95% CI (Wilson) |
+|---|---|---|
+| seat 0 | 57.1% (28/49) | 43.3–70.0% |
+| seat 1 | 42.9% (21/49) | 30.0–56.7% |
+| **bb_competitive** | **89.8% (44/49)** | **78.2–95.6%** |
+| sw_competitive | 10.2% (5/49) | 4.4–21.8% |
+
+The seat effect is small and its CI straddles 50% — turn order is **not** what is
+driving this. The deck effect is enormous and its CI excludes parity by a wide
+margin. Win conditions: 47 KNOCKOUT, 2 CONCESSION.
+
+Margins, reconstructed from the action logs (bb's 42 knockout wins): winner finishes
+with a **median 20 of 30 HP** in a **median 11 turns**. Swarm's 5 wins are all narrow
+(median 8 HP, 13–14 turns). Only **22% of matches (11/49)** end with the winner at
+≤10 HP, i.e. were ever close.
+
+## D-L1 · The headline: this contradicts DDD's own authoritative balance gate
+
+`apps/probe` is DDD's sole authoritative skilled-play balance instrument (D18), it is
+a **load-bearing CI gate**, and it is **green**. Run fresh against the current tree
+(`36c845e6`) it reports Blitzblade at parity. The LLM tier disagrees violently:
+
+| measurement | policy | Blitzblade win rate | n |
+|---|---|---|---|
+| `apps/probe` gate K | greedy v greedy | 51.7% | 2400 |
+| `apps/probe` gate L | tier3 v tier3 | 47.8% | 2400 |
+| `packages/sim` baseline | random v random (bb=P0) | 78.5% | 400 |
+| **UGT wire, random policy (bb=P0)** | **random v random** | **80.0%** | **20** |
+| UGT LLM, forward cell (bb=P0) | Haiku 4.5 | 96.0% | 25 |
+| **UGT LLM, pooled** | **Haiku 4.5** | **89.8%** | **49** |
+
+**The wire is NOT the culprit, and that is a deliberate negative result.** Given
+L-007 and L-009 were both wire-only defects that blanked Swarm's cards, the obvious
+hypothesis was a third one — especially since 89.8% is *worse* than the historical
+"bb ~69%" figure whose documented cause was "random play blanked Swarm's recursion".
+So I ran a random policy through the **same** `legal_actions()`/`apply_legal()` path
+the LLM uses: it lands on **80.0%**, reproducing `packages/sim`'s in-process 78.5%
+baseline. The transport is faithful; the remaining gap is play quality.
+
+That leaves the real finding, which is about the game rather than the tester:
+**Swarm's win rate is extraordinarily sensitive to who is piloting it** — ~50% under
+greedy/tier-3, ~21% under random, ~10% under an LLM. Swarm is the only deck whose
+performance collapses this way, and an LLM playing it *worse than random* is not a
+result balance measured solely at greedy/tier-3 would ever surface. D-L2 is the
+mechanism I found for part of it.
+
+⚠️ Open question, deliberately not over-claimed: greedy and tier-3 run on the same
+engine and hit the same hand cap as everyone else, so D-L2 alone does not explain why
+*they* reach parity. Whether greedy manages hand size better, or leans on recursion
+less, is unmeasured. That is the next thing to look at, not a settled conclusion.
+
+## D-L2 · Swarm's "return 2/3 from graveyard" can almost never return more than ONE card
+
+Measured over the wire (25 matches, forcing the Swarm seat to take recursion whenever
+legal), correlating hand size at commit against how many cards actually came back:
+
+| handCount at commit | targets chosen | cards actually returned | occurrences |
+|---|---|---|---|
+| 6 | 2 | **2** | 5 |
+| 7 | 1 | 1 | 14 |
+| 7 | 2 | **1** | 34 |
+| 7 | 3 | **1** | 8 |
+
+**Swarm is at the 7-card hand cap for 82% of these decisions** (56 of 68). Playing the
+recursion card frees exactly one hand slot, so exactly one card fits back in and the
+remainder is silently dropped. This is not an engine bug — `mechanics/handlers/return.ts`
+documents it (`HAND respects the hand cap via RETURN_SKIPPED`, App-C #9) — it is a
+**content/design interaction**: the three multi-return Swarm cards all use
+`destination: HAND`, the one destination the cap truncates.
+
+| card | printed | destination | effective |
+|---|---|---|---|
+| sw_adaptation_chamber | return 2 | HAND | ~1 |
+| sw_deep_emergence | return 2 | HAND | ~1 |
+| sw_endless_tide | return 3 | HAND | **~1** |
+| sw_nest_builder | return 1 | DECK_TOP | 1 (unaffected) |
+
+Swarm's own draw engine (spawning_pool draw 2, colony_growth draw 2, swarm_scout
+draw 1) is what pins its hand at the cap, so **the deck's economy half actively
+disables its recursion half**. `sw_endless_tide` delivers a third of its printed text.
+
+Candidate levers, for the game side to choose between — I have deliberately NOT
+edited content:
+1. Switch the multi-return cards to `DECK_TOP`/`DECK_SHUFFLE` (dodges the cap
+   entirely; `sw_nest_builder` already shows the pattern).
+2. Raise the hand cap, or let a return exceed it.
+3. Reprint the magnitudes to what actually resolves (honest, but removes the card's
+   point).
+Note the `return_count_mismatch` validation rule ties `magnitude` to `target.maxCount`,
+so options 1 and 3 must keep those two in lockstep.
+
+## D-L3 · Deck curve asymmetry (weaker evidence — recorded, not concluded)
+
+From the shipped manifest (verified identical to the strategy guide's transcription):
+
+| cost | bb copies / mean power | sw copies / mean power |
+|---|---|---|
+| 0 | 6 / 3.00 | 6 / 2.00 |
+| 1 | 14 / 3.43 | 17 / 3.35 |
+| **2** | **12 / 5.42** | **0 / —** |
+| 3 | 5 / 6.00 | 10 / 4.30 |
+| 4 | 3 / 6.67 | 7 / 4.86 |
+
+Blitzblade has more base power at every cost point, at a lower mean cost (1.62 vs
+1.88), with a 55% vs 35% ATTACK share. The whole **SWARM archetype has no cost-2 card
+at all** (18 cards in the pool, zero at cost 2) while Blitzblade's cost-2 block is its
+best rate. Focus accrues +1/turn (cap 5, carries over), so this doesn't lock Swarm
+out — it taxes it, since Swarm must bank a turn to reach its cost-3 payoffs.
+
+⚠️ **Base power ignores effects entirely** — scaling, shields, heals, recursion and
+the D16 triangle are exactly where Swarm's value is meant to live, and D21's curve
+surgery was effect-side. So this table is a lead, not a verdict, and it is consistent
+with parity at greedy play. Do not retune from this table alone.
+
+## Non-findings (checked and dismissed)
+
+- **The 1 flagged bug is a false positive.** Its own body reads "None detected in game
+  state - this is a legitimate unwinnable position" — the LLM used the bug-report
+  channel to report the *absence* of a bug. Nothing to fix game-side; the report shape
+  invites this and could use a "no bug" path.
+- **Both CONCESSIONs were correct play**, not defects: each was a resignation at 1–2
+  HP facing lethal with explicit reasoning. They do contradict the strategy guide's
+  "`CONCEDE` — Do NOT pick this", so the guide should either permit resignation at
+  provably-lost positions or drop the instruction rather than ask the model to ignore
+  a legal, sound move.
+- **Zero invariant violations across 1600 actions**, both cells. Card conservation,
+  HP/focus bounds and no-illegal-adjudication all held throughout.
+
+## Method / limitations
+
+- 2 cells × 8 runs × 100 actions, `anthropic/claude-haiku-4-5-20251001`, seeds
+  `ddd-r1#0..7` (identical across cells — a paired design), all three waves on.
+- n=49 matches is small; the deck CI (78.2–95.6%) nevertheless excludes the probe's
+  45–55% band outright, so the disagreement is not a sample-size artifact.
+- **Model competence is a live variable in this tier.** These numbers are Haiku 4.5
+  and must not be pooled with L-008's gemma4:26b runs (which were also blind play).
+  A stronger model may well pilot Swarm better — worth one cell to find out, and it
+  would sharpen D-L1 either way.
+- Cells are archived under `results/batch-fwd/` and `results/batch-rev/` with
+  `batch-meta.json`; pooled output in `results/L010-pooled-analysis.json`.
 
 ## Next tier
 

@@ -1,5 +1,39 @@
 # DDD × UGT — resume here
 
+**Status (2026-07-22, L-010 — READ THIS FIRST): the seat-swapped pooled balance batch
+is DONE, and it contradicts DDD's own authoritative balance gate.** Pooled over 49
+matches (2 cells × 8 runs × 100 actions, Haiku 4.5, paired seeds): **Blitzblade 89.8%**
+(95% CI 78.2–95.6%), while `apps/probe`'s gated skilled-play measurement reports 51.7%
+(greedy) / 47.8% (tier3) over 2400 games and is GREEN in CI. Seat/turn-order is NOT the
+cause (pooled by seat: 57.1% / 42.9%, CI straddling 50%).
+
+**A wire defect is REFUTED** — a random policy driven through the same
+`legal_actions()`/`apply_legal()` path the LLM uses lands on 80.0%, reproducing
+`packages/sim`'s in-process 78.5% random baseline. The transport is faithful. Swarm's
+win rate is simply extreme-sensitive to its pilot: ~50% greedy/tier3, ~21% random,
+~10% LLM.
+
+**Main game-side finding (D-L2): Swarm's "return 2/3 from graveyard" can almost never
+return more than ONE card.** Swarm sits at the 7-card hand cap 82% of the time; playing
+the recursion card frees exactly one slot, so the rest is silently dropped
+(`RETURN_SKIPPED`, by design). All three multi-return Swarm cards use
+`destination: HAND` — the one destination the cap truncates. `sw_endless_tide` delivers
+a third of its printed text. Candidate levers are listed in RESULTS.md D-L2; **no
+content has been edited** — that call is the game side's.
+
+0 invariant violations across 1600 actions; the single flagged "bug" is a false
+positive (the LLM filed a report saying there was no bug). Full ladder re-run GREEN
+after `engine.decks` was restored to the forward order: spike 10/10 · smoke 5/5 · R1
+11/11 · R2 26/26 · R3 32/32.
+
+Open next steps, in order: (1) the D-L1 open question — why greedy/tier3 reach parity
+on the same engine and the same hand cap; (2) one cell on a stronger model, since model
+competence is a live variable in this tier; (3) the game-side decision on D-L2.
+
+New tooling: `archive_batch.py` (cells + `batch-meta.json`) and a rewritten
+`analyze_playtest_batch.py` (repeatable `--dir`, seat→deck from metadata, Wilson CIs,
+pooled by seat AND by deck). Full writeup: RESULTS.md **L-010**.
+
 **Status (2026-07-21, evening — READ THIS FIRST): the L-008 batch was measuring
 BLIND play; 3 UGT-side harness defects found + fixed (RESULTS.md L-009). Do NOT run
 the seat-swap mirror batch against the old harness, and do NOT pool L-008's numbers
