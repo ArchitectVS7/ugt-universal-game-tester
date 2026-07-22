@@ -363,6 +363,63 @@ rather than low-index-biased, and the single match ran as an actual contest (P0
 reply, safely skipped by the loop. One 24-action run proves the channel, not the
 balance.
 
+## L-010: Seat-swapped pooled balance batch, Haiku 4.5 (2026-07-21/22)
+
+The post-L-009 balance measurement, run as a 2-cell deck×seat design on
+`anthropic/claude-haiku-4-5-20251001` (the L-008/L-009 runs were ollama/gemma4:26b —
+model competence is a live variable in this tier, so cells must not be pooled across
+models either). Each cell is `playtest_ddd.py --runs 8 --max-actions 100`, seeds
+`ddd-r1#0..7`, all three waves on.
+
+Tooling added for this measurement (both were prerequisites, not polish):
+- `archive_batch.py` — `playtest_ddd.py` writes `results/playtest-run-{1..N}.json` on a
+  FIXED path, so cell 2 would have overwritten cell 1 in place. Archiving moves a
+  finished batch into a named cell dir and stamps `batch-meta.json` with the deck
+  order, model and per-file mtimes. (L-008's stale gemma `run-7/8` files sat in
+  `results/` for hours looking exactly like fresh ones — `--expect N` + the mtime
+  stamp is the guard against re-running that.)
+- `analyze_playtest_batch.py` — rewritten to take repeatable `--dir` (one per cell),
+  read the seat→deck map from `batch-meta.json` instead of the old hardcoded
+  `SEAT_DECK` (which assumed the forward order and would have **silently inverted
+  every label in the reversed cell**), and report per-cell, pooled-by-seat and
+  pooled-by-deck with Wilson score intervals. It prints a CONFOUNDED banner when
+  given a single cell.
+
+### Cell A — forward (`batch-fwd`: bb_competitive = seat 0, sw_competitive = seat 1)
+
+8/8 runs, 800/800 actions, **0 bugs flagged, 0 invariant violations**, no run ended
+early. 25 completed matches.
+
+| seat 0 (bb_competitive) | seat 1 (sw_competitive) | via |
+|---|---|---|
+| 24/25 = **96.0%** (95% CI 80.5–99.3%) | 1/25 = 4.0% (0.7–19.5%) | 24 KNOCKOUT, 1 CONCESSION |
+
+⚠️ **This is ONE CELL — the figure is confounded with seat/turn-order and is NOT a
+balance read.** It is recorded as a health check plus a magnitude signal. It is also
+not comparable to L-008's 92.6% (blind play, different model).
+
+The margin is the interesting part, not just the win rate. Reconstructing each
+match's HP track and turn count from the action logs:
+
+- bb's 23 knockout wins finish with a **median 19 of 30 HP still standing**, in a
+  **median 11 turns**; the fastest are 5-turn wins at 28 HP. These are not grinds
+  that happen to tip — the losing seat is rarely in the game.
+- sw's single win (run 8) was a clean knockout at 9 HP, so the matchup is not
+  literally unwinnable.
+- The lone CONCESSION was **not a defect**: at 2 HP facing lethal, the LLM playing
+  sw resigned with explicit reasoning ("no viable path to victory"). Correct play,
+  but it does contradict the strategy guide's "`CONCEDE` — Do NOT pick this". Worth
+  a guide tweak (allow resignation only at provably-lost positions, or drop the
+  instruction) so the model isn't being asked to ignore a legal, sound move.
+- Incidental confirmation of D-C1's closure: at step 37 of run 4 the only affordable
+  action at 1 focus was a single DEFENSE card — the Focus economy visibly binds.
+
+### Cell B — reversed (`batch-rev`: sw_competitive = seat 0, bb_competitive = seat 1)
+
+Running. `engine.decks` is flipped in `ugt.config.yaml` for this cell and **must be
+flipped back to `["bb_competitive", "sw_competitive"]` afterwards** — every ladder
+script's pinned expectation was recorded under the forward order.
+
 ## Next tier
 
 The T6.2-oriented balance read now needs the 4-cell (or at minimum seat-swapped

@@ -28,7 +28,12 @@ engine:
   # harness_cwd defaults (in the adapter) to the DDD repo root inferred from
   # harness_entry; override with the DDD_HARNESS_CWD env var. harness_entry itself
   # is overridable with the DDD_HARNESS_PATH env var.
-  decks: ["bb_competitive", "sw_competitive"]
+  # REVERSED for the L-010 seat-swap cell (batch-rev). decks[0] plays seat 0, and
+  # _pending_seat() always resolves seat 0 first, so this key IS the deck x seat
+  # cell selector. Flip it back to ["bb_competitive", "sw_competitive"] (batch-fwd)
+  # after the reversed batch is archived — the ladder scripts' pinned expectations
+  # were all recorded under the forward order.
+  decks: ["sw_competitive", "bb_competitive"]
   format: "COMPETITIVE"
   # All three waves ON — this is the game DDD actually ships: apps/ladder (a CI
   # gate) and apps/play (the human client) both enable all three. A config that
