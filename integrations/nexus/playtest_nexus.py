@@ -35,7 +35,13 @@ api_key:null falls back to it). VERIFY the LISTEN pid is your `next dev`:
 `lsof -nP -iTCP:3100 -sTCP:LISTEN` (the repo's stale-server lesson). Then:
 
     python3 integrations/nexus/playtest_nexus.py --provider ollama
-    python3 integrations/nexus/playtest_nexus.py --provider ollama --model llama3:8b --max-actions 40
+    python3 integrations/nexus/playtest_nexus.py --provider ollama --max-actions 40
+
+MODEL CHOICE: leave --model unset. The ollama default is `gemma4:26b`, which is what
+this tier is validated on. Do NOT run this with a CODING model — `qwen3-coder:30b` was
+tried on 2026-07-22 and is unfit for the balance tier: across two 40-action runs it
+never once issued `cat` (the verb that completes missions), so it finished 0 missions
+while looking healthy (PLAYTEST MET, 0 violations). See RESULTS.md L-014 P7 / L-015.
 
 Exit 0 + "PLAYTEST MET" means: >=20 actions taken, >=1 typed (type_text) command with a
 real state delta, and the invariant suite ran (an invariant_violations list is present).
@@ -64,7 +70,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="NEXUS LLM playtest (text/type_text mode)")
     parser.add_argument("--provider", default="ollama", choices=["ollama", "anthropic"],
                         help="LLM provider (default: ollama — free/local)")
-    parser.add_argument("--model", default=None, help="model override (provider default if unset)")
+    parser.add_argument("--model", default=None,
+                        help="model override; leave unset for the ollama default "
+                             "gemma4:26b (do NOT use a coding model — see the header)")
     parser.add_argument("--max-actions", type=int, default=40,
                         help="max LLM actions this run (default 40 — margin over the 20 bar)")
     args = parser.parse_args()

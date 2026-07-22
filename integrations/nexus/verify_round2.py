@@ -634,6 +634,74 @@ def main() -> int:
            f"success={r_poor.get('success')} credits={s_poor.get('credits')} "
            f"(was {poor.get('credits')}) tier={s_poor.get('toolTier')}")
 
+        # ══ GATED ACCESS SEMANTICS (NX-L16-1 / NX-L17-1) ════════════════════
+        # The game deliberately distinguishes "you have not reached this yet" from
+        # "this does not exist", and throttles its [HINT] line to attempts 1/5/10 so
+        # repeated refusals do not nag. Both are player-facing CONTENT, so they belong
+        # in R2 — and neither had any gate coverage, which is how the economy sat
+        # untested at a green 36/36 (LESSONS.md O10).
+        # Runs on the fresh post-reset player from the economy leg above, whose hint
+        # counters reset-episode has just zeroed.
+        print("\n  == GATED ACCESS: blocked vs nonexistent, hint throttling ==")
+
+        st0 = ad._read_state()
+        r_gate, _ = _cmd("connect 10.42.0.1")      # real host, story-gated
+        r_none, s_none = _cmd("connect 10.99.99.99")  # no such host
+        gate_out = r_gate.get("output") or ""
+        none_out = r_none.get("output") or ""
+
+        ck("a story-gated host is REFUSED with an access-denied message",
+           r_gate.get("success") is False and "blocked" in gate_out
+           and "Access denied" in gate_out,
+           f"success={r_gate.get('success')} first={gate_out.splitlines()[:1]}")
+        ck("a NONEXISTENT host is refused with a DIFFERENT, 'no such server' message",
+           r_none.get("success") is False and "No server at" in none_out,
+           f"first={none_out.splitlines()[:1]}")
+        # THE regression guard: a change that collapsed these into one message would
+        # pass every other check in the ladder.
+        ck("gated-host and nonexistent-host messages are DISTINGUISHABLE",
+           gate_out != none_out and "No server at" not in gate_out
+           and "blocked" not in none_out,
+           "gated!=missing and neither leaks the other's wording")
+        ck("both connection refusals are state-inert",
+           s_none.get("credits") == st0.get("credits")
+           and s_none.get("compromisedServersCount") == st0.get("compromisedServersCount")
+           and s_none.get("discoveredServersCount") == st0.get("discoveredServersCount"),
+           f"credits={s_none.get('credits')} disc={s_none.get('discoveredServersCount')}")
+
+        # Hint cadence on gated ADDRESSES: attempt 1 already fired above, so 2/3/4
+        # must be silent and 5 must fire again.
+        addr_hits = ["HINT" in gate_out]
+        for _ in range(4):
+            r, _ = _cmd("connect 10.42.0.1")
+            addr_hits.append("HINT" in (r.get("output") or ""))
+        ck("gated-address [HINT] throttles to attempts 1 and 5 (silent on 2-4)",
+           addr_hits == [True, False, False, False, True],
+           f"attempts 1..5 -> {addr_hits}")
+
+        # Gated COMMANDS: `talk` is still gated at the post_tutorial baseline.
+        r_cmd, _ = _cmd("talk sp3ctr3")
+        cmd_out = r_cmd.get("output") or ""
+        ck("a gated COMMAND says blocked/access-denied, NOT 'Command not found'",
+           r_cmd.get("success") is False and "blocked" in cmd_out
+           and "Command not found" not in cmd_out,
+           f"first={cmd_out.splitlines()[:1]}")
+        r_typo, _ = _cmd("zzqq_not_a_command")
+        ck("a genuine TYPO still says 'Command not found' (unknown != gated)",
+           r_typo.get("success") is False
+           and "Command not found" in (r_typo.get("output") or ""),
+           f"first={(r_typo.get('output') or '').splitlines()[:1]}")
+
+        # The two counters must be independent: the 5 address attempts above must not
+        # have consumed the command tally, so this command run still reads 1..5.
+        cmd_hits = ["HINT" in cmd_out]
+        for _ in range(4):
+            r, _ = _cmd("talk sp3ctr3")
+            cmd_hits.append("HINT" in (r.get("output") or ""))
+        ck("gated-command [HINT] throttles 1/5 INDEPENDENTLY of the address counter",
+           cmd_hits == [True, False, False, False, True],
+           f"attempts 1..5 -> {cmd_hits} (address counter already at 5)")
+
     except Exception as exc:  # noqa: BLE001
         import traceback
         traceback.print_exc()

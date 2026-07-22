@@ -686,3 +686,61 @@ running game, not the source" is earning its place.
 4. Owner decision pending: `help <locked-command>` still replies `Unknown command: <name>` — the
    one place the old "pretend it does not exist" behaviour survives. Should browsing help reveal
    the command exists, and should it burn a hint?
+
+---
+
+## L-019: coverage gaps closed — NX-L17-1 fixed, R2 46 -> 54; model corrected to gemma4 (2026-07-22)
+
+Closes the three items L-018 left open.
+
+### NX-L17-1 (GAME, fixed) · the economy verbs bypassed the unlock system
+`market`/`buy` shipped `category:"system"` and ungated, so a player with an EMPTY
+`unlockedCommands` list could open the black market — verified live before the fix. Both now
+carry `unlockRequirements` at tutorial-complete parity with the core hack verbs (the earliest
+point a player has any income). Fixed at `nexus-world-builder` **`81e38c0`**.
+
+**A consequence worth recording**: gating them forced `POST_TUTORIAL_UNLOCKED_COMMANDS` to grant
+them explicitly. Without that, R2's economy leg and R3's `market`/`buy` coverage would have gone
+on reporting green while exercising a LOCKED subsystem — the same vacuous-pass shape that let the
+economy sit untested behind a green 36/36 R2 (O10). Closing one gap can silently open another;
+after gating anything, re-ask what the gates are now actually driving.
+
+### R2 gated-access coverage: 46 -> 54 checks, ALL PASS
+Player-facing refusal semantics had no gate at all. Added to R2 (the content rung):
+gated host is refused with access-denied; a nonexistent host gets a DIFFERENT "no such server"
+message; **the two are distinguishable and neither leaks the other's wording** (the regression
+guard — collapsing them would have passed every other check in the ladder); both refusals are
+state-inert; gated-address `[HINT]` fires on 1 and 5, silent on 2-4; a gated COMMAND says blocked,
+NOT `Command not found`; a genuine typo STILL says `Command not found` (unknown != gated, which
+protects UGT's own garbage/unmapped probes); and gated-command hints throttle 1/5 **independently
+while the address counter already sits at 5** — the condition that would expose a shared tally.
+
+### Full ladder after all of it
+**spike 8/8 · R1 25/25 · R2 54/54 · R3 9/9**, episode-0 replay byte-identical. Game gates: unit
+1309/1309, integration 188/188, lint 0 errors, typecheck clean.
+R3 note: `market`/`buy` are now gated refusals early in a walk rather than successful purchases —
+still real coverage, and `inv_refused_state_inert` holds them to being inert.
+
+### Model: the balance tier was being judged by a CODING model, by my own hand
+`gemma4:26b` (25.8B, gemma4 family, 262k ctx) was installed all along **and is already the default
+in `playtester.py`**. The L-014/L-015 runs used `qwen3-coder:30b` solely because I passed
+`--model` on the command line. That is the whole explanation for the P7 result: two 40-action runs
+that never once issued `cat`, completed 0 missions, and still reported PLAYTEST MET with 0
+violations.
+
+Fixed by documenting rather than by changing a default: `playtest_nexus.py`'s header and its
+`--model` help now say to leave the flag unset, name `gemma4:26b`, and state explicitly that a
+coding model is unfit for this tier with the evidence attached. A bare default is too easy for a
+future session to override exactly as I did.
+
+**Interpretation guardrail:** every P7 competence observation in L-014/L-015 is a qwen3-coder
+number and must NOT be pooled with, or compared to, any gemma4 run. The channel findings (deltas,
+invariants, truncation) stand; the competence verdict must be re-established on gemma4.
+
+### Still open
+1. **Requirement (3) instrumentation** — no metric yet for "did the pilot engage a newly unlocked
+   command / newly revealed quest". Needs per-step diffing of `unlockedCommands` + `missions[]`.
+2. **Owner decision**: `help <locked-command>` still replies `Unknown command: <name>` — the one
+   surviving place with the old "pretend it does not exist" behaviour. Should help reveal that a
+   command exists, and should it burn a hint?
+3. A real balance batch still needs Anthropic credits; gemma4 can now be re-baselined locally.
