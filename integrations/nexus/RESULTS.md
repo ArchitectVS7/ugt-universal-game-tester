@@ -942,3 +942,66 @@ hot-reloaded into a non-compiling `player-state/route.ts`, so `bootstrap-player`
 died at setup. **The tell was the collapsing DENOMINATOR**: a real behavioural regression fails
 checks against a stable total, whereas a total that shrinks means the run never started. Do not
 run the ladder against a repo an agent is actively editing.
+
+---
+
+## L-022: gemma4 re-baseline — the pilot is COMPETENT, and the LLM tier found its first real balance defect (2026-07-22)
+
+First run on the correct model (`gemma4:26b`, `--model` unset, 40 actions, server PID-verified).
+**Not poolable with L-014/L-015** — those are qwen3-coder numbers (L-019 guardrail).
+
+### The competence verdict reverses
+| | qwen3-coder (L-014/L-015, 80 actions) | gemma4 (40 actions) |
+|---|---|---|
+| `cat` issued | **0** | **5** |
+| missions completed | **0** | **1** |
+| economy engaged | never | `market` -> `buy commercial` |
+| odds/rate reasoning | 0 mentions | 4 |
+| prior-knowledge references | 0 | 11 |
+
+40/40 typed commands with a real state delta, 0 invariant violations, 0 truncation warnings,
+**0 bugs flagged** (so the rewritten guide §3 did its job — the new `blocked` messages produced
+no false `potential_bug` reports, which was the risk).
+
+The pilot ran a genuinely competent line: `accept the_breadcrumb` (1) -> recon/exploit ->
+`cat work_vpn.txt` (7) **completing the mission**, then `market` (8) -> `buy commercial` (9),
+spending 1,500 of its 2,000 credits on the +20% toolkit — hence `credits_gained: -500`, which is
+a *good* number here — then `accept following_the_money` (11) to take up the next quest line.
+That is the first time any pilot has engaged the economy this tier exists to probe.
+
+### Agility metric, first live reading with a real denominator
+`2/3 required engaged, rate 0.667, status partial`:
+- `offered_quests` **1/1** — noticed a newly offered quest and accepted it. This is exactly the
+  owner's requirement (3) behaviour, and it was unobservable before L-021.
+- `missions` **1/2** — completed `the_breadcrumb`, ignored `following_the_money` after accepting.
+- `commands` **0/0** with `at_start=35` — nothing became newly usable during the run, so the
+  group honestly reports a ZERO denominator rather than a free 100%. The anti-vacuity rule
+  working as designed.
+
+### NX-L22-1 (GAME, balance) · re-reading the same file is an unbounded, risk-free XP grind
+Surfaced by the pilot's own behaviour: steps 23/38/39/40 re-read
+`/var/log/voice_commands.log`, +5 xp each time. Probed directly to confirm rather than infer —
+six consecutive reads of the SAME file on the SAME server: `xpGain=5` every time, xp 4140 ->
+4170, **no novelty check and no diminishing returns**.
+
+Why it matters rather than being cosmetic: player level is `floor(xp/1000)+1` and level is the
+**dominant term** in every hack roll (`base = 0.60 + (level - serverSecurity) * 0.10`, ±10% per
+level). So ~200 repetitions of a zero-risk command buys +10% on every roll thereafter, up to the
+0.90 base clamp — unbounded and requiring no decisions. It is slow rather than an instant win, so
+the honest framing is "a risk-free grind that dominates skilled play given patience", not "an
+exploit". Hardcore makes it *better* (per-command xp x1.5) while leaving mission rewards flat.
+
+**Competence observation, recorded against the pilot rather than the game:** it exploited this
+without recognising it. Guide §5 explicitly asks it to flag "any dominant degenerate line — a
+single command you can repeat to win without making decisions", and it filed **zero**
+`potential_bug` reports while spending its last four steps doing precisely that. Finding the
+defect by behaviour is still a win for the tier — but a competent playtester should have named it,
+and that gap is a fair input to how much weight a future balance verdict from this model carries.
+
+### Remaining weakness
+`ls` is still 17 of 40 actions. Better than qwen3-coder's 21/40 and no longer a blind loop (the
+ledger and terminal recall are being used — 11 prior-knowledge references), but recon still
+crowds out progress. Worth watching across a batch rather than concluding from one run (P9).
+
+**Status: the channel and the pilot are both validated.** A balance batch on Anthropic is the
+next tier step; NX-L22-1 should reach the game owner independently of that.
