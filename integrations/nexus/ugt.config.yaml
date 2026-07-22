@@ -102,11 +102,68 @@ reward_profiles:
 # flat dict (reusing the existing state shape — nothing invented). No loss_path:
 # NEXUS has no loss state (matching DDD / Nexus-Dominion precedent).
 playtest:
-  guide_char_budget: 3500
-  terminal_char_budget: 600
+  # LESSONS.md P3 (truncation is silent starvation) — both budgets were raised on the
+  # 2026-07-22 pre-flight audit, each sized against a MEASURED worst case in the game's
+  # own source, not guessed:
+  #   guide 3500 -> 9000: the guide now teaches the success-rate formula (P6). It is
+  #     ~8.1k chars; 3500 would have cut it off mid-hack-chain, i.e. exactly the DDD
+  #     L-011 defect (a guide that names a mechanic but never reaches its rules).
+  #   terminal 600 -> 2400: `scan` with no argument prints up to 20 servers at ~68
+  #     chars/line = 1400+ chars (executors.ts:1928-2045), and the budget keeps the
+  #     TAIL — at 600 the LLM saw only the last ~8 servers of every scan. `analyze` is
+  #     the ONLY source of vulnerability NAMES (executors.ts:557-613) and emits
+  #     max(1, 11 - securityLevel) lines ~= 520 chars on a security-1 host, so it sat
+  #     right at the old ceiling with the FIRST-listed vulns the ones at risk. Since
+  #     `exploit <vuln>` requires an exact type-string match, a truncated `analyze` is
+  #     unplayable-by-design. Core now prints a [WARN] whenever either budget bites.
+  guide_char_budget: 12000
+  terminal_char_budget: 2400
+
+  # ── Agent memory (LESSONS.md P10) ────────────────────────────────────────────
+  # The 2026-07-22 sanity run cycled scan->connect->ls->analyze->exploit->escalate
+  # over the SAME two servers five times in 40 steps. It fired zero warnings, because
+  # both existing mechanisms miss an interleaved loop: `noop_streaks` counts only
+  # CONSECUTIVE no-delta repeats (it resets on any productive step) and the recent-
+  # actions window slid past each repeat before the next one. The cumulative ledger
+  # in the prompt is the fix; this window is sized to ~2x the observed 6-7 step cycle
+  # so a loop is visible in the raw history too, not only in the digest.
+  history_window: 14
+
+  # Rendered high in the prompt. The guide states the goal as well, but it sits at the
+  # BOTTOM behind the state dump and terminal buffer — far from where the model commits.
+  objective: >-
+    Push the 8-mission story to its ending: gameStatus.completedStoryMissions 0 -> 8,
+    then `choose <path>` at the finale. A mission completes when you read its target
+    file with `cat <file>` on a server you have compromised — compromising a host is
+    the means, the file read is what scores. Recon (`scan`/`ls`/`analyze`) is how you
+    learn what to do next; run it whenever you reach somewhere new or need information
+    you do not have.
+
+  # ANNOTATES the verb list with what the game reports as unlocked — it never replaces
+  # it. First written the other way round (live list REPLACES the vocabulary, so the
+  # agent is never offered a verb the game refuses); live probing killed that idea the
+  # same day. NEXUS's `unlockedCommands` is a HACK-verb list — scan/connect/disconnect/
+  # ls/cd/cat/clues/whois/analyze/download/exploit/crack/escalate/backdoor — and omits
+  # status/missions/accept/talk/choose AND the new market/buy. Used as a replacement it
+  # would have hidden the entire economy from the pilot: a partial list is an
+  # information-starvation defect (P1) the moment it is treated as authoritative.
+  available_actions_path: "unlockedCommands"
+
+  # Recon in NEXUS is scoped to the host you are on, so `ls`/`analyze` at a NEW server is
+  # a fresh observation, not a repeat. Keying the memory digest by currentServerId keeps
+  # that distinction — otherwise legitimate per-host recon looks like a loop.
+  action_context_path: "currentServerId"
+
+  # NEXUS's read layer is terminal-ONLY: `discoveredServers` is a bare IP list, so a
+  # server's security level (`scan`), its vulnerability NAMES (`analyze` — the sole source,
+  # and `exploit` needs an exact match) and its files (`ls`) are printed once and then lost
+  # when the rolling buffer moves on. Retaining the latest output per (action, server) is
+  # what lets the agent still know at step 30 what it learned at step 4.
+  terminal_recall_budget: 3000
   key_state_paths:
     - { path: "level", label: "level" }
     - { path: "credits", label: "credits" }
+    - { path: "toolTier", label: "toolkit", note: "buy up via `market`/`buy <tier>`; +0/20/35/40/50%" }
     - { path: "compromisedServersCount", label: "servers_owned" }
     - { path: "missionsCompletedCount", label: "missions_done" }
     - { path: "gameStatus.completedStoryMissions", label: "story_missions", note: "0..8 -> win at 8" }

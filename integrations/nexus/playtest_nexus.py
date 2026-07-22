@@ -74,6 +74,20 @@ def main() -> int:
     with open(GUIDE_PATH) as fh:
         guide = fh.read()
 
+    # ── Pre-flight P3 (LESSONS.md §B): fail CLOSED on a truncated guide ──────
+    # The core loop warns when a budget bites; here it is a hard stop, because a
+    # silently half-delivered guide is precisely how DDD's L-009/L-011 batches were
+    # lost — the run still reports PLAYTEST MET and the balance number is measuring a
+    # pilot that was never told the rules. NEXUS's guide teaches the success-rate
+    # formula from §4 onward, so a cut costs exactly the part that matters.
+    guide_budget = int((cfg.data.get("playtest") or {}).get("guide_char_budget", 2000))
+    if len(guide) > guide_budget:
+        print(f"[FAIL] strategy guide is {len(guide)} chars but playtest.guide_char_budget "
+              f"is {guide_budget} — the LLM would never see the last {len(guide) - guide_budget}. "
+              f"Raise the budget in {CONFIG_PATH} (LESSONS.md P3).")
+        return 1
+    print(f"[=] pre-flight: guide {len(guide)}/{guide_budget} chars (fits)")
+
     report = playtest_game_with_adapter(
         adapter,
         provider=args.provider,

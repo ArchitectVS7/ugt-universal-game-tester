@@ -10,8 +10,22 @@ registry + ladder table).
 
 Phase 0, **R1, R2 and R3** of the UGT bridge are **complete and verified live** —
 **the NEXUS trial ladder is COMPLETE.** Both repos are on `main` and green. No
-open defects. Next up (out of ladder): the LLM balance-playtester tier, gated on
-API credits (see the note at the bottom of the ladder section).
+open defects. Next up (out of ladder): the LLM balance-playtester tier.
+
+**2026-07-22 — NEXUS is the next game up for the LLM balance tier, and its §B
+pre-flight is DONE (`RESULTS.md` L-014).** Read `LESSONS.md` §B (P1–P9) before
+touching this tier. Three starvation defects were found and fixed *before* spending a
+batch: `terminal_char_budget` 600→2400 (measured: `scan` returns **1,666 chars / 27
+servers**, so the old tail-budget hid every low-security target — i.e. the pilot could
+not choose targets by the term that dominates its odds), `guide_char_budget`
+3500→9000, and a strategy guide that taught none of the success-rate math and actively
+misstated hardcore's modifier. Framework-side, `playtester.py::_fit()` now WARNs on any
+budget truncation for every game (it was silent before). **Do not pool the L-006 run's
+numbers with any post-L-014 batch.** One game-side characterization is open and should
+reach the game owner: **NX-L14-1 — the progression economy is inert** (no command
+spends credits; the 0→+50% tool-tier axis is hardcoded to BASIC; skills are not
+player-directed; failed rolls cost nothing), which reframes the deferred
+progression-math rebalance below — two of its four knobs are unreachable in play.
 
 | | |
 |---|---|

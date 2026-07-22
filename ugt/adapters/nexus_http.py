@@ -268,6 +268,12 @@ class NexusHttpAdapter(BaseAdapter):
             "credits": _to_int(p.get("credits"), 0),
             "rngCounter": _to_int(p.get("rngCounter"), 0),
             "difficulty": p.get("difficulty"),
+            # LESSONS.md P2: the route exposes this, so the adapter must carry it — a
+            # normalized state that silently drops a PUBLIC field is the DDD `_seat()`
+            # defect. Added with NX-L14-1 (the tool-tier economy): without it the agent
+            # can buy a toolkit and never see that it owns one, and the success-rate
+            # breakdown it reads would be unexplainable from state.
+            "toolTier": p.get("toolTier"),
             "reputation": p.get("reputation") or {},
             "storyFlags": p.get("storyFlags") or [],
             "unlockedCommands": p.get("unlockedCommands") or [],
