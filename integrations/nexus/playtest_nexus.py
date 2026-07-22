@@ -128,17 +128,38 @@ def main() -> int:
     invariants_ran = "invariant_violations" in report
     violations = len(report.get("invariant_violations", []))
 
+    # Progressive-content engagement (owner requirement: is the pilot agile about
+    # newly revealed commands / quest lines?). The rate is a COMPETENCE reading for the
+    # owner, not a channel check, so it does NOT gate PLAYTEST MET — a weak pilot that
+    # ignores everything is a valid, informative result. What IS gated is that the
+    # metric ran at all with a game declaration behind it: a broken config path or a
+    # regressed wiring would otherwise silently report nothing forever (O10).
+    ce = report.get("content_engagement") or {}
+    content_metric_ran = ce.get("status") not in (None, "not_configured")
+
     print()
     print(f"[=] actions_taken               = {actions}")
     print(f"[=] typed (type_text) commands  = {typed_steps}")
     print(f"[=] typed commands with a delta = {typed_delta_steps}")
     print(f"[=] invariant suite ran         = {invariants_ran} (violations={violations})")
+    print(f"[=] content metric ran          = {content_metric_ran} "
+          f"(status={ce.get('status')})")
+    if content_metric_ran:
+        print(f"[=] newly revealed (scored)     = {ce.get('required_scored')} "
+              f"required, {sum(g['optional_revealed'] for g in ce['groups'].values())} "
+              f"optional, {ce.get('pending_at_run_end')} pending at run end")
+        print(f"[=] of those, ENGAGED           = {ce.get('required_engaged')} "
+              f"(rate={ce.get('engagement_rate')})")
+        for name, g in ce["groups"].items():
+            print(f"      {name}: revealed_during_run={g['revealed_during_run']} "
+                  f"at_start={g['revealed_at_start']} "
+                  f"engaged={g['required_engaged']}/{g['required_scored']}")
     print(f"[=] report                      = {REPORT_PATH}")
 
-    ok = actions >= 20 and typed_delta_steps >= 1 and invariants_ran
+    ok = actions >= 20 and typed_delta_steps >= 1 and invariants_ran and content_metric_ran
     print(f"\n{'PLAYTEST MET' if ok else 'PLAYTEST NOT MET'} — "
           f"actions>=20:{actions >= 20} typed_delta_steps>=1:{typed_delta_steps >= 1} "
-          f"invariants_ran:{invariants_ran}")
+          f"invariants_ran:{invariants_ran} content_metric_ran:{content_metric_ran}")
     return 0 if ok else 1
 
 

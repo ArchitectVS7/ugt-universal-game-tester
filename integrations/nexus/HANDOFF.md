@@ -198,7 +198,15 @@ paths the R3 directed heuristic biases toward.
   are genuine (see RESULTS.md "L-006" for the fix-round-1 root-cause repair to the
   shared loop's type_text branch). `strategy-guide.md` + the additive `playtest:`
   config block drive it. Exit 0 + "PLAYTEST MET" = ≥20 actions, ≥1 typed command with a
-  real state delta, invariant suite ran.
+  real state delta, invariant suite ran, and the progressive-content metric ran.
+- Progressive-content engagement metric (L-020): `playtest.revealed_content` in
+  `ugt.config.yaml` → `ugt/core/playtester.py::_RevealTracker`. Answers the owner's
+  "is the pilot agile about newly revealed commands / quest lines?" criterion; numbers
+  land in `results/playtest-report.json` under `content_engagement` (+ three keys in
+  `summary`). Its own gate needs NO server and NO LLM:
+  `python3 integrations/nexus/verify_content_metric.py` (27/27, mutation-tested — it
+  replays synthetic logs where the pilot ignores content and asserts the metric FAILS).
+  Read the two shipped limitations in RESULTS.md L-020 before quoting any number.
 - Game endpoints: `apps/game/src/app/api/test/{reset-episode,player-state,closed-alpha,bootstrap-player}/route.ts`
 - Game endpoint tests: `apps/game/tests/integration/api/{reset-episode,player-state}.test.ts`
 - Winnability reference: `apps/game/tests/integration/missions/full-story-winnable.test.ts`

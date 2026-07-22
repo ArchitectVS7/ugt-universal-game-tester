@@ -155,6 +155,77 @@ playtest:
   # information-starvation defect (P1) the moment it is treated as authoritative.
   available_actions_path: "unlockedCommands"
 
+  # ── Progressive-content engagement metric ────────────────────────────────────
+  # Owner requirement (RESULTS.md L-017 item 3 / L-019 open 1): judge whether the pilot
+  # is AGILE about content the game reveals mid-run — does it follow at least some new
+  # quest lines and try at least some new commands? Previously an eyeball judgement,
+  # which LESSONS.md P7 rejects. Core computes it from these two declarations only;
+  # `ugt/core/playtester.py::_RevealTracker` contains no NEXUS nouns.
+  revealed_content:
+    - name: "commands"
+      path: "unlockedCommands"
+      kind: "strings"
+      # A newly unlocked VERB is engaged by being TYPED — first token of the command
+      # line. An attempt counts even if the game refuses it: the behaviour under test is
+      # "did the pilot notice new content and try it", and a refusal is the game's answer.
+      engage: ["invoke"]
+      # ~2x the observed 6-7 step recon cycle: long enough that a pilot mid-hack-chain
+      # can finish it and still get to the new verb, short enough that "engaged" means
+      # a reaction to the reveal rather than a coincidence 30 steps later.
+      window: 12
+      note: >-
+        SEVERE LOWER BOUND, not the truth (D-L15-1, quantified 2026-07-22).
+        `unlockedCommands` is a persisted EXPLICIT-GRANT list, not a report of what is
+        currently usable: unlock-checker.ts:59-74 unlocks a command if it is in this
+        list OR if any unlockRequirements path (level / storyFlags) is satisfied, and
+        nothing writes the list on level-up. The ONLY writer is mission-reward
+        `unlockCommands` (mission.ts:1104-1115), and across all 14 shipped missions
+        exactly ONE grant exists: the SIDE quest `ghost_protocol_test` -> `traceroute`.
+        Consequences, stated plainly rather than buried: (a) this group's denominator is
+        0 on most runs, which the report says out loud as status "no_reveals" and never
+        as a perfect score; (b) commands that become usable by levelling (`crack` Lv3,
+        `escalate` Lv4, `backdoor`/`upload` Lv5, `traceroute` Lv2) are real newly
+        available content this metric CANNOT see. Closing it needs a game-side change:
+        have player-state report the commands currently PASSING the unlock check, not
+        just those explicitly granted.
+    - name: "missions"
+      path: "missions"
+      kind: "objects"
+      id_field: "missionId"
+      status_field: "status"
+      # `missions[]` carries missionId/status/objectivesCompleted/objectivesTotal — and
+      # NO objective text (P1). So engagement cannot be judged from what the pilot said;
+      # it is judged from what the GAME reports: an objective ticked, or the mission
+      # reaching `completed`. That is precisely the L-015 failure mode this must catch —
+      # a pilot that re-issued `accept the_breadcrumb` 11 times, never issued `cat`, and
+      # left objectivesCompleted at 0 while the run reported PLAYTEST MET.
+      engage: ["progress"]
+      progress_fields: ["objectivesCompleted"]
+      engage_status: ["completed"]
+      # A story mission is 3+ objectives, each needing a compromise-then-`cat` chain;
+      # 20 steps is roughly one such chain plus recon.
+      window: 20
+      # NEXUS state carries no story/side marker on a mission entry, so the split has to
+      # come from ids. Source: apps/game/data/missions/side-missions.json (the 5 side
+      # quests); core-story.json holds the 9 story missions. STALENESS DIRECTION IS
+      # DELIBERATE: a side quest added later and not listed here scores as REQUIRED, i.e.
+      # a loud false failure, rather than a silent free pass (O2). If the game ever marks
+      # side quests in player-state, replace this with `optional_field`.
+      optional_ids:
+        - "undercity_intro"
+        - "carnival_chaos"
+        - "data_broker_job"
+        - "ghost_protocol_test"
+        - "foundation_research"
+      note: >-
+        `missions[]` only lists missions the player has ACCEPTED — the AVAILABLE list is
+        printed by the `missions` command into terminal text and never reaches state
+        (verified live 2026-07-22: 4 missions offered, `missions` state array empty).
+        So "revealed" here means "this quest line became live", and the judged behaviour
+        is whether the pilot then FOLLOWED it rather than accepting and wandering off.
+        Quest lines the pilot never accepted are invisible to this metric. Closing that
+        gap needs a game-side change (expose available missions in player-state).
+
   # Recon in NEXUS is scoped to the host you are on, so `ls`/`analyze` at a NEW server is
   # a fresh observation, not a repeat. Keying the memory digest by currentServerId keeps
   # that distinction — otherwise legitimate per-host recon looks like a loop.

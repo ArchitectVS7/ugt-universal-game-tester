@@ -149,6 +149,20 @@ what the game actually prints.
 central mechanic = starvation, no matter how clean the run. This is what turned both DDD batches around, and
 it is the only check in section B that needs a live run.
 
+**The AGILITY half of competence is now machine-measured — stop eyeballing it.** "Did the pilot follow the
+quest lines and try the commands the game revealed mid-run?" had no metric until 2026-07-22. It is now the
+`playtest.revealed_content` config knob → `ugt/core/playtester.py::_RevealTracker`: a game declares which
+state collections are progressively revealed, and the report separates REVEALED (an item newly appeared in
+state) from ENGAGED (the pilot invoked/mentioned it, or the game reported progress on it, within N steps of
+the reveal). Three rules keep it from going decorative, straight out of O2: items present at reset are the
+STARTING KIT and are never scored; a reveal inside the last window is PENDING, not missed; and a run that
+revealed nothing reports `no_reveals` with a **null** rate, never a perfect one. Optional content (side
+quests) is reported but kept out of the denominator. One trap to carry to the next game: a field named
+`unlockedCommands` may be an explicit-GRANT list rather than a report of what is currently unlocked (NEXUS:
+its only writer across 14 shipped missions is a single side quest), so a metric built on it is a lower bound
+and must say so in its own output.
+*Source: NEXUS L-020 → `integrations/nexus/verify_content_metric.py` (27/27, mutation-tested).*
+
 ### P10 · The pilot needs MEMORY, not just state — a sliding window is not memory
 State tells the agent where it *is*; it does not tell it what it has already tried. Without a
 cumulative record, an agent re-runs actions it completed long ago, and the run looks busy while

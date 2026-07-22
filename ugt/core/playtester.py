@@ -277,6 +277,11 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
 
     current_state = adapter.reset()
     baseline_state = json.loads(json.dumps(current_state, default=str))
+    # Progressive-content metric (owner requirement: is the pilot AGILE about newly
+    # revealed commands / quest lines?). Read-only over the state the loop already
+    # holds — no extra adapter calls, no change to the LLM contract.
+    reveals = _RevealTracker(playtest_cfg)
+    reveals.rebaseline(current_state)
     # Deltas accumulated across mid-run episode resets: on each reset we bank
     # (pre-reset value − baseline value) per summary path, then re-baseline.
     banked = {e["path"]: 0 for e in summary_paths}
@@ -330,6 +335,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
                     baseline_state = json.loads(json.dumps(current_state, default=str))
                     episode_resets += 1
                     inv_ctx.clear()
+                    reveals.note_reset(current_state)
                     continue
             terminal_text = ""
             prompt = _build_legal_prompt(config, strategy_guide, current_state,
@@ -366,6 +372,10 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         is_novel      = bool(llm_action.get("is_novel", False))
 
         print(f"  [Step {step_num}] {action_type}({value!r}) — {reasoning[:60]}")
+
+        # Credit engagement BEFORE the action runs, so an item this very action reveals
+        # can never be credited to it (revelation and engagement must not collapse).
+        reveals.note_action(step_num, value)
 
         if potential_bug:
             potential_bugs.append(_make_bug_report(
@@ -456,6 +466,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
                     baseline_state = json.loads(json.dumps(current_state, default=str))
                     episode_resets += 1
                     inv_ctx.clear()
+                    reveals.note_reset(current_state)
                 continue
 
             elif action_type == "end_turn":
@@ -496,6 +507,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
                 baseline_state = json.loads(json.dumps(current_state, default=str))
                 episode_resets += 1
                 inv_ctx.clear()
+                reveals.note_reset(current_state)
 
         action_counts[f"{action_type}:{value}"] = action_counts.get(f"{action_type}:{value}", 0) + 1
 
@@ -517,6 +529,9 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
                     print(f"  [!!] INVARIANT VIOLATION [{getattr(inv, 'name', '?')}]: {msg}")
 
         after_state = current_state
+        # Record anything the game has newly revealed, and any progress it reports on
+        # an item revealed earlier.
+        reveals.observe(after_state, step_num)
         delta = _compute_delta(before_state, after_state)
 
         log_entry = {
@@ -624,6 +639,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
                 baseline_state = json.loads(json.dumps(current_state, default=str))
                 episode_resets += 1
                 inv_ctx.clear()
+                reveals.note_reset(current_state)
                 # Insert a marker so the LLM knows this is a fresh episode, not a crash.
                 action_log.append({
                     "step": step_num,
@@ -670,6 +686,19 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         label = e.get("label", e["path"])
         if isinstance(final, (int, float)) and isinstance(base, (int, float)):
             summary[label] = banked[e["path"]] + (final - base)
+    # Progressive-content engagement (owner requirement). The counts go into `summary`
+    # so `_aggregate_runs` gives them a mean/CI across a batch exactly like every other
+    # numeric metric; the auditable per-item trail lives in the run report below.
+    content_engagement = reveals.report(len(real_actions))
+    if content_engagement.get("status") != "not_configured":
+        summary["content_revealed_scored"] = content_engagement["required_scored"]
+        summary["content_engaged"] = content_engagement["required_engaged"]
+        summary["content_engagement_status"] = content_engagement["status"]
+        # Only emit a RATE when the denominator is non-empty. Emitting 0.0 (or 1.0) for
+        # a run that revealed nothing would put a fabricated number into the batch mean.
+        if content_engagement["engagement_rate"] is not None:
+            summary["content_engagement_rate"] = content_engagement["engagement_rate"]
+
     win_path = playtest_cfg.get("win_path")
     loss_path = playtest_cfg.get("loss_path")
     if win_path:
@@ -682,6 +711,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         "total_actions": len(action_log),
         "duration_seconds": duration,
         "summary": summary,
+        "content_engagement": content_engagement,
         "baseline_state": baseline_state,
         "final_state": current_state,
         "action_counts": action_counts,
@@ -733,6 +763,21 @@ def _print_run_summary(report, output_path):
     print(f"[+] Potential bugs flagged: {len(report['potential_bugs'])}")
     print(f"[+] Invariant violations: {len(report.get('invariant_violations', []))}")
     print(f"[+] Novel behaviors observed: {len(report['novel_behaviors'])}")
+    ce = report.get("content_engagement") or {}
+    if ce.get("status") == "no_reveals":
+        print("[+] Newly-revealed content: NONE revealed during this run — "
+              "engagement is UNMEASURED (not a pass)")
+    elif ce.get("status") and ce["status"] != "not_configured":
+        print(f"[+] Newly-revealed content engaged: {ce['required_engaged']}/"
+              f"{ce['required_scored']} required (rate={ce['engagement_rate']}, "
+              f"status={ce['status']}, pending={ce['pending_at_run_end']})")
+        for name, g in (ce.get("groups") or {}).items():
+            missed = [i["item"] for i in g["items"]
+                      if i["status"] == "missed" and not i["optional"]]
+            print(f"    {name}: {g['required_engaged']}/{g['required_scored']} "
+                  f"(revealed_during_run={g['revealed_during_run']}, "
+                  f"at_start={g['revealed_at_start']}, optional={g['optional_revealed']})"
+                  + (f" — ignored: {', '.join(missed)}" if missed else ""))
     if report.get("summary"):
         interesting = {k: v for k, v in report["summary"].items()
                        if k not in ("actions_taken", "duration_seconds")}
@@ -1066,6 +1111,301 @@ def _terminal_recall_block(recall, budget):
             "These are the results of things you already did — the details here are still\n"
             "valid unless the game has changed them since.\n"
             + "\n".join(chunks) + tail + "\n")
+
+
+class _RevealTracker:
+    """Measures whether the pilot is AGILE about content the game reveals mid-run.
+
+    The question this answers (owner-specified, NEXUS RESULTS.md L-017 item 3 / L-019
+    "still open" 1): when a game unlocks a new command or opens a new quest line, does
+    the pilot notice and *do something about it* — or does it keep playing the game it
+    already knew? Until now that was an eyeball judgement, which LESSONS.md P7 rejects:
+    competence is read off the log, never inferred from the exit code.
+
+    REVEALED and ENGAGED are deliberately separate:
+      * REVEALED — an item APPEARS in a config-named state collection that was not there
+        before. Purely a property of the game's state. Items already present in the state
+        at reset are the STARTING KIT and are never scored (`revealed_at_start`).
+      * ENGAGED  — the pilot then did something about that item, within `window` steps of
+        the reveal. Three game-agnostic rules, any of which can fire (a group lists the
+        ones that make sense for it):
+          - "invoke"   the first whitespace token of the pilot's action equals the item
+                       (a newly unlocked VERB was typed).
+          - "mention"  the item id appears anywhere in the pilot's action string
+                       (an argument-shaped item: `accept <id>`, `progress <id>`).
+          - "progress" one of the item's own `progress_fields` INCREASED, or its
+                       `status_field` entered `engage_status` — i.e. the game itself
+                       reports the pilot advanced this item.
+        An ATTEMPT counts, including one the game refuses: the behaviour under test is
+        "did the pilot notice new content and try it", and a refusal is the game's
+        answer, not the pilot's failure.
+
+    Deliberate non-vacuity rules (LESSONS.md O2 — a score that cannot fail is prohibited):
+      * A reveal in the last `window` steps of the run is PENDING, not missed — the run
+        ended before the pilot could be judged. Pending items are excluded from the
+        denominator and reported separately, so a late reveal is neither a free pass nor
+        a free failure.
+      * Items marked OPTIONAL (`optional_ids`, or an item field via `optional_field`) are
+        counted and reported but never enter the denominator — the owner's rule that side
+        quests are optional and are not an LLM test failure.
+      * If nothing was ever revealed, the rate is `null` and the status is "no_reveals",
+        never 1.0. An empty denominator is reported as an empty denominator.
+
+    Config (`playtest.revealed_content`, a list of groups) — nothing game-specific lives
+    in this module; a game names its own state paths:
+
+        revealed_content:
+          - name: "commands"          # label in the report
+            path: "unlockedCommands"  # dotted path to a LIST in the adapter's state
+            kind: "strings"           # flat list of scalars
+            engage: ["invoke"]
+            window: 12
+          - name: "missions"
+            path: "missions"
+            kind: "objects"           # list of dicts keyed by id_field
+            id_field: "missionId"
+            engage: ["progress"]
+            progress_fields: ["objectivesCompleted"]
+            status_field: "status"
+            engage_status: ["completed"]
+            window: 20
+            optional_ids: ["side_quest_a", "side_quest_b"]
+            note: "caveat carried into the report"
+
+    Episode resets re-baseline: the post-reset collection is the new starting kit, and
+    items are keyed by (group, id, episode) so a second episode's reveals are their own.
+    """
+
+    _DEFAULT_WINDOW = 15
+
+    def __init__(self, playtest_cfg):
+        self.groups = []
+        for raw in (playtest_cfg or {}).get("revealed_content") or []:
+            if not isinstance(raw, dict) or "path" not in raw:
+                continue
+            engage = raw.get("engage") or ["invoke"]
+            if not isinstance(engage, (list, tuple)):
+                engage = [engage]
+            progress_fields = raw.get("progress_fields") or []
+            if not isinstance(progress_fields, (list, tuple)):
+                progress_fields = [progress_fields]
+            self.groups.append({
+                "name": str(raw.get("name") or raw["path"]),
+                "path": str(raw["path"]),
+                "kind": str(raw.get("kind", "strings")),
+                "id_field": raw.get("id_field"),
+                "engage": {str(r) for r in engage},
+                "progress_fields": [str(f) for f in progress_fields],
+                "status_field": raw.get("status_field"),
+                "engage_status": {str(s) for s in (raw.get("engage_status") or [])},
+                "window": int(raw.get("window", self._DEFAULT_WINDOW)),
+                "optional_ids": {str(x) for x in (raw.get("optional_ids") or [])},
+                "optional_field": raw.get("optional_field"),
+                "note": raw.get("note"),
+            })
+        self.enabled = bool(self.groups)
+        self.episode = 0
+        self._known = {}      # group name -> set of item ids seen so far this episode
+        self._at_start = {}   # group name -> count of items present at a baseline
+        self.items = []       # per-item records, the auditable trail
+
+    # ── ingestion ────────────────────────────────────────────────────────────
+    def rebaseline(self, state):
+        """Adopt `state`'s collections as the starting kit (run start, and after every
+        episode reset). Nothing here is a 'reveal' — it is what the pilot was handed."""
+        if not self.enabled:
+            return
+        for g in self.groups:
+            found = self._extract(g, state)
+            self._known[g["name"]] = set(found)
+            self._at_start[g["name"]] = self._at_start.get(g["name"], 0) + len(found)
+
+    def note_action(self, step_num, value):
+        """Record what the pilot just chose to do, and credit any revealed item it
+        engages by "invoke"/"mention". Called BEFORE the action executes, so an item
+        revealed BY this action can never be credited to it."""
+        if not self.enabled:
+            return
+        text = str(value or "")
+        low = text.lower()
+        verb = low.split(None, 1)[0] if low.split() else ""
+        for rec in self.items:
+            if rec["status"] != "revealed" or rec["episode"] != self.episode:
+                continue
+            g = self._group(rec["group"])
+            if step_num - rec["revealed_at_step"] > g["window"]:
+                continue
+            item = rec["item"].lower()
+            if "invoke" in g["engage"] and verb and verb == item:
+                self._engage(rec, step_num, "invoke", text)
+            elif "mention" in g["engage"] and item and item in low:
+                self._engage(rec, step_num, "mention", text)
+
+    def observe(self, state, step_num):
+        """Read the post-action state: credit "progress" engagement on already-revealed
+        items, then record anything that has newly APPEARED."""
+        if not self.enabled:
+            return
+        for g in self.groups:
+            found = self._extract(g, state)
+            known = self._known.setdefault(g["name"], set())
+            if "progress" in g["engage"]:
+                for rec in self.items:
+                    if (rec["group"] != g["name"] or rec["episode"] != self.episode
+                            or rec["status"] != "revealed"):
+                        continue
+                    if step_num - rec["revealed_at_step"] > g["window"]:
+                        continue
+                    now = found.get(rec["item"])
+                    if self._progressed(g, rec["snapshot"], now):
+                        self._engage(rec, step_num, "progress", "(game reported progress)")
+            for item_id, entry in found.items():
+                if item_id in known:
+                    continue
+                known.add(item_id)
+                self.items.append({
+                    "group": g["name"],
+                    "item": item_id,
+                    "episode": self.episode,
+                    "revealed_at_step": step_num,
+                    "optional": self._is_optional(g, item_id, entry),
+                    "status": "revealed",
+                    "engaged_at_step": None,
+                    "engaged_by_rule": None,
+                    "engaged_by_action": None,
+                    "snapshot": entry if isinstance(entry, dict) else None,
+                })
+
+    def note_reset(self, state):
+        self.episode += 1
+        self.rebaseline(state)
+
+    # ── scoring ──────────────────────────────────────────────────────────────
+    def report(self, last_step):
+        """Final tally. `last_step` is the run's final step index — it decides which
+        reveals were still inside their window when the run ended (PENDING)."""
+        if not self.enabled:
+            return {"status": "not_configured",
+                    "note": "no playtest.revealed_content groups declared for this game"}
+
+        groups_out = {}
+        for g in self.groups:
+            recs = [r for r in self.items if r["group"] == g["name"]]
+            for r in recs:
+                if r["status"] == "revealed":
+                    r["status"] = ("missed"
+                                   if last_step - r["revealed_at_step"] >= g["window"]
+                                   else "pending")
+            required = [r for r in recs if not r["optional"]]
+            optional = [r for r in recs if r["optional"]]
+            scored = [r for r in required if r["status"] != "pending"]
+            engaged = [r for r in scored if r["status"] == "engaged"]
+            entry = {
+                "path": g["path"],
+                "window_steps": g["window"],
+                "engage_rules": sorted(g["engage"]),
+                "revealed_at_start": self._at_start.get(g["name"], 0),
+                "revealed_during_run": len(recs),
+                "required_scored": len(scored),
+                "required_engaged": len(engaged),
+                "required_missed": len(scored) - len(engaged),
+                "pending_at_run_end": len([r for r in required if r["status"] == "pending"]),
+                "optional_revealed": len(optional),
+                "optional_engaged": len([r for r in optional if r["status"] == "engaged"]),
+                "engagement_rate": (round(len(engaged) / len(scored), 3) if scored else None),
+                "items": [{k: v for k, v in r.items() if k != "snapshot"} for r in recs],
+            }
+            if g["note"]:
+                entry["caveat"] = str(g["note"])
+            groups_out[g["name"]] = entry
+
+        scored_total = sum(e["required_scored"] for e in groups_out.values())
+        engaged_total = sum(e["required_engaged"] for e in groups_out.values())
+        pending_total = sum(e["pending_at_run_end"] for e in groups_out.values())
+        if scored_total == 0:
+            status = "no_reveals"
+            rate = None
+        else:
+            rate = round(engaged_total / scored_total, 3)
+            status = "engaged" if engaged_total == scored_total else (
+                "partial" if engaged_total else "ignored")
+        return {
+            # The denominator is the headline, not a footnote (O2/O8): a reader must be
+            # able to see that a 100% rate came from 4 chances and not from zero.
+            "status": status,
+            "required_scored": scored_total,
+            "required_engaged": engaged_total,
+            "required_missed": scored_total - engaged_total,
+            "pending_at_run_end": pending_total,
+            "engagement_rate": rate,
+            "groups": groups_out,
+            "definition": (
+                "REVEALED = an item newly APPEARED in a config-named state collection "
+                "(items present at reset are the starting kit and are not scored). "
+                "ENGAGED = the pilot invoked/mentioned it, or the game reported progress "
+                "on it, within the group's window of steps AFTER the reveal. Items "
+                "revealed inside the last window of the run are PENDING and excluded "
+                "from the denominator. OPTIONAL items are reported but never scored. "
+                "An empty denominator reports status 'no_reveals', never a perfect rate."
+            ),
+        }
+
+    # ── internals ────────────────────────────────────────────────────────────
+    def _group(self, name):
+        return next(g for g in self.groups if g["name"] == name)
+
+    def _engage(self, rec, step_num, rule, action_text):
+        rec["status"] = "engaged"
+        rec["engaged_at_step"] = step_num
+        rec["engaged_by_rule"] = rule
+        rec["engaged_by_action"] = action_text[:120]
+
+    @staticmethod
+    def _extract(group, state):
+        """item id -> raw entry, for one group's collection in `state`."""
+        node = _resolve_path(state, group["path"])
+        out = {}
+        if not isinstance(node, (list, tuple)):
+            return out
+        for entry in node:
+            if group["kind"] == "objects":
+                if not isinstance(entry, dict):
+                    continue
+                raw_id = entry.get(group["id_field"]) if group["id_field"] else None
+                if raw_id is None:
+                    continue
+                out[str(raw_id)] = entry
+            else:
+                if isinstance(entry, (dict, list)):
+                    continue
+                out[str(entry)] = entry
+        return out
+
+    @staticmethod
+    def _progressed(group, before, after):
+        """Did the game itself report this item advancing? Numeric increase on any
+        declared progress field, or a status transition into `engage_status`."""
+        if not isinstance(after, dict):
+            return False
+        before = before if isinstance(before, dict) else {}
+        for field in group["progress_fields"]:
+            b, a = before.get(field), after.get(field)
+            if isinstance(b, (int, float)) and isinstance(a, (int, float)) and a > b:
+                return True
+        sf = group["status_field"]
+        if sf and group["engage_status"]:
+            if str(after.get(sf)) in group["engage_status"] and before.get(sf) != after.get(sf):
+                return True
+        return False
+
+    @staticmethod
+    def _is_optional(group, item_id, entry):
+        """Optional (side content) is read from the ITEM where the game marks it, and
+        only falls back to a config id list where state carries no marker at all."""
+        of = group["optional_field"]
+        if isinstance(of, dict) and isinstance(entry, dict) and of.get("field") in entry:
+            return entry.get(of["field"]) == of.get("value")
+        return item_id in group["optional_ids"]
 
 
 def _objective_block(playtest_cfg):

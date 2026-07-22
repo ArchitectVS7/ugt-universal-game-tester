@@ -738,9 +738,145 @@ number and must NOT be pooled with, or compared to, any gemma4 run. The channel 
 invariants, truncation) stand; the competence verdict must be re-established on gemma4.
 
 ### Still open
-1. **Requirement (3) instrumentation** — no metric yet for "did the pilot engage a newly unlocked
-   command / newly revealed quest". Needs per-step diffing of `unlockedCommands` + `missions[]`.
+1. ~~**Requirement (3) instrumentation**~~ — **BUILT in L-020 below.**
 2. **Owner decision**: `help <locked-command>` still replies `Unknown command: <name>` — the one
    surviving place with the old "pretend it does not exist" behaviour. Should help reveal that a
    command exists, and should it burn a hint?
 3. A real balance batch still needs Anthropic credits; gemma4 can now be re-baselined locally.
+
+---
+
+## L-020: progressive-content engagement metric — requirement (3) is now MEASURED, not eyeballed (2026-07-22)
+
+Closes L-017 item (3) / L-019 open 1. The owner's judging criterion for a full run — *"the LLM
+player should be aware of both unlocked commands and unlocked quest lines … judging the tester
+means they follow at least some of the new quest lines and some of the new commands (side quests
+may be judged as optional and are not an LLM test failure)"* — had **no metric at all**. Scoring
+it by reading the log is exactly what LESSONS.md P7 forbids: measure competence, do not infer it.
+
+### What was built (game-agnostic core + NEXUS as the reference configuration)
+`ugt/core/playtester.py::_RevealTracker`, driven entirely by a new
+`playtest.revealed_content` list. **No NEXUS nouns in core** — a game names its own state paths,
+and a second game adopts the metric by adding config only.
+
+**REVEALED** — an item newly APPEARS in a config-named state collection. Two shapes, neither
+special-cased in core: `kind: strings` (a flat list, NEXUS `unlockedCommands`) and
+`kind: objects` + `id_field` (a list of dicts, NEXUS `missions` keyed by `missionId`). Items
+present at reset are the STARTING KIT (`revealed_at_start`) and are never scored.
+
+**ENGAGED** — the pilot did something about that item within the group's `window` steps AFTER the
+reveal. Three rules, any of which can fire: `invoke` (the first token of the pilot's command
+equals the item — a new VERB was typed), `mention` (the item id appears in the command — for
+argument-shaped items), `progress` (one of the item's own `progress_fields` increased, or its
+status entered `engage_status` — the GAME reports the pilot advanced it). `note_action` runs
+BEFORE the step executes, so an item revealed *by* an action can never be credited to it.
+
+NEXUS values and why:
+- **commands** → `unlockedCommands`, rule `invoke`, window **12** (~2x the observed 6-7 step recon
+  cycle). An ATTEMPT counts even if refused: the behaviour under test is "did the pilot notice new
+  content and try it", and a refusal is the game's answer, not the pilot's failure.
+- **missions** → `missions`, rule `progress` on `objectivesCompleted` (+ `status: completed`),
+  window **20** (one compromise→`cat` chain plus recon). It must be `progress`, not "did it
+  mention the id": `missions[]` carries **no objective text** (P1), and this is precisely the
+  L-015 failure shape — a pilot that re-issued `accept the_breadcrumb` 11 times, never issued
+  `cat`, and left `objectivesCompleted` at 0 while the run reported PLAYTEST MET.
+- **Optional (side quests)**: NEXUS state carries no story/side marker, so the split comes from
+  `optional_ids` — the 5 ids in `apps/game/data/missions/side-missions.json`. Optional items are
+  reported (`optional_revealed`/`optional_engaged`) but **never enter the denominator**. Staleness
+  direction is deliberate: a side quest added later and not listed scores as REQUIRED, i.e. a loud
+  false failure rather than a silent free pass (O2). Core also supports `optional_field` for games
+  that mark it on the item, which is preferred wherever the game exposes it.
+
+### Where the numbers land
+`playtest-report.json` gains a top-level `content_engagement` block (status, `required_scored`,
+`required_engaged`, `required_missed`, `pending_at_run_end`, `engagement_rate`, a per-group
+breakdown carrying its `caveat`, a per-item audit trail with reveal step / engage step / which
+rule fired / which action did it, and an inline `definition`). Three headline numbers also go into
+`summary` so `_aggregate_runs` gives them a mean/95%-CI across a batch like every other metric.
+`playtest_nexus.py` prints the breakdown and gates `PLAYTEST MET` on **`content_metric_ran`** — the
+rate itself deliberately does NOT gate: a weak pilot ignoring everything is a valid, informative
+result, but a silently-not-running metric is not (O10).
+
+### Non-vacuity (O2), stated as rules the code enforces
+- Nothing revealed → status **`no_reveals`**, rate **`null`**. Never 1.0, never 0.0. The
+  denominator is a headline field, not a footnote, so a 100% can never be read without seeing it
+  came from N chances.
+- A reveal inside the last `window` steps is **PENDING** — the run ended before the pilot could be
+  judged. Pending is excluded from the denominator: neither a free pass nor a free failure.
+- Engagement *outside* the window does not count.
+- A game with no `revealed_content` declaration reports `not_configured` — visible, not absent.
+
+### Proof it can FAIL — `integrations/nexus/verify_content_metric.py` (new, **27/27**)
+Replayed synthetic NEXUS-shaped state/action sequences (no server, no LLM, no cost), driving the
+tracker through the same `note_action`-then-`observe` order the live loop uses, and reading the
+groups out of NEXUS's real `ugt.config.yaml` so a typo'd path fails here:
+1. **pilot ignores** a story mission + a new verb → `status: ignored`, `required_scored=2`,
+   `engaged=0`, `rate=0.0`, both items named. 2. pilot follows both → `engaged`, 2/2, credited by
+`invoke` and `progress` respectively. 3. nothing revealed → `no_reveals`, rate null. 4. an ignored
+SIDE quest leaves the denominator empty, while a story quest ignored beside it still fails.
+5. late reveal → PENDING; engagement 21 steps after a 12-step window → does not count.
+6. self-credit blocked. 7. episode reset re-baselines. 8. unconfigured → `not_configured`.
+**Mutation-tested**: monkeypatching `note_action` to credit everything unconditionally turns
+**10 of the 27 checks RED** and exits 1 — the verifier is fail-capable, not decorative.
+
+### Live end-to-end (gemma4:26b, 22 actions, PID-verified server)
+**PLAYTEST MET.** 22/22 typed commands with real deltas, 0 invariant violations, 0 bugs, 3 servers
+compromised. Metric output: `commands` revealed_during_run **0** (at_start 16), `missions`
+revealed_during_run **1** (`tutorial_awakening`, accepted at step 3) → overall **`no_reveals`,
+rate null, 1 pending**. Two things that says, both useful:
+- The metric is honest about having had nothing to score, instead of reporting a perfect run.
+- `tutorial_awakening` sat at `objectivesCompleted: 0/2` for 19 steps while the pilot compromised
+  three hosts and `cat`'d two files. At window 20 that lands as PENDING by one step; at the script
+  default of 40 actions it would score as **MISSED** — i.e. the metric is already pointed at the
+  exact behaviour the owner wants judged. (Worth a separate look at whether `tutorial_awakening`'s
+  objectives are advanceable by what this pilot did at all.)
+- Side note, unrelated to this change: **gemma4 played visibly better than the qwen3-coder runs of
+  L-014/L-015** — a real recon→analyze→exploit→`cat` chain across three hosts, `cat` issued twice
+  (qwen3-coder: zero in 80 actions). Consistent with L-019's model correction.
+
+### KNOWN LIMITATIONS — shipped deliberately, not buried
+1. **`unlockedCommands` is a severe lower bound (D-L15-1, now quantified).**
+   `unlock-checker.ts:59-74` unlocks a command if it is in that list **OR** if any
+   `unlockRequirements` path (level / storyFlags) is satisfied, and *nothing writes the list on
+   level-up*. Its only writer is mission-reward `unlockCommands` (`mission.ts:1104-1115`), and
+   across all 14 shipped missions there is **exactly one grant**: the SIDE quest
+   `ghost_protocol_test` → `traceroute`. So (a) this group's denominator is 0 on nearly every run,
+   and (b) commands that become usable by levelling (`traceroute` Lv2, `crack` Lv3, `escalate`
+   Lv4, `backdoor`/`upload` Lv5) are genuinely new content the metric **cannot see**.
+   **Game-side ask (NX-L20-1):** have `player-state` report the commands currently PASSING the
+   unlock check, not just those explicitly granted. Until then the commands group measures a
+   lower bound, and the report says so in its own `caveat` field.
+2. **Quest lines the pilot never accepts are invisible.** `missions[]` lists only ACCEPTED
+   missions — the AVAILABLE list is printed by the `missions` command into terminal text and never
+   reaches state (verified live: 4 missions offered, state array empty). So "revealed" here means
+   "this quest line became live", and the judged behaviour is whether the pilot then FOLLOWED it
+   rather than accepting and wandering off. A pilot that never accepts anything scores
+   `no_reveals`, not "missed" — which is honest, but it is not the whole question.
+   **Game-side ask (NX-L20-2):** expose available/offered missions in `player-state`.
+3. `optional_ids` duplicates the game's side-mission list and can go stale (direction chosen to
+   fail loudly, see above).
+
+### Ladder — re-run and skip decisions (justified per rung, not blanket)
+The change is confined to `ugt/core/playtester.py` plus the `playtest:` block of
+`integrations/nexus/ugt.config.yaml`. **`grep -n "playtest\|playtester"` over `spike_nexus.py`,
+`smoke_nexus_adapter.py`, `verify_round1/2/3.py` returns ZERO hits**, and `ugt/core/playtester.py`
+is imported only by `ugt/cli.py` and the per-game `playtest_*.py` scripts — no ladder rung loads
+it. The one way a rung could regress is the YAML edit itself.
+- **RAN `verify_content_metric.py` — 27/27** (new; the metric's own gate, and where the new
+  denominator lives).
+- **RAN `spike_nexus.py` — 8/8**, matching baseline. Cheapest proof the edited config still parses
+  and the adapter/server path is intact.
+- **RAN `verify_round1.py` — 25/25**, byte-identical same-seed replay, matching baseline. A full
+  live loop through the same `UgtConfig` object; if the YAML edit had broken anything real, this
+  is where it shows.
+- **RAN `playtest_nexus.py` (ollama/gemma4, 22 actions) — PLAYTEST MET**, now with
+  `content_metric_ran:True` in the exit line.
+- **SKIPPED `verify_round2.py` (54/54) and `verify_round3.py` (9/9).** Both were re-run green
+  hours earlier on this same build; neither reads `playtest.*` nor imports the playtester, and
+  this change adds no adapter call and mutates no state (the tracker only reads the state dict the
+  loop already holds), so it cannot alter the command sequence R3's byte-identical replay
+  criterion depends on. Spike + R1 already cover the only shared surface (config parse). Re-running
+  a 360-step determinism walk to re-certify code it does not touch would be motion, not evidence.
+
+**Baselines after this change: spike 8/8 · R1 25/25 · R2 54/54 (not re-run) · R3 9/9 (not re-run)
+· content-metric 27/27 (new) · playtest MET.**
