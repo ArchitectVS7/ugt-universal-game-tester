@@ -277,6 +277,17 @@ class NexusHttpAdapter(BaseAdapter):
             "reputation": p.get("reputation") or {},
             "storyFlags": p.get("storyFlags") or [],
             "unlockedCommands": p.get("unlockedCommands") or [],
+            # LESSONS.md P2, third application this session — the route added these and
+            # _read_state builds an EXPLICIT dict, so anything unlisted is silently
+            # dropped. NX-L20-1: `usableCommands` is what currently PASSES
+            # checkCommandUnlock (35 verbs at post_tutorial) vs `unlockedCommands`, the
+            # explicitly-granted list (16) — the stored list missed more than half the
+            # usable surface, incl. traceroute/upload, which is why the agility metric's
+            # command denominator was ~0. NX-L20-2: `offeredMissions` is the board the
+            # player can see but has not accepted, so "revealed" can finally mean
+            # "became available" rather than "was already accepted".
+            "usableCommands": p.get("usableCommands") or [],
+            "offeredMissions": p.get("offeredMissions") or [],
             "currentServerId": p.get("currentServerId"),
             "discoveredServers": discovered,
             "compromisedServers": compromised,

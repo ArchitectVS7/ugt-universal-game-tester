@@ -702,6 +702,27 @@ def main() -> int:
            cmd_hits == [True, False, False, False, True],
            f"attempts 1..5 -> {cmd_hits} (address counter already at 5)")
 
+        # NOTE ordering: these run AFTER the cadence assertions above. `help <gated>`
+        # shares the gated-COMMAND tally, so issuing it earlier would consume an attempt
+        # and shift the 1/5 cadence the check above asserts — caught by reasoning about
+        # the counter rather than by a red run, but it would have been a real failure.
+        # NX-L19-1: `help <locked>` was the last place the old "pretend it does not
+        # exist" behaviour survived. All three refusal surfaces must now agree, while
+        # `help <unknown>` deliberately still reads as a typo.
+        r_hg, _ = _cmd("help talk")
+        hg_out = r_hg.get("output") or ""
+        ck("help <GATED command> gives the access-denied message, not 'Unknown command'",
+           r_hg.get("success") is False and "blocked" in hg_out
+           and "Unknown command" not in hg_out,
+           f"first={hg_out.splitlines()[:1]}")
+        r_hu, _ = _cmd("help zzqq_not_a_command")
+        hu_out = r_hu.get("output") or ""
+        ck("help <UNKNOWN command> STILL says 'Unknown command' (unknown != gated)",
+           r_hu.get("success") is False and "Unknown command" in hu_out
+           and "blocked" not in hu_out and "Access denied" not in hu_out,
+           f"first={hu_out.splitlines()[:1]}")
+
+
     except Exception as exc:  # noqa: BLE001
         import traceback
         traceback.print_exc()

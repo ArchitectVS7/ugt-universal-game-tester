@@ -153,7 +153,11 @@ playtest:
   # status/missions/accept/talk/choose AND the new market/buy. Used as a replacement it
   # would have hidden the entire economy from the pilot: a partial list is an
   # information-starvation defect (P1) the moment it is treated as authoritative.
-  available_actions_path: "unlockedCommands"
+  # NX-L20-1: switched from `unlockedCommands` (the explicitly-GRANTED list, 16 verbs,
+  # which nothing writes on level-up) to `usableCommands` (what currently PASSES
+  # checkCommandUnlock, 35 verbs). Still an annotation and never a replacement — the
+  # D-L15-1 rule stands regardless of how good the list gets.
+  available_actions_path: "usableCommands"
 
   # ── Progressive-content engagement metric ────────────────────────────────────
   # Owner requirement (RESULTS.md L-017 item 3 / L-019 open 1): judge whether the pilot
@@ -163,7 +167,7 @@ playtest:
   # `ugt/core/playtester.py::_RevealTracker` contains no NEXUS nouns.
   revealed_content:
     - name: "commands"
-      path: "unlockedCommands"
+      path: "usableCommands"
       kind: "strings"
       # A newly unlocked VERB is engaged by being TYPED — first token of the command
       # line. An attempt counts even if the game refuses it: the behaviour under test is
@@ -174,20 +178,37 @@ playtest:
       # a reaction to the reveal rather than a coincidence 30 steps later.
       window: 12
       note: >-
-        SEVERE LOWER BOUND, not the truth (D-L15-1, quantified 2026-07-22).
-        `unlockedCommands` is a persisted EXPLICIT-GRANT list, not a report of what is
-        currently usable: unlock-checker.ts:59-74 unlocks a command if it is in this
-        list OR if any unlockRequirements path (level / storyFlags) is satisfied, and
-        nothing writes the list on level-up. The ONLY writer is mission-reward
-        `unlockCommands` (mission.ts:1104-1115), and across all 14 shipped missions
-        exactly ONE grant exists: the SIDE quest `ghost_protocol_test` -> `traceroute`.
-        Consequences, stated plainly rather than buried: (a) this group's denominator is
-        0 on most runs, which the report says out loud as status "no_reveals" and never
-        as a perfect score; (b) commands that become usable by levelling (`crack` Lv3,
-        `escalate` Lv4, `backdoor`/`upload` Lv5, `traceroute` Lv2) are real newly
-        available content this metric CANNOT see. Closing it needs a game-side change:
-        have player-state report the commands currently PASSING the unlock check, not
-        just those explicitly granted.
+        RESOLVED 2026-07-22 (NX-L20-1). This group used to read `unlockedCommands`, a
+        persisted EXPLICIT-GRANT list that nothing writes on level-up — its only writer
+        is mission-reward `unlockCommands`, and across all 14 shipped missions exactly
+        ONE grant exists (side quest `ghost_protocol_test` -> `traceroute`), so the
+        denominator was ~0 on every run and commands that become usable by LEVELLING
+        (traceroute Lv2, crack Lv3, escalate Lv4, backdoor/upload Lv5) were invisible.
+        The game now reports `usableCommands` — the set that currently PASSES
+        checkCommandUnlock — which this group reads instead. Measured at post_tutorial:
+        35 usable vs 16 granted, i.e. the old list missed more than half the surface.
+        `unlockedCommands` is still emitted and unchanged; the two mean different things
+        and must not be conflated.
+    # NX-L20-2. THE agility question from the owner's requirement (3): did the pilot
+    # notice a quest line that became AVAILABLE and take it up? Before the game exposed
+    # `offeredMissions`, `missions[]` listed only ACCEPTED missions, so "revealed" could
+    # only ever mean "already accepted" and this behaviour was unobservable.
+    # Engaged by "mention": `accept <missionId>` names the id, which IS the act of
+    # taking up a quest line. Progress after acceptance is scored by the `missions`
+    # group below — these two are deliberately different questions.
+    - name: "offered_quests"
+      path: "offeredMissions"
+      kind: "objects"
+      id_field: "missionId"
+      engage: ["mention"]
+      # Wider than the command window: a pilot mid-hack-chain may reasonably finish it
+      # before turning to the board.
+      window: 18
+      # Side quests are optional per the owner and must never count as failure. This
+      # reads the game's OWN marker rather than a hand-maintained id list, so it cannot
+      # go stale the way `optional_ids` can.
+      optional_field: { field: "missionType", value: "side" }
+
     - name: "missions"
       path: "missions"
       kind: "objects"

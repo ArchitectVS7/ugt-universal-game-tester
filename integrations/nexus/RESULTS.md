@@ -880,3 +880,65 @@ it. The one way a rung could regress is the YAML edit itself.
 
 **Baselines after this change: spike 8/8 · R1 25/25 · R2 54/54 (not re-run) · R3 9/9 (not re-run)
 · content-metric 27/27 (new) · playtest MET.**
+
+---
+
+## L-021: NX-L20-1 + NX-L20-2 RESOLVED — the agility metric now has a real denominator (2026-07-22)
+
+L-020 shipped the new-content engagement metric with two limitations stated plainly rather than
+buried. Both are now closed game-side (`nexus-world-builder` `feat/nx-l20-observability-agility`,
+commit **`773bd82`**, unpushed) and wired through UGT.
+
+### NX-L20-1 (RESOLVED) · `usableCommands`
+The route now reports the set that currently PASSES `checkCommandUnlock`, computed live, **added
+alongside** `unlockedCommands` rather than replacing it — the two answer different questions
+("usable right now" vs "explicitly granted") and conflating them would repeat D-L15-1. Measured
+live at `post_tutorial`: **35 usable vs 16 granted**, the stored list missing more than half the
+surface including `traceroute` and `upload`. That is the quantified version of the D-L15-1
+caveat, and it is why the metric's command denominator was ~0 on every run.
+
+### NX-L20-2 (RESOLVED) · `offeredMissions`
+The board the player can see but has not accepted, with the eligibility rules **moved** into a
+shared `lib/missions/availability.ts` (`missionPrerequisitesMet` / `isMissionOffered` /
+`effectiveStoryFlags`) and called by BOTH the mission router and the test route — not copied.
+Copying them would have made the test route a second implementation of the game's own gating,
+which is the `sim_bridge` failure mode this project exists to avoid (M1). Nothing new is
+persisted (pure derivations of already-loaded rows), so `reset-episode` needs no change and the
+NX-L15-1 class does not apply; the route still makes exactly 2 DB calls. Verified live that
+`rngSeed` is still never emitted while both new fields are non-empty.
+
+### UGT-side wiring (mine)
+- **Adapter passthrough (P2) — the THIRD time this session** that `_read_state()` would have
+  silently swallowed new route fields, since it builds an explicit dict. Both carried now. P2's
+  "re-run it on every state-surface change" is not theoretical advice.
+- **`available_actions_path`** switched `unlockedCommands` → `usableCommands`. Still an
+  annotation, never a replacement — the D-L15-1 rule holds no matter how accurate the list gets.
+- **Metric config**: the `commands` group reads `usableCommands` (its lower-bound caveat replaced
+  with the resolution), and a NEW **`offered_quests`** group reads `offeredMissions`, keyed by
+  `missionId`, engaged by `mention` — because `accept <missionId>` IS the act of taking up a
+  quest line. This is the behaviour the owner's requirement (3) actually asks about ("did the
+  pilot notice a newly available quest and follow it"), and it was unobservable before: with only
+  `missions[]`, "revealed" could only ever mean "already accepted". The existing `missions` group
+  still answers the separate question of post-acceptance progress.
+  Side quests are marked optional via the game's own `missionType` field rather than the
+  hand-maintained `optional_ids` list L-020 shipped — it can no longer go stale.
+
+### The metric gate caught my own config change
+Repointing the groups took `verify_content_metric.py` from 27/27 to **17/27** — by design: it
+asserts the REFERENCE integration's config shape, so changing the config must break it.
+Expectations updated to the new truth and **strengthened, not relaxed**: it now fails if anyone
+reverts the commands group to the explicit-grant list, and it pins `offered_quests` to the game's
+own marker. **29/29**, and re-verified fail-capable after the edit (neutering `note_action` still
+turns 3 checks red, exit 1) — worth re-checking precisely because I had just modified the file
+that proves the metric works.
+
+### Full ladder
+**spike 8/8 · R1 25/25 · R2 56/56 · R3 9/9**, episode-0 replay byte-identical, on a stable server.
+Game gates: typecheck clean, lint 0 errors, unit 1312/1312, integration 188 → **196/196**.
+
+**Process note (O1-adjacent):** an earlier R3 in this round reported 2/8 then 0/1 and looked like
+a catastrophic regression. It was not — the L20 agent was mid-edit and the dev server had
+hot-reloaded into a non-compiling `player-state/route.ts`, so `bootstrap-player` 500'd and the run
+died at setup. **The tell was the collapsing DENOMINATOR**: a real behavioural regression fails
+checks against a stable total, whereas a total that shrinks means the run never started. Do not
+run the ladder against a repo an agent is actively editing.

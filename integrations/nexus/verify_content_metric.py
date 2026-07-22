@@ -37,9 +37,21 @@ def check(label: str, ok: bool, detail: str = "") -> None:
     print(f"  [{'PASS' if ok else 'FAIL'}] {label}" + (f" — {detail}" if detail else ""))
 
 
-def state(commands: list[str], missions: list[dict]) -> dict:
-    """A NEXUS-shaped state slice: only the two fields the groups name."""
-    return {"unlockedCommands": list(commands), "missions": [dict(m) for m in missions]}
+def state(commands: list[str], missions: list[dict],
+          offered: list[dict] | None = None) -> dict:
+    """A NEXUS-shaped state slice: only the fields the groups name.
+
+    `usableCommands` (not `unlockedCommands`) since NX-L20-1 — the commands group reads
+    what currently PASSES checkCommandUnlock, not the explicit-grant list.
+    """
+    return {"usableCommands": list(commands),
+            "missions": [dict(m) for m in missions],
+            "offeredMissions": [dict(o) for o in (offered or [])]}
+
+
+def offer(mid: str, mission_type: str = "story") -> dict:
+    return {"missionId": mid, "title": mid.replace("_", " ").title(),
+            "missionType": mission_type, "difficulty": "easy"}
 
 
 def mission(mid: str, status: str = "active", done: int = 0, total: int = 3) -> dict:
@@ -64,11 +76,23 @@ def main() -> int:
 
     print("=== Config wiring ===")
     groups = {g["name"]: g for g in _RevealTracker(pt).groups}
-    check("NEXUS declares both revealed_content groups",
-          set(groups) == {"commands", "missions"}, str(sorted(groups)))
-    check("commands group points at unlockedCommands with the invoke rule",
-          groups.get("commands", {}).get("path") == "unlockedCommands"
-          and groups["commands"]["engage"] == {"invoke"})
+    check("NEXUS declares all three revealed_content groups",
+          set(groups) == {"commands", "offered_quests", "missions"}, str(sorted(groups)))
+    # NX-L20-1: reading the explicit-GRANT list left this denominator ~0 on every run.
+    # Guard the resolution, not just the wiring — a revert to unlockedCommands must fail.
+    check("commands group points at usableCommands (NOT the grant list) with invoke",
+          groups.get("commands", {}).get("path") == "usableCommands"
+          and groups["commands"]["engage"] == {"invoke"},
+          f"path={groups.get('commands', {}).get('path')}")
+    # NX-L20-2: the agility question — did the pilot take up a newly OFFERED quest.
+    check("offered_quests reads offeredMissions, keyed by missionId, engaged by mention",
+          groups.get("offered_quests", {}).get("path") == "offeredMissions"
+          and groups["offered_quests"]["id_field"] == "missionId"
+          and groups["offered_quests"]["engage"] == {"mention"})
+    check("offered_quests marks side quests optional via the GAME's own field",
+          groups.get("offered_quests", {}).get("optional_field")
+          == {"field": "missionType", "value": "side"},
+          "not a hand-maintained id list — cannot go stale")
     check("missions group is keyed by missionId with the progress rule",
           groups.get("missions", {}).get("id_field") == "missionId"
           and groups["missions"]["engage"] == {"progress"})
