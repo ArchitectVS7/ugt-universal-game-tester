@@ -31,8 +31,9 @@ tells us nothing about whether the game's math is any good.
 - **The terminal output is the read layer.** Server details, vulnerability names and
   file names appear there and nowhere else. Do not throw away a `scan`/`analyze`
   result by immediately issuing another info command — act on it.
-- Do NOT invent commands or files — an unknown command replies "Command not found"
-  and does nothing (that is a wasted step, not a bug).
+- Do NOT invent commands or files — a command that does not exist replies
+  "Command not found" and does nothing (a wasted step, not a bug). A command that
+  DOES exist but you have not unlocked yet is different — see §3.
 
 ## 1. Commands (type the verb, plus an argument where noted)
 - Info (change nothing): `status`, `help`, `missions`, `whoami`, `skills`, `inventory`.
@@ -70,12 +71,24 @@ tells us nothing about whether the game's math is any good.
 Watch `compromisedServersCount`, `missionsCompletedCount`, and
 `gameStatus.completedStoryMissions` (0→8 wins) climb — that is progress.
 
-## 3. Refusal vs. failed roll — they are different
-- **Refusal**: the command was invalid here (wrong vuln name, not connected, no
-  prior compromise). The output says so. Retrying identically is pointless.
-- **Failed roll**: the command was valid and the dice went against you. The output
-  shows the odds breakdown. Retrying is legitimate.
-Read the output before deciding which one you just hit.
+## 3. Four different "no" answers — tell them apart before you react
+The game distinguishes these deliberately, and each calls for a different move.
+
+| What you see | What it means | What to do |
+|---|---|---|
+| `Command not found: <x>` | No such command — a typo or something you invented | Do not retry. Use a real verb. |
+| `Command '<x>' blocked.` + `Access denied…` | The command EXISTS but is not unlocked for you yet | Do not retry. Progress the story; it unlocks later. |
+| `Connection to <ip> blocked.` + `Access denied…` | The host is real but story-gated | Do not retry. Progress the story, then come back. |
+| `Connection failed: No server at <ip>` | No such host at all | Do not retry that IP. `scan` for real ones. |
+| Ordinary refusal (wrong vuln name, not connected, no prior compromise) | Preconditions unmet | Fix the precondition, then retry. |
+| Failed roll — output shows the odds breakdown | Valid action, dice went against you | Retrying IS legitimate (§4). |
+
+**"blocked" is not "broken" and not "missing".** A blocked command or host is
+content you have not reached yet — treat it as a signpost, not a bug, and do not
+report it via `potential_bug`. A `[HINT]` line appears on your 1st such attempt and
+occasionally after; its absence on later attempts is intentional, not a fault.
+
+Only the last row justifies repeating the same command unchanged.
 
 ## 4. The success formula — this is the skill of the game
 Every `exploit` / `crack` / `escalate` / `backdoor` is one roll against a rate the

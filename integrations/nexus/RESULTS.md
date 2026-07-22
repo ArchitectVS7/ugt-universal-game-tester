@@ -624,3 +624,65 @@ some new quest lines and some new commands; side quests optional") can be scored
   `missions[]` per step, diff for newly-appearing entries, and score whether the pilot used any
   within N steps. Recommend building this as an explicit playtest metric rather than judging it
   by eye — it is the same "measure it, do not infer it" rule as P7.
+
+---
+
+## L-018: NX-L16-1 gated-access messages + hint throttling — full ladder green (2026-07-22)
+
+Owner-directed UX change, implemented game-side on `nexus-world-builder`
+`feat/nx-l16-1-hint-throttle` (`5d7f9e2`, off the economy branch, unpushed): locked commands now
+return an access-denied message instead of masquerading as a typo, and the `[HINT]` line on both
+gated-command and gated-address refusals is throttled to attempts **1, 5, 10, 15…** (owner chose
+that cadence over 1/6/11; note 1→5 is only 4 apart, which is deliberate and guarded by a test so
+nobody "fixes" it). Two INDEPENDENT counters — one for any gated command, one for any gated
+address — chosen over a single shared tally so a player hammering gated IPs cannot burn the
+command hint and never see it. Counters live in `Player.gameState` and are explicitly zeroed by
+`reset-episode`, applying the NX-L15-1 lesson directly.
+
+**Verified live over the wire, not from the report.** Interleaved on `post_tutorial` with a gated
+address (`connect 10.42.0.1`) and a gated command (`talk sp3ctr3`):
+```
+address hints 1..10: H . . . H . . . . H
+command hints 1..10: H . . . H . . . . H
+```
+Both at 1/5/10, neither burning the other, both re-firing after a reset. The refusal text prints
+every time; only the hint throttles. A genuine typo still returns `Command not found`, so the
+unknown-command path (which UGT's garbage/unmapped probes hit) is intact.
+
+**Two of my own probes were wrong before I got a clean read** — recorded per M9 because the
+mistake is instructive. First I used `cat` at `post_tutorial`, but `cat` is already unlocked
+there, so it hit a "requires an active connection" refusal and never touched the gated path. Then
+I moved to `fresh`, where `connect` is ITSELF a gated command, so both probe lines incremented the
+same command counter and never reached the address gate. Both times I nearly filed a counter leak.
+The tell was that the combined sequence landed on exactly 1, 5, 10, 15, 20 — too clean for two
+broken counters. A valid test needs a baseline where `connect` is unlocked but the TARGET is
+gated, plus a command still gated there: `post_tutorial` + `talk`.
+
+**Ladder re-run, full: spike 8/8 · R1 25/25 · R2 46/46 · R3 9/9**, episode-0 replay
+byte-identical. That last point is the one that matters: prompt/terminal output now depends on a
+PERSISTED counter, so a byte-identical replay is direct evidence the counters increment
+deterministically from the command sequence and are properly reset — exactly the property
+NX-L15-1 destroyed for `toolTier`. Game gates: typecheck clean, lint 0 errors, unit 1293 → 1309,
+integration 185 → 188.
+
+**Guide updated in lockstep (P6) — it had gone stale within the hour.** It still told the pilot
+that a command it cannot use replies `Command not found` and that this is "a wasted step, not a
+bug", which after this change would make it misread every `blocked` message. §3 rewritten into an
+explicit table of the SIX distinct "no" answers (typo / gated command / gated host / nonexistent
+host / unmet precondition / failed roll) with which ones justify a retry, plus: "blocked" is
+content not yet reached and must NOT be filed via `potential_bug`, and a missing `[HINT]` on later
+attempts is intentional. Guide 9,966 → 11,025 chars, still inside the 12,000 budget.
+**Third time today a guide claim was falsified by live behaviour** — P6's "verify against the
+running game, not the source" is earning its place.
+
+### Open before the ladder is truly closed (not regressions — coverage + one defect)
+1. **NX-L17-1** (game): `market` succeeds with zero unlocked commands; the economy verbs bypass
+   the unlock gate. More visible now that other commands say "blocked".
+2. **No gate asserts "blocked" stays distinguishable from "No server at"** — a regression
+   collapsing them passes every rung today.
+3. **The hint throttle has no ladder coverage** — verified by the game suite and by hand, but no
+   UGT gate would catch a regression to hint-every-time. O10: new behaviour shipped, denominator
+   did not move.
+4. Owner decision pending: `help <locked-command>` still replies `Unknown command: <name>` — the
+   one place the old "pretend it does not exist" behaviour survives. Should browsing help reveal
+   the command exists, and should it burn a hint?
