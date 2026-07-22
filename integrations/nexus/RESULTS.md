@@ -546,3 +546,81 @@ as a game bug rather than as data loss**, which is the dangerous part. Generaliz
 **ROUND 2 MET — 46/46.** Full 8-mission spine to a real win (isComplete + ending_liberation +
 8/8) across normal/tutorial/hardcore, rewards once, mode-invariant mission payouts, M1-M4 prefix
 byte-identical. **Next rung: R3.**
+
+---
+
+## L-017: R3 with economy coverage — ROUND 3 MET 9/9; + probe of the three queued progression requirements (2026-07-22)
+
+**R3 ran twice.** First on the frozen 20-id vocabulary: **MET 9/9** — 4 episodes x 90 steps,
+zero invariant violations, byte-identical episode-0 replay. That is the direct confirmation that
+NX-L14-1 + the NX-L15-1 reset fix did not disturb multi-episode determinism, which is exactly
+what the toolTier leak was threatening.
+
+Then extended per O10 (`market` id 20, `buy` id 21; action_space 20 -> 22). **Two iterations
+were needed and R3's own gate caught both**, which is the rung working as designed:
+1. Adding the ids + arg composition was not enough — `[FAIL] never attempted: ['market','buy']`.
+   R3's policy is phase-aware, not uniform over `action_ids`, so a verb absent from a selection
+   pool is reachable in principle and dead in practice — the same shape as the hardcoded
+   `ToolTier.BASIC` defect this whole thread started from.
+2. Fixed by adding both to `EXPLORE` (the 10% branch that exists to guarantee rare verbs fire).
+
+`buy` picks its tier UNIFORMLY rather than affordably, so most buys are refusals and
+`inv_refused_state_inert` asserts each left credits and `toolTier` untouched — a refused purchase
+that still debits is the failure mode that matters for an economy.
+
+**ROUND 3 MET — 9/9.** 360 steps, 22/22 actions covered (`market` x2, `buy` x2), 8 refusal-probe
+kinds fired, zero violations, episode-0 replay byte-identical and non-vacuous.
+**NEXUS trial ladder COMPLETE on the economy branch.**
+
+### Probe: the three queued progression requirements (owner-specified, for a later tier)
+
+**(1) Command discovery/unlock — VERIFIED WORKING, with one real defect.**
+At `baseline:"fresh"` (`unlockedCommands: []`), locked verbs correctly refuse:
+`scan` / `exploit weak_password` / `cat /etc/passwd` all return `success:false`.
+**Defect NX-L17-1: the NX-L14-1 economy verbs bypass the unlock gate entirely.** `market`
+returns `success:true` on a fresh player with ZERO unlocked commands, printing the full toolkit
+catalogue. `buy` reaches its price check (refused for funds, not for being locked). Both were
+registered `category:"system"` and ungated. Mechanically harmless today — a fresh player has no
+income — but it contradicts the progressive-unlock model and leaks the economy's existence before
+the game reveals it. `status`/`help` are also ungated, presumably deliberately.
+**Design question for the owner (not filed as a defect):** a locked command returns
+`Command not found: scan. Type 'help' for available commands.` — indistinguishable from a typo.
+That is deliberate (`handler.ts:128/140`; locked commands masquerade as unknown), but it is the
+inverse of the philosophy stated in requirement (2), where the owner explicitly wants a meaningful
+"blocked" message rather than pretending the thing does not exist. Worth confirming which
+principle wins for commands.
+
+**(2) Quest-gated areas — ALREADY SATISFIED, and better than specified.** The game already
+distinguishes gated from nonexistent, with exactly the message style requested:
+```
+connect 10.42.0.1   (real host, story-gated)   -> success:false
+    Connection to 10.42.0.1 blocked.
+    Access denied. You don't have the required access level.
+    [HINT] Progress through the story to unlock this target.
+connect 10.99.99.99 (no such host)             -> success:false
+    Connection failed: No server at 10.99.99.99
+```
+R3 already fires a `connect_undiscovered` probe (x6 this run) and asserts inertness.
+**Two gaps, neither a game defect:** (a) no gate asserts the two messages are DISTINGUISHABLE —
+a regression that collapsed "blocked" into "No server at" would pass every rung today; (b)
+`baseline:"post_tutorial"` pre-seeds `discoveredServers` with ALL 10 story IPs
+(`getAllStoryServers()`), so the ladder exercises ACCESS gating but never DISCOVERY progression.
+Note discovery and access are separate gates here — a host can be discovered and still blocked,
+which is good design and worth keeping in mind when specifying the eventual test.
+
+**(3) LLM awareness of unlocked commands + quest lines — NOT YET MEASURABLE.** Partly advanced
+today: `playtest.available_actions_path` now annotates the prompt with the game's live
+`unlockedCommands`. Three gaps remain before the owner's judging criterion ("follows at least
+some new quest lines and some new commands; side quests optional") can be scored:
+- `unlockedCommands` is a PARTIAL list (D-L15-1) — it omits `status`/`missions`/`accept`/`talk`/
+  `choose` and both economy verbs, so it cannot serve as the authoritative "what is unlocked now"
+  signal that requirement (3) needs. Either the game should make it complete, or the tester must
+  merge it with the static vocabulary (which is what it does today).
+- `missions[]` carries `missionId` + `status` + counts only, never objective TEXT (P1), so the
+  pilot sees quest IDs but not what they ask. Following a newly revealed quest line requires
+  reading the terminal after `accept`/`missions`.
+- **No metric exists** for "did the pilot engage a newly unlocked command / newly revealed quest".
+  This needs new instrumentation in the playtest report: snapshot `unlockedCommands` and
+  `missions[]` per step, diff for newly-appearing entries, and score whether the pilot used any
+  within N steps. Recommend building this as an explicit playtest metric rather than judging it
+  by eye — it is the same "measure it, do not infer it" rule as P7.

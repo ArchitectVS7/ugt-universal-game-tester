@@ -58,7 +58,7 @@ observation_space:
 
 action_space:
   type: "discrete"
-  size: 20
+  size: 22
   actions:
     0: { name: "status" }       # info — always available
     1: { name: "help" }
@@ -85,6 +85,12 @@ action_space:
     18: { name: "action_18" }   # INTENTIONALLY unmapped in _compose_command:
                                 #   sent verbatim -> "Command not found" (a refusal probe)
     19: { name: "garbage" }     # composes a nonsense token -> "Command not found"
+    # NX-L14-1 economy (LESSONS.md O10: a rung that never names the new system is not
+    # testing it — R2 sat at its old 36/36 for exactly this reason). Arg composition is
+    # state-driven and lives in verify_round3.py::R3NexusAdapter, like the other
+    # argument-taking verbs.
+    20: { name: "market" }      # bare — toolkit catalogue, read-only
+    21: { name: "buy" }         # buy <tier>; deliberately probes UNAFFORDABLE tiers too
 
 # Placeholder profile: P0 is a playability/robustness bring-up, not training.
 # Rewards realized progress (compromises + story-mission completions), not

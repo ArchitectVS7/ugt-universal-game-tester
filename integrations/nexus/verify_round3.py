@@ -77,6 +77,7 @@ LS, CAT, ANALYZE, EXPLOIT, CRACK = 5, 6, 7, 8, 9
 ESCALATE, BACKDOOR, DOWNLOAD, ACCEPT = 10, 11, 12, 13
 TALK, CHOOSE, DISCONNECT, WHOAMI = 14, 15, 16, 17
 UNMAPPED_ID, GARBAGE_ID = 18, 19
+MARKET, BUY = 20, 21   # NX-L14-1 economy
 
 # ── refusal probes: (kind, action_id). Kinds in _PROBE_COMPOSE get a bad arg
 #    composed in the R3 subclass; unmapped_id/garbage need no compose (the base
@@ -100,7 +101,13 @@ _PROBE_COMPOSE = {"hack_ungated", "hack_nonexistent_vuln", "connect_undiscovered
 # regardless of how far into the story an episode gets (talk without a met NPC
 # is simply refused + inert — still real coverage of the verb).
 EXPLORE = [HELP, STATUS, MISSIONS, SCAN, LS, ANALYZE, ESCALATE, BACKDOOR,
-           WHOAMI, DISCONNECT, DOWNLOAD, CRACK, TALK]
+           WHOAMI, DISCONNECT, DOWNLOAD, CRACK, TALK,
+           # NX-L14-1 economy. BUY picks its tier uniformly rather than an
+           # affordable one, so most buys are REFUSALS — and that is the point:
+           # inv_refused_state_inert then asserts a refused purchase left credits
+           # and toolTier untouched, which is the failure mode that matters for an
+           # economy. Downgrades and re-buys arise naturally once one has landed.
+           MARKET, BUY]
 # Guaranteed-success recovery commands (always legal) — a real player retreats
 # to these after a run of failures rather than hammering a dead action.
 SAFE = [STATUS, WHOAMI, MISSIONS, HELP]
@@ -294,10 +301,23 @@ class R3NexusAdapter(NexusHttpAdapter):
             return f"talk {self._pick_npc(st, rng)}"
         if name == "choose":
             return "choose liberation"
+        if name == "buy":
+            return f"buy {self._pick_tier(rng)}"
         # garbage / action_18 / anything else -> the base default.
         return super()._compose_command(name)
 
-    _INFO_BARE = {"status", "help", "missions", "scan", "ls", "analyze",
+    # Every purchasable tier, cheapest first. The walk picks UNIFORMLY, so it
+    # deliberately spends most of its buys on tiers it cannot afford — those are
+    # refusals, and `inv_refused_state_inert` then asserts the refused purchase left
+    # credits/toolTier untouched, which is the failure mode that matters for an
+    # economy (a refused buy that still debits). Downgrades and re-buys arise
+    # naturally once a tier has been bought, and are refusals too.
+    _TIERS = ("commercial", "black_market", "custom", "zero_day")
+
+    def _pick_tier(self, rng):
+        return self._TIERS[rng.randrange(len(self._TIERS))]
+
+    _INFO_BARE = {"market", "status", "help", "missions", "scan", "ls", "analyze",
                   "escalate", "backdoor", "whoami", "disconnect"}
 
     def _compose_probe(self, kind: str) -> str:
