@@ -243,6 +243,24 @@ the known-bad pattern.
 **O8 · Never widen a denominator to look better, never narrow one to hide a gap.** If a check's category
 changes, state the before/after tally.
 
+**O9 · Never point a test suite at a live environment — its setup may destroy data, and the damage
+masquerades as a product bug.** Integration suites routinely truncate every table in `globalSetup`. Handing
+one a `DATABASE_URL` for a running dev server wiped NEXUS's seeded game world mid-session; the next gate run
+failed as *"exploit failed within 15 attempts"*, which reads like a broken hack. It was a missing target host.
+Two defences: (a) run suites through their own config/runner, never by re-pointing the URL yourself; (b) when
+a failure implies an absurd probability, believe the arithmetic over the error message — 15 consecutive
+failures at 90% is ~1e-15, and that number is what located the real cause. Same shape as the-pond PC-2, where
+headless test runs were overwriting the real player's save.
+*Source: NEXUS L-016.*
+
+**O10 · A rung that passes at its old check count after new content shipped has not tested the new content.**
+NEXUS R2 returned exactly its 36/36 baseline on a build that had just gained a whole economy — because it
+never touched it. The identical count *was* the signal. When a game gains a system, the gate's denominator
+must move; if it doesn't, the gate is certifying ground it never walked. Grep the gate for the new system's
+nouns before trusting its green.
+*Source: NEXUS L-016 (R2 36/36 → 46/46, which surfaced NX-L15-1 one rung before it would have corrupted R3's
+determinism criterion).*
+
 ---
 
 ## D. Adding a lesson

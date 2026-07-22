@@ -538,6 +538,102 @@ def main() -> int:
            len(m1_credits) == 3 and cr_vals == {1000},
            f"credits={m1_credits}")
 
+        # ══ ECONOMY SPINE (NX-L14-1 / L-015) ════════════════════════════════
+        # The tool-tier economy is a major system reachable only by player verbs
+        # (`market` / `buy <tier>`), so R2 must drive it to a real outcome like every
+        # other mode — a green R2 that never touches it would be a vacuous pass on the
+        # newest subsystem in the game. Driven here on the post-spine player, which has
+        # real mission income, so the purchase is made the way a player would make it.
+        print("\n  == ECONOMY: market / buy / tool tier ==")
+
+        def _cmd(c):
+            _, _, _, info = ad.type_text_step(c)
+            return info["result"], ad._read_state()
+
+        # NOTE on sequencing: this runs AFTER three full spines, so the player is rich
+        # (~55k credits, level 20) and still on `basic`. Ladder UP from there — an earlier
+        # draft bought `zero_day` first and then read the correct refusal of the
+        # `commercial` DOWNGRADE as a failure. The insufficient-funds case therefore
+        # cannot be tested on this player at all; it is done last, on a fresh reset.
+        econ_before = ad._read_state()
+        ck("economy preconditions: player starts on the free basic toolkit",
+           econ_before.get("toolTier") == "basic",
+           f"tier={econ_before.get('toolTier')} credits={econ_before.get('credits')}")
+
+        r_mkt, s_mkt = _cmd("market")
+        ck("market lists the toolkit catalogue and is READ-ONLY",
+           bool(r_mkt.get("success"))
+           and "zero_day" in (r_mkt.get("output") or "")
+           and s_mkt.get("credits") == econ_before.get("credits")
+           and s_mkt.get("toolTier") == econ_before.get("toolTier"),
+           f"success={r_mkt.get('success')} creditsΔ="
+           f"{s_mkt.get('credits', 0) - econ_before.get('credits', 0)} "
+           f"tier={s_mkt.get('toolTier')}")
+
+        # Ascend the ladder properly: buy the cheapest rung first.
+        r_buy, s_buy = _cmd("buy commercial")
+        spent = (s_mkt.get("credits") or 0) - (s_buy.get("credits") or 0)
+        ck("buy commercial debits EXACTLY 1500 and sets toolTier",
+           r_buy.get("success") is True and s_buy.get("toolTier") == "commercial"
+           and spent == 1500,
+           f"success={r_buy.get('success')} spent={spent} tier={s_buy.get('toolTier')}")
+        if r_buy.get("success") and spent != 1500:
+            finding(f"buy commercial debited {spent} credits, not the 1500 sticker price")
+
+        # Re-buying what you own must refuse inertly.
+        r_re, s_re = _cmd("buy commercial")
+        ck("re-buying the tier you already own is REFUSED and state-inert",
+           r_re.get("success") is False and s_re.get("credits") == s_buy.get("credits")
+           and s_re.get("toolTier") == "commercial",
+           f"success={r_re.get('success')} credits={s_re.get('credits')} "
+           f"tier={s_re.get('toolTier')}")
+
+        # Downgrading must refuse inertly too (basic is not even purchasable).
+        r_dn, s_dn = _cmd("buy basic")
+        ck("downgrading is REFUSED and state-inert",
+           r_dn.get("success") is False and s_dn.get("credits") == s_buy.get("credits")
+           and s_dn.get("toolTier") == "commercial",
+           f"success={r_dn.get('success')} tier={s_dn.get('toolTier')}")
+
+        # THE point of the feature: the purchased tier must reach the odds math. This is
+        # the check that fires if anyone re-hardcodes ToolTier.BASIC at a call site.
+        ad.type_text_step("scan")
+        tgt = (s_dn.get("discoveredServers") or [None])[0]
+        ck("economy: a target host was discoverable for the odds check", bool(tgt),
+           f"target={tgt}")
+        if tgt:
+            ad.type_text_step(f"connect {tgt}")
+            r_hack, _ = _cmd("escalate")
+            out = r_hack.get("output") or ""
+            ck("a purchased tier reaches the success-rate breakdown (Tool: +20%)",
+               "Tool: +20%" in out,
+               f"breakdown={[l for l in out.splitlines() if 'Tool' in l or 'Base' in l]}")
+            if "Basic" in out:
+                finding("odds breakdown still reports Basic tools after a commercial "
+                        "purchase — a success-rate call site is still hardcoded")
+
+        # Climbing a second rung charges the new tier's full price (no trade-in).
+        r_bm, s_bm = _cmd("buy black_market")
+        spent2 = (s_dn.get("credits") or 0) - (s_bm.get("credits") or 0)
+        ck("climbing to black_market charges its FULL 6000 (no trade-in credit)",
+           r_bm.get("success") is True and s_bm.get("toolTier") == "black_market"
+           and spent2 == 6000,
+           f"success={r_bm.get('success')} spent={spent2} tier={s_bm.get('toolTier')}")
+
+        ck("credits never went negative across the economy sequence",
+           (s_bm.get("credits") or 0) >= 0, f"credits={s_bm.get('credits')}")
+
+        # Insufficient funds needs a POOR player, which the post-spine one is not.
+        # A fresh reset gives the post_tutorial baseline: 1000 credits, basic tier.
+        poor = ad.reset()
+        r_poor, s_poor = _cmd("buy commercial")
+        ck("buy beyond your means is REFUSED and state-inert (fresh 1000-credit player)",
+           r_poor.get("success") is False
+           and s_poor.get("credits") == poor.get("credits")
+           and s_poor.get("toolTier") == "basic",
+           f"success={r_poor.get('success')} credits={s_poor.get('credits')} "
+           f"(was {poor.get('credits')}) tier={s_poor.get('toolTier')}")
+
     except Exception as exc:  # noqa: BLE001
         import traceback
         traceback.print_exc()

@@ -12,8 +12,15 @@ Phase 0, **R1, R2 and R3** of the UGT bridge are **complete and verified live** 
 **the NEXUS trial ladder is COMPLETE.** Both repos are on `main` and green. No
 open defects. Next up (out of ladder): the LLM balance-playtester tier.
 
-**2026-07-22 — NEXUS is the next game up for the LLM balance tier, and its §B
-pre-flight is DONE (`RESULTS.md` L-014).** Read `LESSONS.md` §B (P1–P9) before
+**2026-07-22 — R2 re-run with economy coverage: ROUND 2 MET 46/46 (was 36/36); next rung is R3.**
+The tool-tier economy shipped game-side (NX-L14-1, `c95e9a5`) and R2 gained a 10-check economy
+leg — which immediately found **NX-L15-1**: `reset-episode` never reset `toolTier`, so every
+multi-episode run started contaminated and same-seed replay could compute different odds than
+the run it replays. Fixed + pinned at `5dfd489`. That is R3's exit criterion, so **R3 was
+blocked on this and is now unblocked.** Game gates: unit 1293, integration 185.
+
+**NEXUS is the next game up for the LLM balance tier, and its §B pre-flight is DONE
+(`RESULTS.md` L-014/L-015/L-016).** Read `LESSONS.md` §B (P1–P9) before
 touching this tier. Three starvation defects were found and fixed *before* spending a
 batch: `terminal_char_budget` 600→2400 (measured: `scan` returns **1,666 chars / 27
 servers**, so the old tail-budget hid every low-security target — i.e. the pilot could

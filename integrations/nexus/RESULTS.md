@@ -487,3 +487,62 @@ success jumps Lv0 → Lv1 = +15% in one step, the largest early swing available.
 hardcore stated as "~30% base odds" when it is a flat −10%). Both were read from source and
 both were wrong about what the running game does. **P6 additions must be verified against a
 live breakdown, not only against the code that appears to produce it.**
+
+---
+
+## L-016: R2 re-run with economy coverage — NX-L15-1 found + fixed; ROUND 2 MET 46/46 (2026-07-22)
+
+R2 was first re-run unchanged against the economy branch and came back **36/36 — exactly the
+baseline**. That number was the finding: grepping `verify_round2.py` for `market`/`buy`/
+`toolTier` returned **zero hits**, so a green R2 was certifying a game whose newest major system
+it never touched. By R2's own definition in this repo ("every major mode/system driven to a real
+outcome; no vacuous passes"), that is the failure mode the rung exists to prevent.
+
+**Added an economy leg (10 checks, 36 → 46).** Driven on the post-spine player, who has real
+mission income, so the purchase is made the way a player would make it: `market` is read-only
+(credits AND tier unchanged); `buy commercial` debits **exactly** 1500 and sets the tier;
+re-buying what you own and downgrading are both refused **state-inert**; climbing to
+`black_market` charges its full 6000 with **no trade-in**; credits never go negative; and — the
+check the whole feature exists for — a purchased tier reaches the odds math
+(`Base: 90% | Tool: +20% | Difficulty: -10% = 95%`), with a `finding()` armed if the breakdown
+ever reports `Basic` again, which is what fires if a call site is re-hardcoded.
+
+**The first draft of that leg was wrong and R2 red-flagged it** — proof the checks are
+fail-capable, so no separate mutation test was needed. It assumed a poor player, but the section
+runs after three full spines (level 20, ~55k credits): `buy zero_day` succeeded and the follow-up
+`buy commercial` was correctly refused as a DOWNGRADE. Rewritten to ladder UP from `basic`, with
+an explicit precondition check that the player starts on `basic` so a future reordering fails
+loudly, and the insufficient-funds case moved onto a fresh reset where the player really does
+have 1000 credits.
+
+### NX-L15-1 (GAME, fixed + pinned) · `reset-episode` never reset `toolTier`
+The economy leg's last check failed: after `reset()`, credits returned to 1000 but `toolTier`
+stayed `black_market`. `reset-episode/route.ts` resets `rngSeed`, `rngCounter`, `level`, `xp`,
+`credits`, `difficulty` and deletes missions/servers/inventory/skills — the column added with
+NX-L14-1 was never added to that baseline. Consequences, both squarely on the testing path:
+- **every multi-episode run starts contaminated**, inheriting the previous episode's toolkit;
+- **same-seed replay determinism breaks** — tool tier feeds the hack success rate, so a replayed
+  episode can compute different odds than the run it replays. That is **R3's exit criterion**,
+  where this would have surfaced as a mysterious non-deterministic replay far from its cause.
+
+Fixed at `nexus-world-builder` **`5dfd489`** (`toolTier: "basic"` in the reset baseline), pinned
+by an integration test that seeds `zero_day`, resets, asserts `basic`, **and** asserts credits
+still land on the documented 1000 baseline so a row-wiping "fix" cannot pass it. Game gates:
+typecheck clean, lint 0 errors, unit **1293/1293**, integration **184 → 185/185**.
+
+### Self-inflicted: a test suite cleared the LIVE dev database
+Between those runs, R2 failed with `'exploit weak_password' failed within 15 attempts`. At the
+reference seed that hack runs at 90% (`base = 0.60 + (5-2)*0.10`), so 15 consecutive failures is
+~1e-15 — the arithmetic is what said "this is not a failed hack". It was not: `connect` was
+returning **"No server at 192.168.1.105"**. Cause: an earlier attempt to run the new pinning test
+used the wrong vitest config and passed `DATABASE_URL` pointing at the **live dev database**; the
+integration suite's global setup clears all tables before running, got that far, then errored on
+config — wiping the seeded `GameServer` rows. Recovered with `db push` → `seed.ts` →
+`seed-story.ts` (100 servers + tutorial + all three acts); spike 8/8 and R2 46/46 after.
+Nothing irreplaceable was lost (a dev DB that exists to be seeded), but the failure **presented
+as a game bug rather than as data loss**, which is the dangerous part. Generalized to
+`LESSONS.md` O9.
+
+**ROUND 2 MET — 46/46.** Full 8-mission spine to a real win (isComplete + ending_liberation +
+8/8) across normal/tutorial/hardcore, rewards once, mode-invariant mission payouts, M1-M4 prefix
+byte-identical. **Next rung: R3.**
