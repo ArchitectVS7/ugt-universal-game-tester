@@ -21,6 +21,17 @@ harness itself, there is no server to start). Use ollama (free/local) to validat
 
 Exit 0 + "PLAYTEST MET" means: >=20 actions taken, >=1 state-delta-based step, and
 the invariant suite ran (an invariant_violations list is present in the report).
+
+For an actual balance read (PLAYTEST-DESIGN.md's "N runs with confidence intervals"),
+pass --runs N: each run is an independent adapter.reset() (the DDD adapter derives a
+fresh seed per reset, so no two runs replay the same match), and the shared
+_aggregate_runs() in ugt/core/playtester.py reports mean/95%-CI across runs for
+p0_hp_delta, p1_hp_delta, bugs_flagged, invariant_violations, episode_resets. See
+integrations/ddd/analyze_playtest_batch.py to turn the per-run reports into a
+deck-matchup win rate (bb_competitive vs sw_competitive) — the actual T6.2 question.
+
+    python3 integrations/ddd/playtest_ddd.py --provider ollama --model gemma4:26b \
+        --runs 8 --max-actions 100
 """
 from __future__ import annotations
 
@@ -49,6 +60,8 @@ def main() -> int:
     parser.add_argument("--model", default=None, help="model override (provider default if unset)")
     parser.add_argument("--max-actions", type=int, default=40,
                         help="max LLM actions this run (default 40 — margin over the 20 bar)")
+    parser.add_argument("--runs", type=int, default=1,
+                        help="independent playtest runs for a batch/CI read (default 1)")
     args = parser.parse_args()
 
     cfg = UgtConfig(CONFIG_PATH)
@@ -67,7 +80,33 @@ def main() -> int:
         # loop exactly as R3 hands it to the ExploitHunter.
         invariants=lambda ad: invariants.build_suite().to_hunter_invariants(),
         output_path=REPORT_PATH,
+        runs=args.runs,
     )
+
+    if args.runs > 1:
+        # Aggregate-report shape (ugt/core/playtester.py::_run_and_write, runs>1):
+        # {"aggregate": {...mean/CI...}, "runs_detail": [per-run summaries]}.
+        runs_detail = report.get("runs_detail", [])
+        total_actions = sum(s.get("actions_taken", 0) for s in runs_detail)
+        total_violations = sum(s.get("invariant_violations", 0) for s in runs_detail)
+        total_bugs = sum(s.get("bugs_flagged", 0) for s in runs_detail)
+        completed = len(runs_detail)
+
+        print()
+        print(f"[=] runs completed      = {completed}/{args.runs}")
+        print(f"[=] total actions       = {total_actions}")
+        print(f"[=] total invariant violations = {total_violations}")
+        print(f"[=] total bugs flagged  = {total_bugs}")
+        print(f"[=] summary report      = {REPORT_PATH}")
+        print(f"[=] per-run reports     = integrations/ddd/results/playtest-run-{{1..{args.runs}}}.json")
+        print("[=] for a deck-matchup win rate, run "
+              "integrations/ddd/analyze_playtest_batch.py")
+
+        ok = completed == args.runs and total_actions >= 20 * args.runs
+        print(f"\n{'PLAYTEST BATCH MET' if ok else 'PLAYTEST BATCH NOT MET'} — "
+              f"completed all runs:{completed == args.runs} "
+              f"total_actions>=20*runs:{total_actions >= 20 * args.runs}")
+        return 0 if ok else 1
 
     summary = report.get("summary", {})
     actions = summary.get("actions_taken", 0)

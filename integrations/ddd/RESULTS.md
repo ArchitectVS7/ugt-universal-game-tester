@@ -228,8 +228,63 @@ data point: no stuck/refused-action pattern emerged over 40 steps, though a
 verdict — a longer run (or `--provider anthropic`) is the next lever if a deeper
 balance read is wanted.
 
+## L-008: First multi-run LLM balance batch (2026-07-21) — 92.6% seat-0 win rate, CONFOUNDED with seat/turn-order, not yet comparable to T6.2's 36%
+
+`playtest_ddd.py` gained `--runs N` (threads straight through to the existing
+`playtest_game_with_adapter(..., runs=N)` / `_aggregate_runs` machinery in
+`ugt/core/playtester.py` — no new aggregation code needed, this is exactly
+PLAYTEST-DESIGN.md's "N runs with confidence intervals" balance tier). Each run is
+an independent `adapter.reset()`; `DddHarnessAdapter.reset()` derives a fresh seed
+per reset (`f"{self.seed}#{self._reset_count}"`, counter never resets across runs in
+one process), so no two runs or episodes replay the same match.
+
+New `integrations/ddd/analyze_playtest_batch.py` recovers per-episode winner/via from
+the recorded `action_log`: `_compute_delta` flattens nested dicts with dotted keys,
+so a match's terminal step's `state_delta` contains `resultKind: "'ONGOING' → 'WIN'"`
+alongside `result.winner: "None → 0"` and `result.via: "None → 'KNOCKOUT'"` — no core
+change needed, this is a read-only parse of data the loop already logs. Verified
+against the existing single-run report before trusting it on the batch.
+
+**Run: `--provider ollama --model gemma4:26b --runs 8 --max-actions 100`.** Real
+duration ~9500s total (one run, #6, took 2020s vs ~570-640s for the rest — root
+cause was the host machine sleeping mid-run on low battery, not a game or harness
+defect; the process survived the sleep/wake cleanly). Result: **8/8 runs complete,
+800/800 actions, 0 bugs flagged, 0 invariant violations, 27 completed matches** (all
+27 resolved via KNOCKOUT, zero TURN_LIMIT/EXHAUSTION endings, zero soft-locks).
+
+**Raw win rate: seat 0 (bb_competitive/Blitzblade) won 25/27 (92.6%)**, seat 1
+(sw_competitive) won 2/27 (7.4%).
+
+**This number is NOT comparable to T6.2's "Blitzblade ~36% skilled winrate" and must
+not be read as "balance flipped."** `apps/ladder/bin/ladder.mjs` (read to compare)
+documents that DDD's own AI-ladder gate deliberately runs a **4-cell deck×seat
+design** — `{bb as P0, sw as P0, bb as P1, sw as P1}`, pooled — specifically because
+an earlier non-pooled measurement ("random-vs-random gives bb_competitive ~69%") was
+itself a measurement artifact, and because **seat/turn-order bias is a known,
+already-instrumented confound in this engine**. `DddHarnessAdapter._pending_seat()`
+always resolves seat 0 first in every MULLIGAN and SELECTION phase for the entire
+match (`for s in (0, 1): if not committed...`), and `engine.decks` in
+`ugt.config.yaml` fixes `bb_competitive` to seat 0 for every match — so this batch
+sampled exactly ONE of the ladder's 4 cells (bb-as-P0 vs sw-as-P1) 27 times. Deck
+identity and seat/first-move order are perfectly confounded in this dataset; the
+92.6% figure could be real deck power, pure first-mover advantage, or both, and
+there is no way to tell from this batch alone.
+
+**What this batch DOES establish cleanly:** the multi-run channel and the win-rate
+analyzer both work correctly (verified stand-alone before trusting the aggregate),
+and 800 actions of real LLM-driven play produced zero bugs/invariant violations
+across 27 real match completions — a clean robustness data point layered on top of
+R3's exploit-hunter coverage, from a genuinely different "skilled-ish" play source.
+
+**Next step (not yet run):** mirror batch with `engine.decks` reversed
+(`["sw_competitive", "bb_competitive"]`) so bb plays seat 1 / second-mover, pool both
+batches' win rates the same way the AI ladder does — that isolates deck power from
+seat bias and is the actual prerequisite for any T6.2 balance verdict from this tier.
+Raw data: `integrations/ddd/results/playtest-run-{1..8}.json`,
+`playtest-batch-analysis.json` (all gitignored via root `results/`).
+
 ## Next tier
 
-Deeper LLM balance-playtest runs (longer `--max-actions`, `--provider anthropic`) to
-build an actual balance verdict for D-C1 / T6.2's skilled-play matchup question. DDD
-T6.3's conformance audit #2 remains untouched.
+The seat-swapped follow-up batch above, pooled with this one, is the immediate next
+step toward an actual T6.2 balance verdict. DDD T6.3's conformance audit #2 remains
+untouched.
