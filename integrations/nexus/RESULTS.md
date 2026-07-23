@@ -1005,3 +1005,70 @@ crowds out progress. Worth watching across a batch rather than concluding from o
 
 **Status: the channel and the pilot are both validated.** A balance batch on Anthropic is the
 next tier step; NX-L22-1 should reach the game owner independently of that.
+
+---
+
+## L-023: NX-L22-1 + NX-L23-1 fixed — grind class closed, first mission completable; R2 54→66 (2026-07-22)
+
+Closes both blockers L-022 left standing between the tier and its first Anthropic batch.
+
+### NX-L22-1 (GAME, fixed `e981df1`) · the grind class was 8 verbs wide, not 1
+The filed finding was `cat` (+5 per re-read). A full sweep of every `xpGain`/`skillGain` site
+found the same shape on SEVEN more zero-risk verbs: `whois` +10, **`analyze` +50 xp AND +20
+recon skill per spam (the worst faucet — skill also feeds the roll)**, `scan` +25/+35 + skill,
+`connect` +15, `traceroute` +20 + skill, `talk` +5, `difficulty` +25 (re-settable forever). All
+now pay **first-time-only per target** via novelty keys in `Player.gameState`
+(`xp-novelty.ts`, modeled on the NX-L16-1 hint counters): output text unchanged, re-invocations
+earn nothing, re-reads never write, `reset-episode` clears the set (NX-L15-1 applied at design
+time, and asserted over the wire by the new R2 leg). Deliberately NOT gated: the risk-bearing
+hack verbs — their repeat economics belong to the deferred owner-in-the-loop rebalance
+(reviewer FYI recorded there: `download` has **no roll at all** and is a future ticket;
+`exploit`/`escalate` lack an already-compromised guard).
+
+**The live R2 gate then caught a bug the game's 1332 green unit tests missed.** First run:
+65/66 — the SECOND read of a clue-bearing story file paid again (reads 3+ correctly flat, the
+tell). Root cause: the A4/W7-4b **lost-update class** — `narrativeCatCommand` loads the full
+gameState blob at the top of the command and, on a clue-discovering read, echoes it back through
+the shallow-merge `updateGameState` AFTER `grantOncePerKey` appended the `cat:…` key, clobbering
+the fresh array with the stale one. Fixed at `c4f80da`: `savePlayerStoryState` (the file's ONLY
+updateGameState call site) strips `xpAwardedKeys` from its payload — one-writer-per-key; pinning
+test verified RED without the strip. This is the wire-only-defects thesis in miniature: the unit
+suite never seeded a non-empty novelty array before a clue read, but four real commands over
+HTTP surfaced it immediately.
+
+### NX-L23-1 (GAME, fixed `e981df1`) · the FIRST mission was uncompletable by any play
+The L-020/L-022 "worth a separate look" item, resolved: `tutorial_awakening`'s `find_neighbor`
+objective (`find_clue` targeting IP `192.168.1.105`) can only match an `analyze_target` event —
+and **nothing in the codebase ever emitted one** (the matcher supported it; no emitter existed).
+`read_file` compares file paths and `discover_clue` compares `"<ip>:<path>"` clue ids, so an IP
+target could never match. That is why the L-020 pilot sat at 0/2 for 19 steps — and why L-022's
+`missions` engagement score (1/2) undercounted the pilot. `analyze` now emits
+`ObjectiveEvents.analyze(server.id, server.ipAddress)` + the completion banner, mirroring
+`scanCommand`; verified no other shipped objective can spuriously match. Matcher footgun for
+future authors, recorded: a TARGET-LESS `find_clue` objective would auto-complete on any analyze.
+
+### R2 54 → 66, and what the new legs assert
+- **NX-L23-1 leg (4)**: `tutorial_awakening` driven to `completed` via natural recon
+  (accept → `scan 192.168.1.1` → `connect 192.168.1.105` → `analyze`), +500 reward exactly once.
+- **NX-L22-1 leg (6)**: first cat/analyze/scan pay base xp; repeats pay nothing and move no
+  state; **the exact L-022 grind line (6× re-read) yields zero xp**; reset-episode clears the
+  novelty set (first read pays again next episode).
+- Guide updated in lockstep (P6): new §4.5b teaches the first-time-only rule so a pilot doesn't
+  misread unchanged output as a bug or burn a batch grinding; 11,657 chars, inside the 12,000
+  budget.
+
+### Full ladder on the fixed build (server PID-verified)
+**spike 8/8 · R1 25/25 · R2 66/66 · R3 9/9 · content-metric 29/29**, episode-0 replay
+byte-identical (R3's walk hit `cat` ×117 / `analyze` ×7 under the new gating — zero findings).
+Game gates: typecheck clean, lint 0 errors, unit **1333/1333**, integration **197/197**.
+Adversarial review PASSED with a mutation test (reverting either gate turns the pinning tests
+red; working tree restored byte-identical).
+
+### Interpretation guardrails for the Anthropic batch
+1. **Never pool any pre-e981df1 run with post-fix runs** — the xp economy changed for 8 verbs
+   and the first mission's completability changed. That includes L-022's gemma4 numbers.
+2. The engagement metric's `missions` denominator now includes a completable
+   `tutorial_awakening` — earlier "pending/missed" readings for it were the game's fault, not
+   the pilot's.
+3. XP-curve findings from the batch now measure the intended faucets (missions + risk verbs),
+   which was the point of fixing this first.

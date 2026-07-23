@@ -39,7 +39,17 @@ and asserts (~35-40 checks):
     runs -> identical command sequence, CommandResult stream, rngCounter
     progression and normalized final player-state; non-vacuous because the
     transcript carries a "[Success Rate:" roll AND the seeded sp3ctr3 delivery
-    (met_sp3ctr3) fired inside the prefix.
+    (met_sp3ctr3) fired inside the prefix,
+  * GRIND RESISTANCE (NX-L22-1): zero-risk info commands (cat/analyze/scan) pay
+    xp FIRST-TIME-ONLY per target — a repeat pays nothing and moves no state, the
+    exact L-022 grind line (6x re-read of one file) yields zero xp, and
+    reset-episode clears the novelty set so the next episode's first read pays
+    again (the NX-L15-1 reset-baseline lesson, asserted over the wire),
+  * FIRST-MISSION COMPLETABILITY (NX-L23-1): tutorial_awakening — uncompletable
+    by ANY play before the fix, since nothing emitted the `analyze_target` event
+    its find_clue-by-IP objective needs — is driven to `completed` via natural
+    recon (accept -> scan 192.168.1.1 -> connect 192.168.1.105 -> analyze) and
+    pays its reward exactly once.
 
 No game logic is reimplemented; every effect is read back from player-state. A
 failed check is DATA — it prints as a FINDING and fails the gate, to be fixed
@@ -722,6 +732,86 @@ def main() -> int:
            and "blocked" not in hu_out and "Access denied" not in hu_out,
            f"first={hu_out.splitlines()[:1]}")
 
+        # ══ NX-L23-1: THE FIRST MISSION IS COMPLETABLE ══════════════════════
+        # tutorial_awakening's find_neighbor objective (find_clue targeting IP
+        # 192.168.1.105) could only ever match an `analyze_target` event — and
+        # nothing emitted one, so the game's FIRST mission was uncompletable by
+        # any play (the L-020 pilot sat at 0/2 for 19 steps for exactly this
+        # reason). `analyze` now emits the event; drive the mission to
+        # `completed` via natural recon and assert the reward lands once.
+        print("\n  == NX-L23-1: tutorial_awakening completable via natural recon ==")
+        ad.difficulty = "normal"   # the hardcore spine above left x1.5 xp set
+        aw0 = ad.reset(f"{seed}-l23")
+        r_acc2, _ = _cmd("accept tutorial_awakening")
+        ck("tutorial_awakening is offered and acceptable at post_tutorial",
+           r_acc2.get("success") is True, f"success={r_acc2.get('success')}")
+        r_sc, s_sc = _cmd("scan 192.168.1.1")
+        aw = _mission(s_sc, "tutorial_awakening") or {}
+        ck("scan 192.168.1.1 completes the scan_home objective (1/2)",
+           r_sc.get("success") is True and aw.get("objectivesCompleted") == 1,
+           f"success={r_sc.get('success')} "
+           f"objectives={aw.get('objectivesCompleted')}/{aw.get('objectivesTotal')}")
+        _cmd("connect 192.168.1.105")
+        r_an, s_an = _cmd("analyze")
+        aw2 = _mission(s_an, "tutorial_awakening") or {}
+        aw_done = aw2.get("status") == "completed"
+        ck("analyze on 192.168.1.105 completes find_neighbor -> MISSION COMPLETED",
+           r_an.get("success") is True and aw_done,
+           f"success={r_an.get('success')} status={aw2.get('status')} "
+           f"objectives={aw2.get('objectivesCompleted')}/{aw2.get('objectivesTotal')}")
+        aw_credits = (s_an.get("credits") or 0) - (aw0.get("credits") or 0)
+        ck("tutorial_awakening pays its +500 credit reward exactly once",
+           aw_done and aw_credits == 500, f"creditsΔ={aw_credits}")
+
+        # ══ NX-L22-1: GRIND RESISTANCE ══════════════════════════════════════
+        # Zero-risk informational commands paid xp on EVERY repeat — an
+        # unbounded, risk-free faucet on the dominant term of every hack roll
+        # (level), found when the L-022 pilot spent its last four steps
+        # re-reading one file. They now pay first-time-only per target (novelty
+        # keys in Player.gameState, cleared by reset-episode). The refusal/
+        # output text is unchanged; only the reward is gated.
+        print("\n  == NX-L22-1: grind resistance (first-time-only info xp) ==")
+        ad.reset(f"{seed}-l22")
+        _cmd("connect 192.168.1.105")
+        r_c1, s_c1 = _cmd("cat /Users/jmiller/Documents/work_vpn.txt")
+        r_c2, s_c2 = _cmd("cat /Users/jmiller/Documents/work_vpn.txt")
+        ck("first cat of a file pays its base +5 xp",
+           r_c1.get("success") is True and int(r_c1.get("xpGain") or 0) == 5,
+           f"xpGain={r_c1.get('xpGain')}")
+        ck("re-reading the SAME file pays NOTHING (success unchanged, xp flat)",
+           r_c2.get("success") is True and not r_c2.get("xpGain")
+           and s_c2.get("xp") == s_c1.get("xp"),
+           f"xpGain={r_c2.get('xpGain')} xp {s_c1.get('xp')} -> {s_c2.get('xp')}")
+        r_a1, s_a1 = _cmd("analyze")
+        r_a2, s_a2 = _cmd("analyze")
+        ck("first analyze pays +50; a REPEAT pays neither xp nor skill (was the "
+           "worst faucet: +50xp/+20skill per spam)",
+           int(r_a1.get("xpGain") or 0) == 50 and not r_a2.get("xpGain")
+           and not r_a2.get("skillGain") and s_a2.get("xp") == s_a1.get("xp"),
+           f"first={r_a1.get('xpGain')} repeat={r_a2.get('xpGain')}")
+        r_s1, s_s1 = _cmd("scan")
+        r_s2, s_s2 = _cmd("scan")
+        ck("bare scan pays once (+25); a repeat pays NOTHING",
+           int(r_s1.get("xpGain") or 0) == 25 and not r_s2.get("xpGain")
+           and s_s2.get("xp") == s_s1.get("xp"),
+           f"first={r_s1.get('xpGain')} repeat={r_s2.get('xpGain')}")
+        # The exact L-022 grind line, replayed: six consecutive re-reads of the
+        # same file must leave xp perfectly flat.
+        grind_xp = s_s2.get("xp")
+        flat = True
+        for _ in range(6):
+            _rg, _sg = _cmd("cat /Users/jmiller/Documents/work_vpn.txt")
+            flat = flat and _sg.get("xp") == grind_xp
+        ck("the L-022 grind line itself (6x re-read) now yields ZERO xp",
+           flat, f"xp flat at {grind_xp}" if flat
+           else f"xp moved during the grind (now {_sg.get('xp')})")
+        # Reset must clear the novelty set — the NX-L15-1 class of bug, proven
+        # over the wire: the NEXT episode's first read pays again.
+        ad.reset(f"{seed}-l22b")
+        _cmd("connect 192.168.1.105")
+        r_c3, _ = _cmd("cat /Users/jmiller/Documents/work_vpn.txt")
+        ck("reset-episode CLEARS the novelty set (first read pays again post-reset)",
+           int(r_c3.get("xpGain") or 0) == 5, f"xpGain={r_c3.get('xpGain')}")
 
     except Exception as exc:  # noqa: BLE001
         import traceback

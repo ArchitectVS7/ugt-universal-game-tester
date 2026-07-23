@@ -163,6 +163,14 @@ hardcore ×1.5), but **mission-reward credits and XP are mode-invariant**.
 `player_level = floor(total_xp / 1000) + 1` — flat and linear, no curve. Level
 raises the `base` term in §4.1 by 10% per level.
 
+### 4.5b Info commands pay XP once per target — repeats pay nothing
+`scan`, `connect`, `whois`, `analyze`, `cat`, `traceroute`, `talk` and
+`difficulty` grant their XP (and skill points) only the FIRST time per target
+(per file for `cat`, per server for `analyze`/`connect`, per mode for
+`difficulty`). Repeating one of these is a wasted step, not a strategy: the
+command still succeeds and its output is unchanged, but nothing is earned.
+Sustained XP comes from missions and the risk-bearing hack verbs (§4.1).
+
 ### 4.6 What a failed roll costs you
 Nothing is deducted on a failure — no credits, no cooldown, no trace or detection
 counter, and the attempt can be repeated immediately. Successes grant XP; failures

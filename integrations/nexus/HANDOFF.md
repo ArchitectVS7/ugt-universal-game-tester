@@ -1,23 +1,37 @@
 # NEXUS UGT Integration — HANDOFF (resume here)
 
-Single doorway for a fresh session. Last updated **2026-07-08**, after Phase 0.
+Single doorway for a fresh session. Last updated **2026-07-22**, after L-023.
 Companions: `ROLLOUT.md` (the phased plan), `README.md` (run recipe + findings
-registry + ladder table).
+registry + ladder table), `RESULTS.md` (the L-xxx findings log — L-014..L-023
+is the LLM-tier arc).
 
 ---
 
 ## TL;DR — where we are
 
-Phase 0, **R1, R2 and R3** of the UGT bridge are **complete and verified live** —
-**the NEXUS trial ladder is COMPLETE.** Both repos are on `main` and green. No
-open defects. Next up (out of ladder): the LLM balance-playtester tier.
+**The ladder is COMPLETE and green on the current build: spike 8/8 · R1 25/25 ·
+R2 66/66 · R3 9/9 · content-metric 29/29** (2026-07-22, ep-0 replay
+byte-identical). The LLM playtest channel AND the pilot are validated
+(gemma4:26b, L-022). **Next step: the first Anthropic balance batch** — credits
+are topped up; the pre-batch blockers are all resolved:
+- **NX-L22-1 FIXED** (`e981df1`+`c4f80da`): 8 zero-risk verbs paid xp on every
+  repeat (worst: `analyze` +50xp/+20skill per spam); all now first-time-only
+  per target via `xp-novelty.ts`, reset by reset-episode. The live R2 gate
+  caught a lost-update clobber of the novelty array that 1332 green unit tests
+  missed (see RESULTS L-023).
+- **NX-L23-1 FIXED** (`e981df1`): the FIRST mission (`tutorial_awakening`) was
+  uncompletable by any play — its find_clue-by-IP objective needed an
+  `analyze_target` event nothing emitted. `analyze` now emits it; R2 drives the
+  mission to completion via natural recon.
+- Game gates: unit **1333/1333**, integration **197/197**, lint/typecheck clean.
 
-**2026-07-22 — R2 re-run with economy coverage: ROUND 2 MET 46/46 (was 36/36); next rung is R3.**
-The tool-tier economy shipped game-side (NX-L14-1, `c95e9a5`) and R2 gained a 10-check economy
-leg — which immediately found **NX-L15-1**: `reset-episode` never reset `toolTier`, so every
-multi-episode run started contaminated and same-seed replay could compute different odds than
-the run it replays. Fixed + pinned at `5dfd489`. That is R3's exit criterion, so **R3 was
-blocked on this and is now unblocked.** Game gates: unit 1293, integration 185.
+**Batch guardrail: never pool any pre-`e981df1` run (incl. L-022's gemma4
+numbers) with post-fix runs — the xp economy and first-mission completability
+both changed.**
+
+**Branch state (2026-07-22):** game work is on `feat/nx-l20-observability-agility`
+(NX-L14-1..NX-L23-1 series); UGT work on `fix/ugt-harness-false-positives`.
+Merge both to `main` before the batch so its numbers pin to main commits.
 
 **NEXUS is the next game up for the LLM balance tier, and its §B pre-flight is DONE
 (`RESULTS.md` L-014/L-015/L-016).** Read `LESSONS.md` §B (P1–P9) before
@@ -36,10 +50,10 @@ progression-math rebalance below — two of its four knobs are unreachable in pl
 
 | | |
 |---|---|
-| **NEXUS game** | `~/Dev/Games/nexus-world-builder`, app in `apps/game`. On `main` = `origin/main`. Gates green: typecheck+lint clean, **unit 1265/1265, integration 173/173** (0 skip). |
-| **UGT framework** | `~/Dev/Games/_UGT Universal Game Tester`. On `main` (NO git remote — local commits only). Nexus integration under `integrations/nexus/` + adapter `ugt/adapters/nexus_http.py`. |
+| **NEXUS game** | `~/Dev/Games/nexus-world-builder`, app in `apps/game`. L-014..L-023 series on `feat/nx-l20-observability-agility` (merge to `main` pending). Gates green: typecheck+lint clean, **unit 1333/1333, integration 197/197** (0 skip). |
+| **UGT framework** | `~/Dev/Games/_UGT Universal Game Tester`. LLM-tier arc on `fix/ugt-harness-false-positives` (merge to `main` pending). Nexus integration under `integrations/nexus/` + adapter `ugt/adapters/nexus_http.py`. |
 
-**Work on `main` in both repos now** — the earlier "do not merge to main" constraint
+**Work on `main` in both repos** — the earlier "do not merge to main" constraint
 is LIFTED (user merged the fix branch via PRs #121/#122). The old
 `fix/code-review-2026-07` (nexus) and `integration/nexus-bridge` (UGT) branches are
 merged/stale.
