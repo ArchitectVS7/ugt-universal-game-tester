@@ -16,18 +16,14 @@ tells us nothing about whether the game's math is any good.
   - `value` = `"scan"`, `"connect 192.168.4.10"`, `"exploit weak_password"`,
     `"cat /etc/passwd"`, `"accept the_breadcrumb"`.
 - Read the Current State JSON to fill in REAL arguments:
-  - `discoveredServers` — IP addresses you can `connect` to (populate it with `scan`
-    first if empty). It is a bare list of IPs; a server's security level, hostname
-    and file list exist ONLY in terminal output, never in the state JSON.
-  - `compromisedServers` — hosts you already own (with `hasRootAccess`/`hasBackdoor`).
-  - `missions[]` — each has a `missionId`, a `status`, and `objectivesCompleted` /
-    `objectivesTotal` **counts only** — the objective *text* is not in state, so read
-    the terminal after `accept`/`missions` to learn what a mission actually wants.
-    A mission starts out NOT in this list at all; `accept <missionId>` is what PUTS
-    it here with `status: "active"` in one shot. Once you see a mission with
-    `status: "active"`, it is ALREADY accepted — do NOT `accept` it again (that call
-    does nothing the second time). Move on to `scan`/`connect`/`exploit`/`cat` to
-    make its `objectivesCompleted` count go up instead.
+  - `discoveredServers` — IPs you can `connect` to (populate via `scan` if empty). Bare
+    IP list only; security level/hostname/file list are terminal-output-only, never state.
+  - `compromisedServers` — hosts you own (`hasRootAccess`/`hasBackdoor` flags).
+  - `missions[]` — `missionId`/`status`/`objectivesCompleted`/`objectivesTotal` COUNTS
+    only, no objective text (read terminal after `accept`/`missions` for that). Absent
+    = not yet accepted; `accept <missionId>` puts it here as `status:"active"` in one
+    shot — do NOT `accept` again once active (no-op). Progress it via
+    `scan`/`connect`/`exploit`/`cat` instead.
 - **The terminal output is the read layer.** Server details, vulnerability names and
   file names appear there and nowhere else. Do not throw away a `scan`/`analyze`
   result by immediately issuing another info command — act on it.
@@ -71,6 +67,51 @@ tells us nothing about whether the game's math is any good.
 Watch `compromisedServersCount`, `missionsCompletedCount`, and
 `gameStatus.completedStoryMissions` (0→8 wins) climb — that is progress.
 
+## 2b. Side quests — a real economic choice, backed by real numbers, not flavor text
+NEXUS has 5 optional side missions running in PARALLEL to the 8 main-story missions —
+distinguishable by `missionType: "side"` (vs `"story"`) wherever a mission appears
+(`offeredMissions`, `missions[]`). They are not a distraction from "the real game":
+their rewards are comparable to, and often larger than, early main-story missions.
+
+| Side mission | Gate | XP | Credits | Other |
+|---|---|---|---|---|
+| Market Rate (`undercity_intro`) | level 2 | 300 | 5,000 | +15 undercity rep |
+| The Punchline (`carnival_chaos`) | level 3 | 400 | 2,000 | +20 carnival rep, −10 syndicate rep |
+| The Price of Information (`data_broker_job`) | level 4 + `undercity_intro` done | 600 | 8,000 | +25 undercity rep, −15 corporate rep |
+| Initiation (`ghost_protocol_test`) | level 5 + a story flag | 1,500 | 5,000 | +40 ghost_protocol rep, **unlocks the `traceroute` command** |
+| Ethical Considerations (`foundation_research`) | level 6 + a story flag | 1,200 | 4,000 | +35 foundation rep, −25 syndicate rep |
+
+For comparison: `the_breadcrumb`, the FIRST main-story mission, pays 250xp/1,000
+credits — less than every side mission above. Skipping side content by default is not
+economically correct in this game.
+
+**Rule: the first time you see a side quest offered (`missionType: "side"` in
+`offeredMissions`), accept it and follow it through to completion before returning to
+what you were doing** — unless you are mid-hack-chain on a server, in which case finish
+that chain first, then go back for the side quest. This is a floor, not a ceiling: if
+you want to pursue every side quest that becomes available given the numbers above,
+that is also a legitimate, informed choice. What is NOT legitimate is ignoring every
+side quest by default without weighing it against the main story's pace — that leaves
+real XP, credits, and (for `ghost_protocol_test`) a command unlock unclaimed.
+
+## 2c. When nothing is working — use `hint`/`clues` BEFORE you keep guessing
+If several different commands in a row change nothing (state JSON unchanged, no new
+file or clue, `## Warnings` shows repeated no-op entries), do NOT respond by guessing
+more file paths or IPs. Two commands exist for exactly this:
+- `clues` (aliases `discoveries`/`intel`) — lists every clue you have ALREADY found,
+  grouped by type, with where it came from. Something you read several servers ago and
+  moved on from is often the answer you are missing.
+- `hint` (alias `stuck` — literally named for this moment) — a contextual nudge based
+  on your current story progress.
+
+**Rule: after 2 different commands in a row that changed nothing, run `clues` then
+`hint` before trying anything else.** That costs one or two turns and usually reveals
+what to do next; blind-guessing paths for 20+ turns in a row does not.
+
+Only use `action_type="diagnose"` if `hint`/`clues` genuinely give you nothing to act
+on and the game itself seems broken — it flags the situation for review, it does not
+solve it for you.
+
 ## 3. Four different "no" answers — tell them apart before you react
 The game distinguishes these deliberately, and each calls for a different move.
 
@@ -100,34 +141,27 @@ base = clamp(0.10, 0.90,  0.60 + (your_level - server_security) * 0.10)
 ```
 
 ### 4.1 Level vs. server security is the dominant term
-Each level of gap is worth **±10%**. At parity, base = 60%. Against a server 3
-levels above you, base = 30%. `scan` tells you every host's security level — so
-**choose targets by the gap**, and prefer a lower-security host when a mission does
-not demand a specific one.
+Each level of gap = **±10%**; parity = 60% base; 3 levels above you = 30% base. `scan`
+shows every host's security level — **choose targets by the gap**, preferring lower
+security when a mission doesn't demand a specific host.
 
 ### 4.2a Skill bonus: +15% per skill level
-`skill_bonus = skill_level * 0.15`. **You start at skill level 0, so +0%** — a brand-new
-player gets no skill bonus at all, and the odds breakdown shows no `Skill:` line until
-you have earned some. Every hack prints your current level, e.g.
-`[Player Lv5 | Exploitation Lv0 | Basic Tools]`.
+- `skill_bonus = skill_level * 0.15`; `skill_level = floor(points/100) + 1`; you start
+  at Lv0 = +0% (no `Skill:` line in the odds breakdown yet; every hack prints your
+  current level, e.g. `[Player Lv5 | Exploitation Lv0 | Basic Tools]`).
+- **First point-earning success jumps Lv0→Lv1 = +15% instantly** — the single biggest
+  early swing available, bigger than a player-level-up.
 
-Once you have any points at all, level is `floor(points / 100) + 1`, so your **first**
-successful point-earning action jumps you straight from Lv0 to Lv1 = **+15%**. That
-first success is the single most valuable percentage swing available to you early —
-worth more than a level of player XP.
-
-Two separate skill tracks, and each verb trains only one of them:
-- **`exploitation`** — trained by `exploit` (+25 pts) and `crack` (+30 pts).
-- **`persistence`** — trained by `backdoor` (+40 pts) and `escalate` (+20 pts).
-- `scan` (+10/+15) and `analyze` (+20) also grant points.
-
-100 points = one skill level = a permanent +15% on every roll in that track. Both
-tracks matter: a strong `exploitation` does nothing for `escalate`.
+Two skill tracks, 100 pts = 1 level = **+15% permanent, per track** (a strong
+`exploitation` does nothing for `escalate`):
+- **`exploitation`** — `exploit` (+25 pts), `crack` (+30 pts).
+- **`persistence`** — `backdoor` (+40 pts), `escalate` (+20 pts).
+- `scan` (+10/+15), `analyze` (+20) also grant points.
 
 ### 4.2b Tool tier: buy your way up to +50%
-`tool_bonus` comes from the toolkit you own, and you start on the free `basic` (+0%).
-Run `market` to see the catalogue and `buy <tier>` to purchase — this is the ONLY
-thing credits are spent on, so credits you are sitting on are doing nothing.
+`tool_bonus` comes from your owned toolkit (`market` = catalogue, `buy <tier>` =
+purchase — the ONLY thing credits are spent on; idle credits do nothing). Start:
+`basic` (+0%), 1,000 credits (nothing affordable yet — mission rewards are the income).
 
 | Tier | Bonus | Price |
 |---|---|---|
@@ -137,11 +171,8 @@ thing credits are spent on, so credits you are sitting on are doing nothing.
 | custom | +40% | 12,000 |
 | zero_day | +50% | 25,000 |
 
-You start with 1,000 credits, so nothing is affordable immediately — mission rewards
-are the income. Your current toolkit is `toolTier` in Current State, and a purchase
-shows up in the odds breakdown as a `Tool: +N%` line on your next hack. Buying a tier
-you own, or a cheaper one than you own, is refused and costs nothing. There is no
-resale.
+Current tier = `toolTier` in state; a purchase shows as `Tool: +N%` on your next hack.
+Buying an owned/cheaper tier is refused, free, no resale.
 
 ### 4.3 Per-verb differences
 | Verb | Skill track | Effective security | Prerequisite |
@@ -154,28 +185,24 @@ resale.
 `escalate` is deliberately one notch harder than everything else on the same box.
 
 ### 4.4 Difficulty modifier
-Applied as a flat term on the rate: **tutorial +20%, normal 0, hardcore −10%.**
-That is the *whole* effect on odds — hardcore is not a "30% chance" mode, it is a
-−10 point shift. Difficulty also scales per-command XP (tutorial ×0.7, normal ×1.0,
-hardcore ×1.5), but **mission-reward credits and XP are mode-invariant**.
+Flat term on the rate: **tutorial +20%, normal 0, hardcore −10%** — that's the WHOLE
+effect (hardcore is a −10pt shift, not a "30% mode"). Also scales per-command XP
+(tutorial ×0.7, normal ×1.0, hardcore ×1.5); **mission credits/XP are mode-invariant**.
 
 ### 4.5 Levelling
 `player_level = floor(total_xp / 1000) + 1` — flat and linear, no curve. Level
 raises the `base` term in §4.1 by 10% per level.
 
 ### 4.5b Info commands pay XP once per target — repeats pay nothing
-`scan`, `connect`, `whois`, `analyze`, `cat`, `traceroute`, `talk` and
-`difficulty` grant their XP (and skill points) only the FIRST time per target
-(per file for `cat`, per server for `analyze`/`connect`, per mode for
-`difficulty`). Repeating one of these is a wasted step, not a strategy: the
-command still succeeds and its output is unchanged, but nothing is earned.
-Sustained XP comes from missions and the risk-bearing hack verbs (§4.1).
+`scan`/`connect`/`whois`/`analyze`/`cat`/`traceroute`/`talk`/`difficulty` pay XP+skill
+points only the FIRST time per target (per file for `cat`, per server for
+`analyze`/`connect`, per mode for `difficulty`) — repeats succeed but earn nothing.
+Sustained XP comes from missions + the risk-bearing hack verbs (§4.1).
 
 ### 4.6 What a failed roll costs you
-Nothing is deducted on a failure — no credits, no cooldown, no trace or detection
-counter, and the attempt can be repeated immediately. Successes grant XP; failures
-grant none. Take that into account when deciding between retrying a low-percentage
-roll and going to improve your odds first.
+Failures cost nothing — no credits, cooldown, or detection counter, and can retry
+immediately (successes grant XP, failures grant none). Weigh that when choosing between
+retrying a low-percentage roll and improving your odds first.
 
 ## 5. Balance observations worth flagging (`potential_bug`)
 Report these as observations if you meet them — with the evidence you saw:

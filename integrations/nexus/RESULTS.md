@@ -1071,4 +1071,376 @@ red; working tree restored byte-identical).
    `tutorial_awakening` — earlier "pending/missed" readings for it were the game's fault, not
    the pilot's.
 3. XP-curve findings from the batch now measure the intended faucets (missions + risk verbs),
+
+## L-024: first Anthropic smoke comparison — gemma4:26b vs Claude Haiku 4.5, 40 actions each (2026-07-22/23)
+
+Single-run (n=1) smoke comparison on the post-`e981df1` build, not yet a statistically powered
+balance batch. Server PID-verified stale before the run (the previous `next dev` predated 12
+files changed by the L-023 merge — restarted clean on `main@164812e`, spike 8/8 re-confirmed).
+
+Both hit `PLAYTEST MET`, 0 invariant violations, same 2/3 (67%) content-engagement rate, both left
+`following_the_money` unresolved. Haiku ran ~3.4x faster (5.5s/action vs 18.6s/action) and showed
+materially better stall recovery: gemma4 ran 8 identical `ls` calls in a row on an already-looted
+server with no recovery (not auto-flagged — `ls` is a declared `display_only_verb`, exempt from
+the material-delta contradiction detector by design); Haiku hit an analogous 3x `progress` no-op
+streak, got auto-flagged by the existing contradiction detector, and **self-corrected** — its next
+`novel_behaviors` entry explicitly reasons from the warning, re-reads mission state, and pivots to
+using already-discovered VPN credentials. One Haiku step (32) returned a blank `reasoning`/
+`expected` tool call (single malformed turn, self-recovered from within 2 steps, no lasting harm).
+
+Process note for future sessions: the report JSON's field is `expected`, not `expected_outcome`
+(the LLM_ACTION_SCHEMA property name) — querying the wrong key silently returns `None`/empty for
+every row and reads as "the model never explains its predictions," which is false. Verify field
+names against an actual report before drawing a conclusion from "missing" data.
+
+## L-025: repeat-preventer added, then STRESS-TESTED to failure at 300 actions — found a real
+game parser bug that seven previous playtest rounds never would have surfaced (2026-07-23)
+
+**The ask:** the 40-action runs above showed `ls` could run 8x unbroken with zero framework
+signal, since `display_only_verbs` exempts recon commands from the material-delta contradiction
+detector entirely (by design — re-`ls`ing at a NEW location is correct play and must not be
+penalized). The gap: that exemption also silences the ONE case that's never legitimate — the
+exact same command picked back-to-back with nothing in between, which by construction shows
+identical terminal output every time regardless of whether the verb is display-only.
+
+**UGT-side fix (`ugt/core/playtester.py`, game-agnostic):** a new immediate-adjacency guard,
+independent of `display_only_verbs` and of material delta — it only asks "was this the literal
+previous step's action". Tracked via `_consecutive_repeat`/`repeat_streak` (mirrors the existing
+`noop_streaks` plumbing) and surfaced through a merged `_noop_warning_block` so both signals share
+one `## Warnings` section. New `summary.back_to_back_repeat_steps` metric for visibility (not a
+bug count — repetition itself isn't a defect). Deliberately a soft nudge (warn, don't veto),
+consistent with the rest of the framework's "report, don't instruct" philosophy (`LESSONS.md` /
+`_action_ledger_block`'s own stated design principle).
+
+**Validated on two gemma4 re-runs at 40 actions:** the warning fired, and the max consecutive-
+identical-action streak dropped from 8 (pre-fix) to 3 (post-fix) — real improvement, not perfect
+compliance (gemma4 still slipped one extra repeat past the warning a couple of times before
+diversifying).
+
+**Then it was asked to do a full-scenario run (300 actions, one order of magnitude past the
+smoke-test budget) and the soft nudge collapsed completely: `back_to_back_repeat_steps: 250/300`
+(83%).** The tail was one unbroken 139-step streak of the literal string
+`ls -la /home/jmiller/Documents`, plus two earlier streaks of 46 and 29 — gemma4's own reasoning
+explicitly said "I have been stuck in a loop... need to try something else" on nearly every one of
+those 139 steps, and picked the identical action anyway. A warning appended to an already-long
+context stopped being a sufficient signal at this length — a real, useful data point for anyone
+tuning this framework's stall-detection budget expectations, independent of the game bug below.
+
+### NX-L26-1 (GAME, fix in progress) · `ls`/`cat`/`cd` silently swallow a leading flag argument
+
+Reproduced directly against the live server (raw HTTP, same seed/baseline the adapter uses,
+bypassing the LLM entirely) to separate "model got confused" from "game gave a broken answer."
+Root cause, `apps/game/src/lib/commands/executors.ts` `baseLs`:
+```ts
+const targetPath = args[0] ?? context.currentPath ?? "/";
+```
+Zero flag parsing. `ls -la /home/jmiller/Documents` tokenizes (`handler.ts::parseCommand`,
+`split(/\s+/)`) to `["-la", "/home/jmiller/Documents"]`; `args[0]` is `"-la"`, which SILENTLY
+becomes the path, and the real path is discarded. Confirmed live: the server returned
+`Listing: -la` with zero files and **no error** — indistinguishable from a legitimately empty
+directory. This is why no amount of prompting could have broken the loop: the pilot kept
+adjusting its REASONING (check parent dir, check hidden files, re-verify) while the tool's output
+never varied, because it was quietly evaluating a nonsense path (`"-la"`) every single time
+regardless of what real path was typed. `cat` (`filePath = args[0]`) and `cd` (`targetPath =
+args[0]`) share the identical pattern — any player, human or LLM, who ever types the single most
+common `ls` flag in existence with a path argument hits this, permanently, with zero error signal.
+
+This is the wire-only/dual-validation thesis again, at a new depth: not "the wire hides a field
+the in-process client doesn't route around" (the usual shape here), but "no amount of unit-test
+green or in-repo dogfooding surfaces a bug that only a real player's natural Unix habits trigger" —
+worth promoting to `LESSONS.md` §B as its own pattern once the fix lands: **a sufficiently long
+LLM playtest run is itself a fuzzer for real-world argument conventions the game's own test suite
+never tried.** Fix + audit of the rest of the command set + pinning tests dispatched to the game
+repo via subagent (isolation: worktree, to avoid disturbing the live PID-verified dev server this
+session's runs depend on); a parallel read-only agent is auditing why existing CI/test coverage
+didn't already catch this class of bug. Both in progress as of this entry — update on completion,
+including the game repo's own "Known Issues & Resolutions" note once merged.
    which was the point of fixing this first.
+
+## L-026: NX-L26-1 CLOSED (`0d99b21`) + repeat-block hardened from soft warning to a
+deterministic code override; a 300-action re-run shows the best story progress yet, plus one
+harness metric bug found and fixed (2026-07-23)
+
+### NX-L26-1 CLOSED
+Subagent-built fix from L-025 (shared `stripLeadingFlags()`, `ls`/`cat` base AND narrative-layer
+copies, `cd`/`download`/`upload`/`crack`/`backdoor`) reviewed, independently re-verified (1364/1364
+unit tests re-run live, 0 lint/typecheck errors), committed, and fast-forward merged to NEXUS
+`main` (`0d99b21`). A follow-up pass (same worktree, second subagent trip) closed the CI audit's
+own recommendation: one real-executor behavioral test per previously-metadata-only command
+(`escalate`, `analyze`, `inventory`, `accept`, `progress`, `help`, `tutorial`), plus an explicit
+"open question, not fixed" test recording that `connect`/`scan` fail LOUD on a stray leading flag
+today (`"No server at -p"`) rather than silently — safe by the nature of IP-address arguments,
+which can never collide with a dash-prefixed token the way a file path can. Final count: 1364/1364.
+
+### UGT-side: the soft repeat warning was upgraded to a HARD, deterministic block
+Requested directly by the user after seeing the L-025 300-action stall: a text warning is
+advisory, and a weak/local model can simply not follow it — proven by that same run repeating
+`ls -la /home/jmiller/Documents` 250/300 times with the warning firing and growing every step.
+`ugt/core/playtester.py` (game-agnostic, all three prompt-builder paths):
+- **Hard block**: once a proposed action would be identical to the previous N in a row
+  (`playtest.repeat_block_threshold`, default 3 — two repeats tolerated, a third is not), the
+  framework overrides it to `action_type="wait"` in code BEFORE it reaches the adapter, rather
+  than re-asking the LLM. `wait` is the universal fallback: already a no-op in every action_mode,
+  so no game-specific command text is ever fabricated. Fully auditable per-step
+  (`log_entry["forced_by_repeat_block"]` records exactly what was rejected) and in the run
+  summary (`forced_repeat_blocks`).
+- **"## Open Quest Lines" prompt block** (`playtest.quest_state_path` / `quest_commands`): renders
+  an always-fresh structured mission summary (id/status/objective counts, straight from
+  `current_state`) plus the latest `progress`/`missions` terminal output, recalled GLOBALLY by
+  verb rather than scoped by `currentServerId` the way recon recall is — a mission is player-global
+  state, and location-scoping it would fragment the same answer into stale duplicates depending on
+  where the pilot happened to be standing when it last checked.
+- **State-block compaction, not truncation** (`playtest.state_char_budget`, default 4000): the
+  "Current State" JSON was the one prompt section with no size guard at all. Large lists are now
+  shrunk (first few items + a "+N more" marker) at increasing aggressiveness until the budget is
+  met, keeping the JSON valid throughout — a blind text truncation on serialized JSON would produce
+  invalid output and sacrifice whatever field lands after the cut, regardless of importance.
+  NEXUS's own growth (2,175→3,106 chars over 300 actions) never approached the 4,000 budget in
+  practice; the guard exists for when it does, for this game or another.
+
+### Validated in three live re-runs (server PID-verified on the merged build each time)
+1. **40 actions**: clean, `forced_repeat_blocks: 0` (streak never reached 3) — confirms no
+   regression to normal play.
+2. **40 actions, second pass**: the block fired for real (step 22, `ls` blocked at its 3rd
+   consecutive pick) — and the run went noticeably FARTHER than any prior 40-action attempt
+   (VPN credentials, a Meridian-internal subnet reached) in the same budget, direct evidence that
+   breaking one early loop freed up the rest of the run.
+3. **300 actions — the best result to date.** `following_the_money` reached **3/4 objectives**
+   (every prior run, pre- and post-parser-fix, stalled at 0/4). Level 5→7 (was 5→6 at best), XP
+   4000→6385, 5 servers compromised (was 2-3), and two further story missions (`dead_drop`,
+   `into_the_syndicate`) newly appeared in `offeredMissions`. Content-reveal metric: 6 items
+   revealed (was 3 every prior run).
+   - **But the block fired 62/300 times (20.7%)**, and the tail (steps ~276-300, with forced-waits
+     recurring roughly every 3 steps from step 88 onward) shows an **oscillating** failure mode the
+     hard ceiling does not fully solve: the model tries the same dead command twice, gets blocked
+     and forced to `wait` on the 3rd (which resets the adjacency counter), then goes right back to
+     trying the SAME blocked command again. The ceiling bounds the damage per cycle (never more
+     than 2 wasted real attempts before a forced wait) but does not stop the model from returning to
+     a proven-dead target across many short cycles — that would need memory of *what has already
+     been blocked*, not just *what was picked last*, a bigger change than what was asked for this
+     session.
+   - **Zero progress on either newly-revealed mission.** `dead_drop` appeared at step 35,
+     `into_the_syndicate` at step 69 — both sat available for the rest of the run (265 and 231
+     steps respectively) and were never accepted. Nor were the two side quests offered from the
+     very start (`undercity_intro`, `carnival_chaos`) ever touched. The pilot tunnel-visioned on
+     finishing `following_the_money`'s last objective (the `/Users/jmiller/shared/reports` loop)
+     rather than branching to newly-available content — itself a real, if unsurprising, balance/
+     pilot-behavior data point distinct from the harness mechanics above.
+   - 5 benign contradiction-detector auto-flags (re-`scan`/re-`progress`/re-`connect`/re-`cat` with
+     no new effect) — expected behavior, not new game defects.
+
+### Harness bug found and fixed mid-session: `unexpected_delta_steps` metric artifact
+The 300-action run's raw summary showed `unexpected_delta_steps: 238` — i.e. 238/238 real
+`type_text` actions "surprising," which would be an alarming regression if real. Root cause: the
+metric's "ubiquitous field" noise filter (excludes fields like `rngCounter` that change on nearly
+every action, since a truly universal delta carries no signal) computes its 80% frequency
+threshold over ALL real actions **including the 62 forced-`wait` steps** — which, being pure
+no-ops, contribute zero to every key's frequency count while still inflating the denominator. That
+pushed `rngCounter`'s ratio to 238/300 (just under 0.8), so it stopped being filtered and every
+action with the routine rngCounter tick got flagged. Fixed by excluding `action_type=="wait"` steps
+from that calculation's denominator; verified against this run's actual data before (238) and after
+(36, a plausible 15%) the fix. This bug is generic to the framework (any game, any provider) and
+would have under-reported confidence in every future run with meaningful forced-wait volume, not
+NEXUS-specific.
+
+### Confirms (independent of this session, live-verified): NEXUS has side content beyond the main
+spine. `missionType` is a first-party field in the game's own data (seen directly in
+`offeredMissions`/`baseline_state` this run): `"tutorial"` (1), `"story"` (main spine — confirmed
+here: `the_breadcrumb`, `following_the_money`, `dead_drop`, `into_the_syndicate`), and `"side"`
+(confirmed here: `undercity_intro` "Market Rate", `carnival_chaos` "The Punchline") — matching the
+UGT research pass's earlier count of 14 total missions (1 tutorial + 8 main story + 5 side).
+
+## L-027: strategy-guide §2b added — side quests are economically real, not flavor; pilot
+now touches them (2026-07-23)
+
+L-026's 300-action run showed zero engagement with either side quest available since the start
+(`undercity_intro`, `carnival_chaos`) or either newly-revealed story mission — the pilot
+tunnel-visioned on the main spine by default. Per the user: some players are completionists, some
+are goal-rushers, but the pilot should at least SAMPLE side content rather than structurally never
+touching it, and this should be a strategy-guide change (prose), not a code change.
+
+Pulled the real numbers from the game's own `data/missions/side-missions.json` rather than writing
+generic "try side quests" filler (LESSONS.md P6 discipline): all 5 side missions pay 300-1,500 xp /
+2,000-8,000 credits, and `ghost_protocol_test` also unlocks the `traceroute` command. For
+comparison, `the_breadcrumb` — the FIRST main-story mission — pays only 250xp/1,000cr, i.e. LESS
+than every side mission. New guide §2b states this table plus one concrete rule: *the first time a
+side quest is offered, accept and complete it before returning to what you were doing (finish an
+in-progress hack chain first if mid-chain)* — a floor, not a ceiling.
+
+Deliberately NOT implemented as literal randomness (the user offered it as an option): an LLM
+"rolling a die" in prose is unverifiable and adds noise for no reliability gain, and this session's
+own L-026/P11 finding was that a concrete, checkable trigger works better than a soft nudge for a
+weak model. `guide_char_budget` raised 12000→15000 to fit (new guide is 13.5k chars).
+
+**Smoke-tested (gemma4:26b, 40 actions) — worked on the first try.** Step 10: `accept
+undercity_intro`, reasoning quotes the guide almost verbatim: *"The 'Market Rate' side mission is
+available and offers a high reward (5,000 credits) which can be used to upgrade my toolkit.
+Following the strategy guide, I should accept side missions when they appear."* Clean run
+otherwise: 0 bugs, 0 invariant violations, hard block fired twice (still working), reached
+`meridian-internal-07` / `project-m-secure` by step 40 — consistent with the deeper-story-progress
+trend from L-026's fixes. Expected trade-off, not a regression: pursuing the side quest used part
+of the 40-action budget, so `following_the_money` wasn't reached this run — the same real economic
+tension a human completionist vs. speedrunner faces, now visible in the pilot too.
+
+## L-028: first long-form Anthropic run (Haiku 4.5, 600-action budget) — deepest run yet,
+no win, and a NEW stall shape the adjacency-only repeat guard doesn't cover (2026-07-23)
+
+Same fixed build as L-026/L-027 (parser fix, hard repeat block, quest block, state compaction,
+§2b side-quest rule). 4,218.8s (~70 min) for 599 real actions (one loop iteration produced no
+log entry — see episode reset below).
+
+**By far the deepest reach of any run to date.** `missions_completed: 4` (vs 1 in every gemma4
+run); final state shows `the_breadcrumb` and `dead_drop` COMPLETED, `following_the_money` (2/4),
+`into_the_syndicate` (3/4) and `the_other` (0/2) all ACTIVE — i.e. the pilot touched 7 of the 9
+main-spine missions (only `the_architect`/`point_of_no_return`, the last two, were never reached).
+20 servers compromised (vs 2-5 before), level 5→9, xp 4000→8230. `gameStatus.completedStoryMissions:
+2/8`, `isComplete: false` — no win. Content-reveal metric: **17 required items revealed (vs 6 max
+previously), 15/17 (88.2%) engaged** — both the widest exploration and the highest follow-through
+rate of any run so far.
+
+**§2b (side quests) validated again, more strongly than the gemma4 smoke test:** `carnival_chaos`,
+`undercity_intro`, and `ghost_protocol_test` all show `status: "active"` in final state — 3 of 5
+side quests accepted unprompted, on top of the main-story push.
+
+**`forced_repeat_blocks: 0` — the hard block never fired.** Haiku's failure mode is categorically
+different from gemma4's: instead of one command repeated identically many times in a row, it
+spread its stalling across MANY different targets, each tried only 1-3 times before switching —
+`progress` alone was reportedly re-run 30-48 times over the course of the run (per the pilot's own
+later self-flags), interleaved with dozens of different `connect`/`cat`/`accept`/`talk` attempts
+against story-gated or already-resolved targets, none of which ever hit 3 consecutive identical
+picks. This is a genuine gap in the current guard: it catches immediate-adjacency loops, not
+diffuse, broad unproductive exploration — a stronger/more varied model can still burn a large
+fraction of a long run without ever tripping it.
+
+**One episode reset, self-triggered, real cost.** At step 311 (the ONE loop iteration with no
+action_log entry — `action_type="diagnose"` skips logging by design) the pilot correctly
+recognized its own stuck state — *"I am in a severe loop state where the last 35+ attempts to call
+'progress' produced zero material change, and 45+ other commands are similarly stuck"* — and
+called `diagnose`, which resets the episode. This is GOOD self-awareness (arguably better than
+gemma4 ever showed — it noticed and asked for a reset rather than continuing to flail), but it
+wiped ~310 steps of progress; everything in the final state above was rebuilt in the remaining
+~288 real actions post-reset, which is itself a strong signal of how much Haiku can accomplish
+once it isn't stuck.
+
+**69 potential_bugs flagged — spot-checked, none are new game defects.** 44 contradiction_detector
+(mechanical, repeated no-op targets — likely story-gated content per guide §3, not confirmed
+individually at this volume), 24 llm_flag (all self-reflective "I notice I'm repeating a failed
+command, let me reconsider" — good behavior, not defect reports), 1 agent_confusion (the diagnose
+event above). Worth a closer pass if a future session wants to confirm none of the 44 mechanical
+flags hide a real story-gate bug, but the sampled ones read as expected refusals.
+
+**Open follow-up, not actioned this session:** the adjacency-only hard block doesn't address this
+run's actual dominant failure mode (diffuse repetition across many different futile targets). A
+broader guard would need to track total futile attempts PER TARGET across the whole run (not just
+consecutive), which is a bigger change than today's scope — flagged for a future decision, not
+implemented here.
+
+## L-029: real-browser Playwright UI-wiring audit (not LLM-driven) — a genuine game-crashing bug
+found, 32 pre-existing E2E failures triaged and documented (2026-07-23)
+
+Separate from the HTTP-based LLM playtest tier above: the user wanted confidence that every user-facing
+NEXUS UI element (not just terminal commands) is actually accessible and wired, having never played this
+build. Deliberately built as **deterministic Playwright coverage, not an LLM-driven pass** — this is a
+coverage/wiring question ("is X clickable and does it do something"), not a judgment question, and this
+session's own repeat-block work (L-026) already showed determinism beats LLM discretion for hard
+guarantees. Dispatched to a subagent working directly in the nexus-world-builder repo (worktree isolation
+did NOT engage — it's scoped to the repo a session is hosted in, not an arbitrary other repo a subagent
+`cd`s into; worth remembering for future cross-repo dispatches. Nothing was committed by the subagent —
+verified via `git log`/`git status` before proceeding).
+
+**Pre-existing gap found first**: the existing 878-line `ui-components.spec.ts` "comprehensive" suite had
+exactly one test touching a settings-style menu, and it was vacuous — checked `button count() > 0`, logged
+to console, never called `expect()`. Reading the actual components (`Header.tsx`, `Sidebar.tsx`) confirmed
+why: the Notifications and Settings header buttons are both explicitly commented `(future)` with no
+`onClick` at all, and there are only 4 real navigable panels (Terminal/World Map/Missions/Profile) — no
+save/load or difficulty menu exists anywhere; those are terminal-only commands.
+
+**Real, asserting coverage added** (`apps/game/tests/e2e/ui-wiring.spec.ts`): all 4 panels with real
+content assertions, sidebar collapse/expand, both inert header buttons asserted as *intentionally* inert
+(so a future accidental change — wired-up or further broken — shows as a red test, not silence), and
+`save`/`load`/`difficulty`/`help` driven through the actual rendered terminal DOM (not the HTTP test
+routes this integration otherwise uses). All new tests passed in the full suite run.
+
+**A real, serious bug found and fixed**: `useWorldSync.ts` crashed the ENTIRE game client
+("Game Loading Error", `s.toLowerCase is not a function`) on first load for every player —
+`server.services`/`vulnerabilities` are typed-object arrays, not `string[]`, and `STARTER_SERVERS` are
+always "discovered" so this fired unconditionally. Confirmed real via revert-and-rerun (crash reproduces
+pre-fix, gone post-fix). Fixed with defensive extraction helpers, pinned by the new World Map test.
+
+**Full E2E suite run for the first time in a while: 47/79 passing.** All 32 failures independently
+verified as pre-existing and unrelated to this session (git-log timestamps on committed failure artifacts
+dating to `64ec10d`, 2026-04-06 — 3.5 months before this session — plus stash/revert/rerun A/B proofs for
+several clusters). Root causes: 26 across 3 spec files wait on DOM selectors (`.game-terminal-container`,
+`window.__TERMINAL_STORE__`) that don't exist anywhere in current source (written against an old terminal
+implementation); 1 asserts unconditional `scan` output that's actually story-gated; 1 test-timeout gap;
+3 copy-mismatch bugs in the tests' own assertions; 1 genuine unbuilt mobile-responsive-Sidebar gap. None
+fixed (separate, substantial work, explicitly out of today's scope) — **documented in the game repo
+itself**: `nexus-world-builder/README.md` § "Known E2E Test Debt" (full cluster table) and
+`nexus-world-builder/TODO.md` (checklist item updated with the same summary + pointer to README).
+
+Committed to nexus-world-builder `main` at `e07b41b` (fix + new tests + placeholder-test cleanup + both
+doc updates, one commit). Unit 1364/1364, typecheck clean.
+
+## L-030: the 32 E2E failures FIXED — full suite 79/79 green, every test drives real operations; a real
+Act-1 progression finding surfaced (2026-07-24)
+
+Follow-up to L-029, which triaged 32 pre-existing E2E failures and documented them in the game repo rather
+than fixing them. This session **fixed all 32** and made the full chromium E2E suite **79/79 green**, with
+the hard constraint (from the user) that passing must validate *real working operations* — no hollow passes.
+
+**What the 32 actually were, and how each was fixed for real (not to green):**
+- **Cluster A (26 tests, 3 spec files)** — `act1-story-playthrough`, `tutorial-onboarding`,
+  `terminal-ui-playthrough` were written against a **retired xterm.js terminal** (`.game-terminal-container`,
+  `.status-ready`, `window.__TERMINAL_STORE__` — none exist in current source) and were riddled with vacuous
+  asserts (`expect(x || true)`, `console.log` instead of `expect`, 70%-aggregate pass bars). Rewrote all
+  three against the **current React terminal DOM** through a new shared harness
+  `tests/e2e/helpers/terminal-ui.ts` (real registration+login, type into `input[aria-label="Terminal input"]`,
+  read `[role="log"]` `[data-line-type]` lines, scope each command's output to the lines IT appended). Every
+  assertion is now an exact source string (`"=== AVAILABLE COMMANDS ==="`, `"Command 'scan' blocked."`,
+  `"Connected to <hostname>"`, real story-file content).
+- **Cluster B** (`closed-alpha-smoke`) — asserted `scan` succeeds immediately; `scan` is legitimately
+  tutorial-locked. Now asserts the real lock message, then the real unlock path, then scan/connect/save/load.
+- **Cluster C** (`narrative-playthrough`) — no `test.setTimeout` for 100+ round-trips AND it connected to
+  story-gated servers blind. Rewritten as a **flag-respecting Act-1 read-path playthrough** (~85 real
+  commands, milestone-asserted, `EXPECTED_FAILURES`-precise instead of a fuzzy rate).
+- **Cluster D** (`new-player-journey`) — copy-mismatch asserts + the old `🔒` lock shape. Aligned to the
+  real NX-L16-1 access-denied shape and current copy.
+- **Cluster E** (`ui-components` "UI adapts to mobile viewport") — a **real unbuilt feature**. Built actual
+  mobile behavior in `Sidebar.tsx` (auto-collapse to the 64px rail under a 767px `matchMedia` breakpoint;
+  expanded = overlay drawer that doesn't crush the panel; picking a panel closes it) and made the test
+  assert it — without disturbing the desktop `ui-wiring` width assertions.
+
+**Infra correctness fixes (so the tests exercise the REAL game, per this repo's core discipline):**
+- The E2E DB seeded two throwaway `test-server-*` rows; the whole Act 1 story world was never seeded.
+  Extracted `src/lib/narrative/story-seed.ts` (shared by `prisma/seed-story.ts`) and made
+  `tests/helpers/db-helpers.ts` seed the **real `STORY_SERVERS` + story missions** — run as a *subprocess*
+  because the mission loader's static JSON import is rejected by Playwright's own ESM loader (works under
+  tsx/webpack), keeping the strict loader and real content both happy.
+- `NEXUS_ALLOW_TEST_AUTH=1` set for the E2E server so the API-key-authenticated `/api/test/*` bridge can
+  exercise the session-less save/load/clear game-state actions (the documented out-of-band-auth opt-in).
+
+**Two real game bugs found + fixed in passing** (pinned by the new tests):
+1. The terminal never handled the `clear` command — its executor returns the ANSI clear code `\x1Bc`, which
+   this non-xterm React terminal appended as a junk line instead of clearing. `TerminalInterface.tsx` now
+   maps it to the store clear (same as Ctrl+L).
+2. save/load were unreachable over the test bridge (session-less) until the `NEXUS_ALLOW_TEST_AUTH` opt-in
+   above — previously any bridge-driven save/load silently failed.
+
+**NX-L30-1 — real Act-1 progression finding (filed to the game, NOT fixed here):** `tutorial skip` prints
+"All commands have been unlocked" and lists `exploit`, but the skip executor only persists story *flags* —
+it never writes the player's `unlockedCommands` column. So `exploit`/`crack`/`backdoor`/`escalate` (registry
+unlock = `level 2 + tutorial_complete`, or level 4) stay **locked** for a level-1 tutorial-skipped player,
+directly contradicting the message. And since `hack_server` mission objectives require exactly those
+level-2 verbs while a level-1 player's XP comes largely from those hack missions, a fresh player can read
+the entire Act-1 story spine (home → neighbor → Meridian gateway/fileserver → dead drop, all gated by
+file-read flags) but appears **unable to compromise any server or reach PROJECT M / the Syndicate**. This is
+a design decision for the game owner (make `skip` persist `unlockedCommands`; lower the verb gates; or add a
+non-hack level-1 XP path) — the rewritten `act1-story-playthrough` + `narrative-playthrough` **pin this
+current reality** so whichever fix lands flips a visible, intentional assertion. Documented in the game repo:
+`nexus-world-builder/README.md` §"E2E Test Debt" + `TODO.md` P1.
+
+Game suite after: **unit 1364/1364, typecheck clean, E2E 79/79 (chromium)**. Files touched (nexus-world-builder):
+`Sidebar.tsx`, `TerminalInterface.tsx`, `narrative/story-seed.ts` (new), `prisma/seed-story.ts` (thinned to a
+runner), `tests/helpers/db-helpers.ts`, `tests/e2e/start-server-with-db.ts`, `playwright.config.ts`,
+`tests/e2e/helpers/terminal-ui.ts` (new) + the 6 rewritten specs + `ui-components`/`ui-wiring` touch-ups,
+`README.md`, `TODO.md`.

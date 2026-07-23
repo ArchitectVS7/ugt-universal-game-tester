@@ -221,6 +221,30 @@ swapped and pooled (DDD pooled a deck×seat design because turn order confounded
 with a confidence interval, and compared against the game's own authoritative gate if it has one.
 *Source: DDD L-008 (confounded), L-010 (pooled seat-swap).*
 
+### P11 · A prompt-level warning is advice, not a guarantee — a hard loop ceiling needs code, not prose
+A text warning that grows more insistent every step ("you've done this 8 times now") still relies on the
+model choosing to comply. It does not. A live gemma4:26b run repeated one command 163 times in a row while
+its own reasoning said "I'm stuck in a loop" on nearly every one of those steps — the warning was working
+exactly as designed and changed nothing. Only a deterministic, code-enforced override (reject the Nth
+consecutive identical action, substitute a fixed fallback, never re-ask the same model) actually bounds the
+behavior. Even then, expect a *different* failure shape, not zero failures: an oscillating "try twice, get
+blocked, immediately try the same dead target again" pattern is a real residual, since the ceiling only
+remembers the immediately-previous action, not everything it has already blocked this run. A stronger
+guarantee (memory of *every* target already blocked, not just the last one) is a bigger change than a soft
+warning → hard ceiling upgrade, and worth treating as a separate, deliberate decision.
+
+**Corollary — any "noise floor" metric must exclude synthetic no-op steps from its own denominator.** A
+hard ceiling that substitutes a genuine no-op action (e.g. `wait`) for a rejected one will, by construction,
+contribute an empty state-delta on every override. A frequency-based filter (e.g. "ignore delta keys that
+change on ≥80% of actions, they carry no signal") computed over ALL actions including those synthetic
+no-ops will have its threshold silently dragged down as override volume rises — a field that was reliably
+~100%-ubiquitous can cross under the cutoff purely from the added no-op steps, and every real action
+downstream starts reading as spuriously "surprising." Found on NEXUS (2026-07-23): 62 forced-`wait` steps in
+a 300-action run pushed `rngCounter`'s ratio to just under 80%, flipping `unexpected_delta_steps` from a
+routine single-digit reading to 238/238. Fix: compute the frequency/threshold over only the steps that could
+have produced a real delta, not over every step the loop consumed.
+*Source: NEXUS L-026.*
+
 ---
 
 ## C. Operational discipline

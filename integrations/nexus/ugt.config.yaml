@@ -122,8 +122,45 @@ playtest:
   #     right at the old ceiling with the FIRST-listed vulns the ones at risk. Since
   #     `exploit <vuln>` requires an exact type-string match, a truncated `analyze` is
   #     unplayable-by-design. Core now prints a [WARN] whenever either budget bites.
-  guide_char_budget: 12000
+  # guide 12000 -> 15000 (2026-07-23): added §2b (side-quest economics + a decision
+  # rule, real reward numbers from data/missions/side-missions.json) after a live run
+  # showed the pilot never touched 2 newly-offered story missions OR either side quest
+  # available since the start.
+  # guide 15000 -> 17000 (2026-07-23, same day): added §2c (use `hint`/`clues` before
+  # blind-guessing when stuck) after a 600-action Haiku run spent ~60 turns guessing
+  # file paths instead of using the game's own built-in unstick commands. Guide is now
+  # 14.7k chars; 15000 left only ~270 chars of headroom, so raised further this time.
+  # Compaction pass (2026-07-23, same day): §4's prose sub-sections and the state-field
+  # walkthrough rewritten as tighter bullets, same facts — guide dropped 14.7k -> 13.4k
+  # chars (~9%). Budget left at 17000 (not lowered) — real headroom for the next
+  # addition, not a hard ceiling to shave every time.
+  guide_char_budget: 17000
   terminal_char_budget: 2400
+  # The "Current State" JSON block had NO budget at all until 2026-07-23 — every other
+  # section is protected by a budget above. Unlike terminal/guide text, this is COMPACTED
+  # (large lists shrunk to a few items + a "+N more" marker) rather than truncated, since a
+  # blind text cut on JSON produces invalid output and drops whatever field lands after the
+  # cut regardless of importance. Measured baseline->300-action-final growth was a modest
+  # 2175->3106 chars (NEXUS's world is finite: ~27 servers, 14 missions total), so 4000
+  # is comfortable headroom, not a tight ceiling.
+  state_char_budget: 4000
+
+  # Deterministic ceiling on back-to-back identical actions (2026-07-23) — the soft
+  # repeat_streak warning below is advisory only, and a weak/local model can and does
+  # ignore it indefinitely: a live gemma4:26b run repeated one command 163 times in a row,
+  # restating "I'm stuck in a loop" almost every time while picking it anyway. Once a
+  # proposed action would be identical to the previous N in a row (default 3, i.e. two
+  # repeats tolerated), the framework overrides it to `wait` in CODE rather than asking
+  # the LLM again — see ugt/core/playtester.py's hard-block comment for the full rationale.
+  # repeat_block_threshold: 3   # (this is the framework default; uncomment to override)
+
+  # A `diagnose` call resets the WHOLE episode by default (framework-wide) — the right
+  # call for a cheap-to-restart episode, the wrong one for NEXUS's persistent, DB-backed
+  # campaign. Found 2026-07-23: a single (correct, well-reasoned) `diagnose` from Haiku
+  # erased ~310 turns of real progress. NEXUS documents its own "no loss state" design
+  # (see the ignore_delta_fields comment above); a pilot's confusion about what to do
+  # next should cost it a turn, not the whole campaign.
+  diagnose_resets_episode: false
 
   # ── Agent memory (LESSONS.md P10) ────────────────────────────────────────────
   # The 2026-07-22 sanity run cycled scan->connect->ls->analyze->exploit->escalate
@@ -258,6 +295,19 @@ playtest:
   # when the rolling buffer moves on. Retaining the latest output per (action, server) is
   # what lets the agent still know at step 30 what it learned at step 4.
   terminal_recall_budget: 3000
+  # "## Open Quest Lines" (2026-07-23) — makes active-mission status visible EVERY turn,
+  # not just when the pilot happens to have recently typed `progress`/`missions`. Two
+  # halves: quest_state_path gives an always-fresh but terse structured summary (id/
+  # status/objective COUNTS — NEXUS's player-state never exposes objective TEXT);
+  # quest_commands names the verbs whose terminal output IS the objective-text detail view,
+  # recalled GLOBALLY (not per-server, unlike terminal_recall_budget above) since a mission
+  # is player state, not location state — calling `progress` at server A and later at
+  # server B must not fragment into two stale, duplicate copies of the same information.
+  quest_state_path: "missions"
+  quest_commands:
+    - "progress"
+    - "missions"
+
   key_state_paths:
     - { path: "level", label: "level" }
     - { path: "credits", label: "credits" }

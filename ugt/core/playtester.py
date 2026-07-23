@@ -310,6 +310,27 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
     # the fetched terminal_text IS the output of action N, so no extra adapter call.
     terminal_recall = {}
     _pending_recall = None  # (key, step) awaiting its output on the next iteration
+    # (verb) -> {text, step}: the LATEST output of a quest/mission-status command (e.g.
+    # 'progress'/'missions'), kept GLOBALLY — deliberately NOT scoped by context like
+    # terminal_recall above. A mission is player-global state, not location-scoped, so
+    # keying its recall by currentServerId (as terminal_recall does for recon commands)
+    # would fragment the same information into multiple stale, duplicate entries across
+    # whatever server the pilot happened to be on each time it checked. See _quest_block.
+    quest_recall = {}
+    _quest_commands = set((playtest_cfg or {}).get("quest_commands") or [])
+    # Immediate-adjacency guard: distinct from noop_streaks (material-delta-gated, and
+    # bypassed entirely for display_only_verbs so legitimate repeatable recon like NEXUS's
+    # `ls` never trips it). This tracks ONLY whether the literal previous step picked the
+    # SAME (action_type, value) as this one, regardless of delta or display-only status —
+    # "used often" (spaced out, or after other actions) is fine and untouched; "used
+    # back-to-back with nothing in between" is capped by TWO mechanisms below: a soft
+    # warning fed into the prompt (repeat_streak), then a HARD, deterministic block once
+    # `playtest.repeat_block_threshold` is reached — a text warning alone is advisory and
+    # a model can simply not follow it (live evidence: gemma4:26b repeated one command
+    # 163x in a row on NEXUS, restating "I'm stuck" almost every time regardless).
+    _last_seq_key = None
+    _consecutive_repeat = 0
+    repeat_streak = {}  # {noop_key: current back-to-back run length}, single active entry
     ended_early = None
     # Shared mutable context for stateful invariants (exploit-hunter semantics:
     # one ctx per episode — cleared whenever the game resets mid-run).
@@ -340,22 +361,30 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
             terminal_text = ""
             prompt = _build_legal_prompt(config, strategy_guide, current_state,
                                          legal_list, action_log, playtest_cfg,
-                                         noop_streaks=noop_streaks, ledger=action_ledger)
+                                         noop_streaks=noop_streaks, ledger=action_ledger,
+                                         repeat_streak=repeat_streak, quest_recall=quest_recall)
         else:
             terminal_text = adapter.get_terminal_text(terminal_budget)
             if _pending_recall and terminal_text:
                 _pk, _ps = _pending_recall
                 terminal_recall[_pk] = {"text": terminal_text, "step": _ps}
+                _pending_value = _pk[0] if isinstance(_pk, tuple) else _pk
+                _pending_verb = (_pending_value.split(None, 1)[0]
+                                 if isinstance(_pending_value, str) and _pending_value else None)
+                if _pending_verb in _quest_commands:
+                    quest_recall[_pending_verb] = {"text": terminal_text, "step": _ps}
             _pending_recall = None
             if action_mode == "text":
                 prompt = _build_terminal_prompt(config, strategy_guide, current_state,
                                                 terminal_text, action_log, playtest_cfg,
                                                 noop_streaks=noop_streaks, ledger=action_ledger,
-                                                recall=terminal_recall)
+                                                recall=terminal_recall, repeat_streak=repeat_streak,
+                                                quest_recall=quest_recall)
             else:
                 prompt = _build_prompt(config, strategy_guide, current_state, terminal_text, action_log,
                                        noop_streaks=noop_streaks, ledger=action_ledger,
-                                       recall=terminal_recall)
+                                       recall=terminal_recall, repeat_streak=repeat_streak,
+                                       quest_recall=quest_recall)
 
         try:
             llm_action = llm.choose_action(prompt)
@@ -370,6 +399,53 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         expected      = llm_action.get("expected_outcome", "")
         potential_bug = llm_action.get("potential_bug", "")
         is_novel      = bool(llm_action.get("is_novel", False))
+
+        # ── Hard repeat block: deterministic, not a prompt-level nudge ───────────────
+        # The `repeat_streak` warning below (fed into the NEXT prompt) is a soft
+        # signal — it asks the model to reconsider, it doesn't stop it. That's not
+        # enough for a weak/local model: a live NEXUS run had gemma4:26b repeat the
+        # literal same command, `ls /home/jmiller`, 163 times in a row, restating
+        # "I'm stuck in a loop" almost every time while picking it again anyway — a
+        # markdown warning is advisory, and an LLM can simply not follow it. This
+        # block makes back-to-back repetition past a hard ceiling IMPOSSIBLE, in code,
+        # rather than discouraged in prose: the model's choice is overridden, not
+        # just warned against. `wait` is the universal, game-agnostic override target
+        # — it is already a no-op in every action_mode (see the `elif action_type ==
+        # "wait": pass` branch below), so this never has to fabricate a plausible
+        # game-specific command. Tunable per game via `playtest.repeat_block_threshold`
+        # (default 3 — i.e. two consecutive identical picks are tolerated, a third is
+        # not). If the model's own proposal already IS `wait`, forcing `wait` again
+        # would be a no-op override, so that case is left alone rather than blocked.
+        _forced_original_action = None
+        _proposed_key = f"{action_type}:{value}"
+        _consecutive_repeat = _consecutive_repeat + 1 if _proposed_key == _last_seq_key else 1
+        _last_seq_key = _proposed_key
+        _repeat_block_threshold = int(playtest_cfg.get("repeat_block_threshold", 3))
+        if _consecutive_repeat >= _repeat_block_threshold and action_type != "wait":
+            _forced_original_action = {"action_type": action_type, "value": value}
+            print(f"  [BLOCKED] '{action_type}:{value}' would be the same action "
+                  f"{_consecutive_repeat}x in a row — hard-blocked at "
+                  f"repeat_block_threshold={_repeat_block_threshold}; forcing "
+                  f"action_type='wait' instead of asking the LLM again "
+                  f"(deterministic, not model-decided).")
+            reasoning = (f"[FORCED by repeat-block guard] the model's proposed "
+                         f"{action_type}:{value!r} was rejected — it would have been "
+                         f"the same action {_consecutive_repeat} times in a row.")
+            expected = ""
+            action_type = "wait"
+            value = ""
+            is_novel = False
+            # The executed action is now 'wait', not the rejected proposal — track
+            # THAT for the next step's adjacency check, not the rejected one.
+            _last_seq_key = f"{action_type}:{value}"
+            _consecutive_repeat = 1
+
+        # Feeds the NEXT prompt's '## Warnings' block (soft signal, one step ahead of
+        # the hard block above) — cleared and re-set each step so it only ever holds
+        # the single currently-active streak, never stale entries from an old one.
+        repeat_streak.clear()
+        if _consecutive_repeat >= 2:
+            repeat_streak[_last_seq_key] = _consecutive_repeat
 
         print(f"  [Step {step_num}] {action_type}({value!r}) — {reasoning[:60]}")
 
@@ -456,18 +532,36 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
                     actual=confusion_desc,
                     terminal_text=terminal_text,
                 ))
-                pre_reset = current_state
-                try:
-                    current_state = adapter.reset()
-                except Exception:
-                    pass
-                else:
-                    bank_deltas(pre_reset)
-                    baseline_state = json.loads(json.dumps(current_state, default=str))
-                    episode_resets += 1
-                    inv_ctx.clear()
-                    reveals.note_reset(current_state)
-                continue
+                # `playtest.diagnose_resets_episode` (default True, preserving prior
+                # behavior): unconditionally resetting the whole episode is the right
+                # call for a short/cheap-to-restart episode (a browser level, a sim
+                # match) — but the WRONG one for a long-running, persistent campaign
+                # where "I don't know what to do next" and "the game state is broken"
+                # are very different problems that got conflated into one response.
+                # Found 2026-07-23 on NEXUS: a single `diagnose` (correct, well-reasoned
+                # self-diagnosis of a stuck state) erased ~310 turns of real, valid
+                # campaign progress — a cost the model was never even told about (the
+                # LLM_ACTION_SCHEMA description just says "flag... confusing or
+                # broken", no mention of a reset). Games that document their own
+                # "no loss state" design (NEXUS, DDD, nexus-dominion) should set this
+                # False so pilot confusion costs a turn, not the whole run.
+                if bool(playtest_cfg.get("diagnose_resets_episode", True)):
+                    pre_reset = current_state
+                    try:
+                        current_state = adapter.reset()
+                    except Exception:
+                        pass
+                    else:
+                        bank_deltas(pre_reset)
+                        baseline_state = json.loads(json.dumps(current_state, default=str))
+                        episode_resets += 1
+                        inv_ctx.clear()
+                        reveals.note_reset(current_state)
+                    continue
+                # Else: fall through like `wait` — current_state is untouched, so the
+                # normal delta/logging/invariant pipeline below sees an empty delta and
+                # records a real, auditable step instead of vanishing from the log the
+                # way the reset path above deliberately does.
 
             elif action_type == "end_turn":
                 # If the game maps an end-turn action, "turn complete" means EXECUTE it;
@@ -548,6 +642,10 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         surprises = _unexpected_delta_fields(delta, f"{expected} {reasoning}")
         if surprises:
             log_entry["unexpected_deltas"] = surprises
+        if _consecutive_repeat >= 2:
+            log_entry["consecutive_repeat"] = _consecutive_repeat
+        if _forced_original_action:
+            log_entry["forced_by_repeat_block"] = _forced_original_action
         if is_novel:
             log_entry["is_novel"] = True
             novel_behaviors.append(log_entry)
@@ -661,15 +759,34 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
     # Surprise metric noise floor: a key that changes on nearly every step (harness step
     # counters, per-action fuel ticks) carries no signal — only count steps whose
     # surprises include a NON-ubiquitous key. Per-step raw records stay in the log.
+    #
+    # Denominator is delta-bearing actions only, NOT all of real_actions: a `wait` step
+    # (genuine or forced by the repeat-block guard) never touches the adapter, so its
+    # state_delta is always {} by construction — it can contribute to no key's frequency
+    # count but still inflates the denominator, artificially depressing every key's
+    # ubiquity ratio. Found 2026-07-23: a 300-action run with 62 forced-wait steps saw
+    # rngCounter's ratio fall to 238/300 (just under the 0.8 cutoff, purely from the
+    # wait steps diluting it), which flipped `unexpected_delta_steps` from its usual
+    # single digits to 238/238 — every real action "surprising" for a purely mechanical
+    # reason, not a genuine change in pilot behavior.
+    delta_bearing = [e for e in real_actions if e.get("action_type") != "wait"]
     key_freq = {}
-    for e in real_actions:
+    for e in delta_bearing:
         for k in (e.get("state_delta") or {}):
             key_freq[k] = key_freq.get(k, 0) + 1
-    ubiquitous = {k for k, n in key_freq.items() if n >= 0.8 * max(1, len(real_actions))}
+    ubiquitous = {k for k, n in key_freq.items() if n >= 0.8 * max(1, len(delta_bearing))}
     unexpected_delta_steps = sum(
-        1 for e in real_actions
+        1 for e in delta_bearing
         if any(k not in ubiquitous for k in (e.get("unexpected_deltas") or {}))
     )
+    # Visibility only, not a bug count: immediate back-to-back repeats of the same action
+    # are wasted pilot turns, not game defects (see `_noop_warning_block`'s repeat_streak).
+    back_to_back_repeat_steps = sum(1 for e in real_actions if e.get("consecutive_repeat"))
+    # How many times the hard repeat-block actually overrode the model's choice — the
+    # deterministic ceiling firing, distinct from the soft warning above. Non-zero here
+    # means the model tried to exceed repeat_block_threshold at least once; it does NOT
+    # mean the model ever exceeded it, since the override makes that impossible.
+    forced_repeat_blocks = sum(1 for e in real_actions if e.get("forced_by_repeat_block"))
 
     summary = {
         "actions_taken": len(real_actions),
@@ -679,6 +796,8 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         "bugs_flagged": len(potential_bugs),
         "invariant_violations": len(invariant_violations),
         "unexpected_delta_steps": unexpected_delta_steps,
+        "back_to_back_repeat_steps": back_to_back_repeat_steps,
+        "forced_repeat_blocks": forced_repeat_blocks,
     }
     for e in summary_paths:
         final = _resolve_path(current_state, e["path"])
@@ -1419,6 +1538,72 @@ def _objective_block(playtest_cfg):
     return f"## Your objective\n{str(objective).strip()}\n\n"
 
 
+def _quest_block(playtest_cfg, current_state, quest_recall):
+    """Render an '## Open Quest Lines' section — what the agent currently knows about its
+    active missions/quests, kept visible every turn regardless of location.
+
+    Two config knobs, both optional and game-agnostic:
+    - `playtest.quest_state_path`: a state field holding a list of mission/quest dicts
+      (e.g. NEXUS's `missions`). Rendered as one compact line per entry (id/title, status,
+      objective counts if present) — always fresh, since it comes straight from `current_state`.
+    - `playtest.quest_commands`: verb names whose terminal output IS the quest detail view
+      (e.g. NEXUS's `progress`/`missions` print the actual objective TEXT that never reaches
+      structured state at all). Their latest output is shown here too.
+
+    Why this needs to be its own block instead of relying on the generic terminal-recall
+    mechanism: that recall is keyed by (command, currentServerId) — correct for
+    location-scoped recon (`ls` at server A and server B are two different facts) but WRONG
+    for quest status, which is player-global. Keying it by location fragments the same
+    "what does this mission need" answer into multiple stale, duplicate, never-refreshed
+    copies scattered across whatever server the pilot happened to be on each time it
+    checked. `quest_recall` (populated in the main loop) is deliberately keyed by verb
+    alone, so there is exactly ONE always-current entry per quest command regardless of
+    where it was run. Found 2026-07-23: without this, a pilot's only view of what an
+    active mission actually needs was incidental — present only if it happened to check
+    recently, from anywhere — which is a plausible contributor to a real NEXUS run never
+    progressing past its second mission across two full 300-action attempts.
+
+    Freshness caveat is explicit in the rendered text, not hidden: recalled command output
+    can go stale if the mission has progressed since it was last checked. This block cannot
+    guarantee freshness the structured-state half doesn't already have — it only guarantees
+    the LATEST check is never lost to the passage of turns or a change of location.
+    """
+    lines = []
+    quest_state_path = (playtest_cfg or {}).get("quest_state_path")
+    if quest_state_path:
+        items = _resolve_path(current_state, str(quest_state_path))
+        if isinstance(items, list):
+            for it in items:
+                if not isinstance(it, dict):
+                    lines.append(f"  - {it}")
+                    continue
+                label = it.get("missionId") or it.get("id") or it.get("title") or "?"
+                bits = [str(label)]
+                if it.get("status") is not None:
+                    bits.append(f"status={it['status']}")
+                comp, total = it.get("objectivesCompleted"), it.get("objectivesTotal")
+                if comp is not None and total is not None:
+                    bits.append(f"{comp}/{total} objectives")
+                lines.append("  - " + ", ".join(bits))
+    quest_commands = (playtest_cfg or {}).get("quest_commands") or []
+    recall_chunks = []
+    for verb in quest_commands:
+        rec = (quest_recall or {}).get(verb)
+        text = (rec["text"] if rec else "").strip() if rec else ""
+        if not text:
+            continue
+        recall_chunks.append(f"### last '{verb}' output (step {rec['step']})\n{text}\n")
+    if not lines and not recall_chunks:
+        return ""
+    body = ""
+    if lines:
+        body += "Active, from current state (always fresh):\n" + "\n".join(lines) + "\n"
+    if recall_chunks:
+        body += ("\nDetail from the last time you checked (may be stale if you've since "
+                 "made progress — re-check if unsure):\n" + "\n".join(recall_chunks))
+    return "## Open Quest Lines\n" + body + "\n"
+
+
 def _available_actions_line(playtest_cfg, current_state, fallback):
     """The verb list shown to the agent: ALWAYS the full vocabulary, plus — when the game
     maintains its own live unlock list — an annotation naming what it currently reports as
@@ -1446,22 +1631,48 @@ def _available_actions_line(playtest_cfg, current_state, fallback):
     return fallback
 
 
-def _noop_warning_block(noop_streaks, threshold=2):
-    """Render a '## Warnings' section for any action whose last `threshold`+ attempts
-    produced no material state change — the SAME counter the contradiction detector
-    uses to auto-flag a bug at 3 repeats, surfaced one step earlier so the agent gets
-    a chance to notice and change course itself, rather than only being scored on it
-    after the fact. Without this, that count exists in memory the whole time but was
-    never shown back to the agent — the 5-step 'Recent Actions' window alone is too
-    short to reveal a pattern that repeats every 6+ steps (see NEXUS the_breadcrumb
-    2026-07-21: 'accept' repeated 11 times, each one scrolled out of view before the
-    next attempt, with no signal that it had ever been tried before)."""
-    if not noop_streaks:
-        return ""
+def _noop_warning_block(noop_streaks, repeat_streak=None, threshold=2):
+    """Render a '## Warnings' section covering two DISTINCT stall signals:
+
+    1. `noop_streaks` — an action whose last `threshold`+ attempts produced no material
+       state change. The SAME counter the contradiction detector uses to auto-flag a bug
+       at 3 repeats, surfaced one step earlier so the agent gets a chance to notice and
+       change course itself. Gated on material delta, and bypassed entirely for
+       `playtest.display_only_verbs` (repeatable recon like NEXUS's `ls` legitimately
+       never shows a delta, so it never reaches this dict at all).
+    2. `repeat_streak` — literal back-to-back repetition of the SAME (action_type, value),
+       independent of delta or display-only status. This is what `display_only_verbs`
+       deliberately does NOT cover: `ls` used repeatedly over the course of a run (new
+       location each time, or after other actions) is normal, correct play — but `ls`
+       picked twice+ in an unbroken row shows the IDENTICAL terminal output both times by
+       construction, so it is always wasted regardless of what the verb is. Found
+       2026-07-22: gemma4:26b picked plain 'ls' 8 times in a row on an already-explored
+       server with zero recovery, and because `ls` is display-only it never triggered
+       (1) at all — this covers exactly that gap without penalising spaced-out reuse.
+       This warning is now backed by a HARD, deterministic block in the main loop (see
+       `repeat_block_threshold`) — the warning fires one step before the block would, so
+       the agent gets a chance to self-correct, but unlike (1) it is not the only thing
+       standing between the agent and an unbounded loop. Found 2026-07-23: even this
+       warning, restated every step with a growing count, did not reliably stop gemma4:26b
+       — a 300-action run repeated one command 163 times in a row regardless.
+
+    Without this, both counts exist in memory the whole time but were never shown back to
+    the agent — the 5-step 'Recent Actions' window alone is too short to reveal a pattern
+    that repeats every 6+ steps (see NEXUS the_breadcrumb 2026-07-21: 'accept' repeated 11
+    times, each one scrolled out of view before the next attempt, with no signal that it
+    had ever been tried before)."""
     lines = [
         f"  '{key.split(':', 1)[-1]}' has produced NO material change the last {count} "
         f"time{'s' if count != 1 else ''} you tried it — do NOT just repeat it, try something else"
-        for key, count in noop_streaks.items() if count >= threshold
+        for key, count in (noop_streaks or {}).items() if count >= threshold
+    ]
+    lines += [
+        f"  you just picked '{key.split(':', 1)[-1]}' {count} times in a row, back-to-back — "
+        f"an immediate repeat shows the exact SAME result every time. Picking it again will "
+        f"be REJECTED and forced to 'wait' instead — this is a hard rule, not a suggestion. "
+        f"If you want to use it again later (e.g. after moving or after another action), "
+        f"that's fine — just not right now"
+        for key, count in (repeat_streak or {}).items() if count >= threshold
     ]
     if not lines:
         return ""
@@ -1498,6 +1709,57 @@ def _fit(text, budget, what, tail=False):
             f"ugt.config.yaml, or the pilot is playing without part of it (LESSONS.md P3)."
         )
     return text[-budget:] if tail else text[:budget]
+
+
+def _compact_state_block(state, budget, what="Current State"):
+    """Render `state` as JSON within `budget` chars by COMPACTING large lists rather than
+    truncating the serialized text.
+
+    `_fit()`'s blind text cut is correct for prose (terminal output, the guide) — the
+    reader loses the least-recent/least-important end. It is the WRONG tool for a JSON
+    blob: slicing the serialized string at an arbitrary byte offset produces invalid JSON
+    and drops whatever field happens to fall after the cut, regardless of importance (the
+    `missions` array is exactly as likely to be sacrificed as a `discoveredServers` entry
+    nobody needs). Compaction instead shrinks the largest list-valued fields FIRST, at every
+    nesting level, keeping the JSON valid and every top-level field present throughout —
+    only the enumeration of a long list gets shorter, never a whole field.
+
+    budget<=0 disables this (unbounded, matches `_fit`'s off-switch convention). Warns once
+    per (what, budget) per process, same convention as `_fit`, only if even the most
+    aggressive compaction (keep=1 per list) still doesn't fit — at that point the
+    most-compacted form is returned anyway rather than ever truncating the JSON text itself.
+    """
+    full = json.dumps(state, indent=2, default=str)
+    if budget <= 0 or len(full) <= budget:
+        return full
+
+    def _compact(obj, keep):
+        if isinstance(obj, list):
+            kept = [_compact(v, keep) for v in obj[:keep]]
+            if len(obj) > keep:
+                kept.append(f"… +{len(obj) - keep} more ({len(obj)} total — not shown to save prompt space)")
+            return kept
+        if isinstance(obj, dict):
+            return {k: _compact(v, keep) for k, v in obj.items()}
+        return obj
+
+    result = full
+    for keep in (8, 4, 2, 1):
+        candidate = json.dumps(_compact(state, keep), indent=2, default=str)
+        result = candidate
+        if len(candidate) <= budget:
+            return candidate
+
+    key = (what, budget)
+    if key not in _TRUNCATION_WARNED:
+        _TRUNCATION_WARNED.add(key)
+        print(
+            f"[WARN] {what} is {len(result)} chars even after maximum compaction "
+            f"(budget {budget}) — every list is down to 1 item and it still doesn't fit. "
+            f"Raise `playtest.state_char_budget` in ugt.config.yaml. Showing the "
+            f"most-compacted form rather than truncating mid-JSON."
+        )
+    return result
 
 
 def _redaction_paths(playtest_cfg):
@@ -1551,9 +1813,10 @@ def _recent_actions_summary(action_log, redact, window=5):
 
 
 def _build_prompt(config, strategy_guide, current_state, terminal_text, action_log, noop_streaks=None,
-                  ledger=None, recall=None):
+                  ledger=None, recall=None, repeat_streak=None, quest_recall=None):
     playtest_cfg = config.data.get("playtest", {}) if isinstance(config.data, dict) else {}
     guide_budget = int(playtest_cfg.get("guide_char_budget", 2000))
+    state_char_budget = int(playtest_cfg.get("state_char_budget", 4000))
     terminal_budget = int(playtest_cfg.get("terminal_char_budget", 400))
 
     redact = _redaction_paths(playtest_cfg)
@@ -1578,11 +1841,12 @@ def _build_prompt(config, strategy_guide, current_state, terminal_text, action_l
         f"VALID action names (use one as value when action_type=action_id):\n"
         f"  {action_name_list}\n\n"
         + _objective_block(playtest_cfg)
+        + _quest_block(playtest_cfg, current_state, quest_recall)
         + f"## Current State\n"
         + _key_values_line(playtest_cfg, current_state)
-        + f"```json\n{json.dumps(_redact_state(current_state, redact), indent=2, default=str)}\n```\n\n"
+        + f"```json\n{_compact_state_block(_redact_state(current_state, redact), state_char_budget, 'Current State')}\n```\n\n"
         f"## Recent Actions\n{recent_summary}\n\n"
-        + _noop_warning_block(noop_streaks)
+        + _noop_warning_block(noop_streaks, repeat_streak)
         + _action_ledger_block(ledger)
         + _terminal_recall_block(recall, int(playtest_cfg.get('terminal_recall_budget', 0)))
         + f"## Terminal Output\n```\n{_fit(terminal_text, terminal_budget, 'Terminal output', tail=True)}\n```\n\n"
@@ -1592,7 +1856,7 @@ def _build_prompt(config, strategy_guide, current_state, terminal_text, action_l
 
 
 def _build_legal_prompt(config, strategy_guide, current_state, legal_list, action_log, playtest_cfg,
-                        noop_streaks=None, ledger=None, recall=None):
+                        noop_streaks=None, ledger=None, recall=None, repeat_streak=None, quest_recall=None):
     """Prompt for legal_action mode: the adapter's own structured state (serialized
     JSON — the exact shape the game's ladder scripts read) plus its live legal-action
     list. Game-agnostic: each legal action is dumped as its raw JSON, with no
@@ -1600,6 +1864,7 @@ def _build_legal_prompt(config, strategy_guide, current_state, legal_list, actio
     project = getattr(config, "project_name", None) or "the game"
     playtest_cfg = playtest_cfg or {}
     guide_budget = int(playtest_cfg.get("guide_char_budget", 2000))
+    state_char_budget = int(playtest_cfg.get("state_char_budget", 4000))
 
     redact = _redaction_paths(playtest_cfg)
 
@@ -1615,13 +1880,14 @@ def _build_legal_prompt(config, strategy_guide, current_state, legal_list, actio
         f"NOTE: If you see EPISODE_RESET in recent actions, the previous episode "
         f"ended normally (win/draw/step limit) and the game restarted — NOT a bug.\n\n"
         + _objective_block(playtest_cfg)
+        + _quest_block(playtest_cfg, current_state, quest_recall)
         + f"## Current State\n"
         + _key_values_line(playtest_cfg, current_state)
-        + f"```json\n{json.dumps(_redact_state(current_state, redact), indent=2, default=str)}\n```\n\n"
+        + f"```json\n{_compact_state_block(_redact_state(current_state, redact), state_char_budget, 'Current State')}\n```\n\n"
         f"## LEGAL ACTIONS (respond with action_type=\"legal_action\", value=<the NUMBER>)\n"
         f"{legal_lines}\n\n"
         f"## Recent Actions\n{recent_summary}\n\n"
-        + _noop_warning_block(noop_streaks)
+        + _noop_warning_block(noop_streaks, repeat_streak)
         + _action_ledger_block(ledger)
         + f"## Strategy Guide\n{_fit(strategy_guide, guide_budget, 'Strategy guide')}\n\n"
         f"Respond JSON only. action_type=\"legal_action\", value=\"<index 0..{upper}>\"."
@@ -1629,7 +1895,7 @@ def _build_legal_prompt(config, strategy_guide, current_state, legal_list, actio
 
 
 def _build_terminal_prompt(config, strategy_guide, current_state, terminal_text, action_log, playtest_cfg,
-                           noop_streaks=None, ledger=None, recall=None):
+                           noop_streaks=None, ledger=None, recall=None, repeat_streak=None, quest_recall=None):
     """Prompt for "text" mode: the LLM drives the game by TYPING a raw command line
     (action_type="type_text"), exactly as a human at the terminal would. The adapter's
     own get_terminal_text output and structured state are shown; the command vocabulary
@@ -1639,6 +1905,7 @@ def _build_terminal_prompt(config, strategy_guide, current_state, terminal_text,
     stays game-agnostic (no game-specific strings here)."""
     playtest_cfg = playtest_cfg or {}
     guide_budget = int(playtest_cfg.get("guide_char_budget", 2000))
+    state_char_budget = int(playtest_cfg.get("state_char_budget", 4000))
     terminal_budget = int(playtest_cfg.get("terminal_char_budget", 400))
     project = getattr(config, "project_name", None) or "the game"
 
@@ -1660,11 +1927,12 @@ def _build_terminal_prompt(config, strategy_guide, current_state, terminal_text,
         f"  (Which files / servers / missions / targets to name as arguments is in the "
         f"Strategy Guide below — read the Current State to fill in REAL arguments.)\n\n"
         + _objective_block(playtest_cfg)
+        + _quest_block(playtest_cfg, current_state, quest_recall)
         + f"## Current State\n"
         + _key_values_line(playtest_cfg, current_state)
-        + f"```json\n{json.dumps(_redact_state(current_state, redact), indent=2, default=str)}\n```\n\n"
+        + f"```json\n{_compact_state_block(_redact_state(current_state, redact), state_char_budget, 'Current State')}\n```\n\n"
         f"## Recent Actions\n{recent_summary}\n\n"
-        + _noop_warning_block(noop_streaks)
+        + _noop_warning_block(noop_streaks, repeat_streak)
         + _action_ledger_block(ledger)
         + _terminal_recall_block(recall, int(playtest_cfg.get('terminal_recall_budget', 0)))
         + f"## Terminal Output\n```\n{_fit(terminal_text, terminal_budget, 'Terminal output', tail=True)}\n```\n\n"
