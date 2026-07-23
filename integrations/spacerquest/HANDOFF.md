@@ -6,12 +6,14 @@ sim exposes at `packages/sim/dist/protocol-stdio.js` — and it runs through
 **UGT's own CLI phases** (smoke-test → verify → train → evaluate), not a
 side-channel driver.
 
-## What changed from `spacerquest_old/`
+## What changed from the old, now-deleted `spacerquest_old/`
 
-`integrations/spacerquest_old/` drives the **retired Museum-Edition**
+`integrations/spacerquest_old/` used to drive the **retired Museum-Edition**
 `spacerquest-web` Socket.IO server (via `ugt/adapters/realclient.py`) and its rank
-ladder (LIEUTENANT … GIGA_HERO). That server is the **quarantined legacy game**,
-not Rimward. It is kept as history — do not edit it.
+ladder (LIEUTENANT … GIGA_HERO). That server was the **quarantined legacy game**,
+not Rimward. The folder was **deleted from this repo on 2026-07-21** — entirely
+superseded by this Rimward integration; its history is preserved in
+`Dev/PLAN-FORWARD-spacerquest.md` and `Dev/UGT-TRACK-RECORD.md`, not as live code.
 
 Rimward has no Socket.IO server. It plays headlessly through a **pure protocol
 core** (`packages/sim/src/protocol.ts` → `handleMessage`) wrapped by a stdio

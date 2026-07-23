@@ -54,6 +54,42 @@ action_space:
     6: { name: "set_mode_survival" }
     7: { name: "set_mode_endless" }
 
+# LLM playtest tier (L-005) — the "is it a good game?" balance tier. This game
+# already uses the browser adapter (engine.type: browser), which playtest_game()
+# supports directly in the DEFAULT action_id drive mode (dispatch through
+# __SEND_ACTION__ into the real useGameState handlers) — no new drive mode. This
+# block is additive + config-only: R1/R2/R3 build their own config shim and ignore
+# it (UgtConfig tolerates unknown top-level keys). All paths resolve into the live
+# __GET_STATE__ projection (ugt-hooks.ts) — no new state shape is invented here.
+#
+#   key_state_paths -> the prompt's "⚡ KEY VALUES" line (what the LLM watches).
+#   summary_paths   -> cross-reset numeric delta banking in the report (banked
+#                      across the auto-reset that follows a finished game).
+#   terminal_char_budget -> the game has NO terminal-text hook; the state JSON +
+#                      the KEY VALUES line carry all game info. Kept small.
+# There is NO win_path/loss_path: `winner` is a STRING set for EITHER player
+# ('player1'/'player2'), so bool(winner) would report a "win" whenever ANYONE
+# won — a false signal. Omitted, matching DDD / Nexus-Dominion precedent.
+playtest:
+  guide_char_budget: 3000
+  terminal_char_budget: 200
+  key_state_paths:
+    - { path: "gamePhase",         label: "phase", note: "pickers work ONLY in 'setup'; 'finished' ends the game — play_round then auto-resets" }
+    - { path: "gameMode",          label: "mode" }
+    - { path: "aiDifficulty",      label: "difficulty" }
+    - { path: "currentRound",      label: "round" }
+    - { path: "player1.score",     label: "P1 score" }
+    - { path: "player2.score",     label: "Oracle score" }
+    - { path: "player1.deckCount", label: "P1 deck" }
+    - { path: "player2.deckCount", label: "Oracle deck" }
+    - { path: "warCardCount",      label: "warPile", note: "rises during a war (tie); winner claims it" }
+    - { path: "winner",            label: "winner" }
+  summary_paths:
+    - { path: "player1.score",  label: "p1_score_delta" }
+    - { path: "player2.score",  label: "oracle_score_delta" }
+    - { path: "gameLogTotal",   label: "log_growth" }
+  # win_path / loss_path deliberately omitted — see block comment above.
+
 # Placeholder profile: Round 1 is playability verification, not training.
 # Rewards realized score margin, not activity counters.
 reward_profiles:

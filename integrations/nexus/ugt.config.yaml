@@ -58,7 +58,7 @@ observation_space:
 
 action_space:
   type: "discrete"
-  size: 20
+  size: 22
   actions:
     0: { name: "status" }       # info — always available
     1: { name: "help" }
@@ -85,6 +85,12 @@ action_space:
     18: { name: "action_18" }   # INTENTIONALLY unmapped in _compose_command:
                                 #   sent verbatim -> "Command not found" (a refusal probe)
     19: { name: "garbage" }     # composes a nonsense token -> "Command not found"
+    # NX-L14-1 economy (LESSONS.md O10: a rung that never names the new system is not
+    # testing it — R2 sat at its old 36/36 for exactly this reason). Arg composition is
+    # state-driven and lives in verify_round3.py::R3NexusAdapter, like the other
+    # argument-taking verbs.
+    20: { name: "market" }      # bare — toolkit catalogue, read-only
+    21: { name: "buy" }         # buy <tier>; deliberately probes UNAFFORDABLE tiers too
 
 # Placeholder profile: P0 is a playability/robustness bring-up, not training.
 # Rewards realized progress (compromises + story-mission completions), not
@@ -94,3 +100,187 @@ reward_profiles:
     formula: "(state.compromisedServersCount - before.compromisedServersCount) + 10 * (state.missionsCompletedCount - before.missionsCompletedCount)"
     win_bonus: 100
     loss_penalty: 0
+
+# LLM playtest tier (L-006). ADDITIVE + ladder-inert: R1/R2/R3 and the
+# exploit-hunter read only engine/observation_space/action_space/reward_profiles,
+# never this block. It drives the prompt's "KEY VALUES" line and the per-run
+# summary; every path below resolves into NexusHttpAdapter._read_state()'s own
+# flat dict (reusing the existing state shape — nothing invented). No loss_path:
+# NEXUS has no loss state (matching DDD / Nexus-Dominion precedent).
+playtest:
+  # LESSONS.md P3 (truncation is silent starvation) — both budgets were raised on the
+  # 2026-07-22 pre-flight audit, each sized against a MEASURED worst case in the game's
+  # own source, not guessed:
+  #   guide 3500 -> 9000: the guide now teaches the success-rate formula (P6). It is
+  #     ~8.1k chars; 3500 would have cut it off mid-hack-chain, i.e. exactly the DDD
+  #     L-011 defect (a guide that names a mechanic but never reaches its rules).
+  #   terminal 600 -> 2400: `scan` with no argument prints up to 20 servers at ~68
+  #     chars/line = 1400+ chars (executors.ts:1928-2045), and the budget keeps the
+  #     TAIL — at 600 the LLM saw only the last ~8 servers of every scan. `analyze` is
+  #     the ONLY source of vulnerability NAMES (executors.ts:557-613) and emits
+  #     max(1, 11 - securityLevel) lines ~= 520 chars on a security-1 host, so it sat
+  #     right at the old ceiling with the FIRST-listed vulns the ones at risk. Since
+  #     `exploit <vuln>` requires an exact type-string match, a truncated `analyze` is
+  #     unplayable-by-design. Core now prints a [WARN] whenever either budget bites.
+  guide_char_budget: 12000
+  terminal_char_budget: 2400
+
+  # ── Agent memory (LESSONS.md P10) ────────────────────────────────────────────
+  # The 2026-07-22 sanity run cycled scan->connect->ls->analyze->exploit->escalate
+  # over the SAME two servers five times in 40 steps. It fired zero warnings, because
+  # both existing mechanisms miss an interleaved loop: `noop_streaks` counts only
+  # CONSECUTIVE no-delta repeats (it resets on any productive step) and the recent-
+  # actions window slid past each repeat before the next one. The cumulative ledger
+  # in the prompt is the fix; this window is sized to ~2x the observed 6-7 step cycle
+  # so a loop is visible in the raw history too, not only in the digest.
+  history_window: 14
+
+  # Rendered high in the prompt. The guide states the goal as well, but it sits at the
+  # BOTTOM behind the state dump and terminal buffer — far from where the model commits.
+  objective: >-
+    Push the 8-mission story to its ending: gameStatus.completedStoryMissions 0 -> 8,
+    then `choose <path>` at the finale. A mission completes when you read its target
+    file with `cat <file>` on a server you have compromised — compromising a host is
+    the means, the file read is what scores. Recon (`scan`/`ls`/`analyze`) is how you
+    learn what to do next; run it whenever you reach somewhere new or need information
+    you do not have.
+
+  # ANNOTATES the verb list with what the game reports as unlocked — it never replaces
+  # it. First written the other way round (live list REPLACES the vocabulary, so the
+  # agent is never offered a verb the game refuses); live probing killed that idea the
+  # same day. NEXUS's `unlockedCommands` is a HACK-verb list — scan/connect/disconnect/
+  # ls/cd/cat/clues/whois/analyze/download/exploit/crack/escalate/backdoor — and omits
+  # status/missions/accept/talk/choose AND the new market/buy. Used as a replacement it
+  # would have hidden the entire economy from the pilot: a partial list is an
+  # information-starvation defect (P1) the moment it is treated as authoritative.
+  # NX-L20-1: switched from `unlockedCommands` (the explicitly-GRANTED list, 16 verbs,
+  # which nothing writes on level-up) to `usableCommands` (what currently PASSES
+  # checkCommandUnlock, 35 verbs). Still an annotation and never a replacement — the
+  # D-L15-1 rule stands regardless of how good the list gets.
+  available_actions_path: "usableCommands"
+
+  # ── Progressive-content engagement metric ────────────────────────────────────
+  # Owner requirement (RESULTS.md L-017 item 3 / L-019 open 1): judge whether the pilot
+  # is AGILE about content the game reveals mid-run — does it follow at least some new
+  # quest lines and try at least some new commands? Previously an eyeball judgement,
+  # which LESSONS.md P7 rejects. Core computes it from these two declarations only;
+  # `ugt/core/playtester.py::_RevealTracker` contains no NEXUS nouns.
+  revealed_content:
+    - name: "commands"
+      path: "usableCommands"
+      kind: "strings"
+      # A newly unlocked VERB is engaged by being TYPED — first token of the command
+      # line. An attempt counts even if the game refuses it: the behaviour under test is
+      # "did the pilot notice new content and try it", and a refusal is the game's answer.
+      engage: ["invoke"]
+      # ~2x the observed 6-7 step recon cycle: long enough that a pilot mid-hack-chain
+      # can finish it and still get to the new verb, short enough that "engaged" means
+      # a reaction to the reveal rather than a coincidence 30 steps later.
+      window: 12
+      note: >-
+        RESOLVED 2026-07-22 (NX-L20-1). This group used to read `unlockedCommands`, a
+        persisted EXPLICIT-GRANT list that nothing writes on level-up — its only writer
+        is mission-reward `unlockCommands`, and across all 14 shipped missions exactly
+        ONE grant exists (side quest `ghost_protocol_test` -> `traceroute`), so the
+        denominator was ~0 on every run and commands that become usable by LEVELLING
+        (traceroute Lv2, crack Lv3, escalate Lv4, backdoor/upload Lv5) were invisible.
+        The game now reports `usableCommands` — the set that currently PASSES
+        checkCommandUnlock — which this group reads instead. Measured at post_tutorial:
+        35 usable vs 16 granted, i.e. the old list missed more than half the surface.
+        `unlockedCommands` is still emitted and unchanged; the two mean different things
+        and must not be conflated.
+    # NX-L20-2. THE agility question from the owner's requirement (3): did the pilot
+    # notice a quest line that became AVAILABLE and take it up? Before the game exposed
+    # `offeredMissions`, `missions[]` listed only ACCEPTED missions, so "revealed" could
+    # only ever mean "already accepted" and this behaviour was unobservable.
+    # Engaged by "mention": `accept <missionId>` names the id, which IS the act of
+    # taking up a quest line. Progress after acceptance is scored by the `missions`
+    # group below — these two are deliberately different questions.
+    - name: "offered_quests"
+      path: "offeredMissions"
+      kind: "objects"
+      id_field: "missionId"
+      engage: ["mention"]
+      # Wider than the command window: a pilot mid-hack-chain may reasonably finish it
+      # before turning to the board.
+      window: 18
+      # Side quests are optional per the owner and must never count as failure. This
+      # reads the game's OWN marker rather than a hand-maintained id list, so it cannot
+      # go stale the way `optional_ids` can.
+      optional_field: { field: "missionType", value: "side" }
+
+    - name: "missions"
+      path: "missions"
+      kind: "objects"
+      id_field: "missionId"
+      status_field: "status"
+      # `missions[]` carries missionId/status/objectivesCompleted/objectivesTotal — and
+      # NO objective text (P1). So engagement cannot be judged from what the pilot said;
+      # it is judged from what the GAME reports: an objective ticked, or the mission
+      # reaching `completed`. That is precisely the L-015 failure mode this must catch —
+      # a pilot that re-issued `accept the_breadcrumb` 11 times, never issued `cat`, and
+      # left objectivesCompleted at 0 while the run reported PLAYTEST MET.
+      engage: ["progress"]
+      progress_fields: ["objectivesCompleted"]
+      engage_status: ["completed"]
+      # A story mission is 3+ objectives, each needing a compromise-then-`cat` chain;
+      # 20 steps is roughly one such chain plus recon.
+      window: 20
+      # NEXUS state carries no story/side marker on a mission entry, so the split has to
+      # come from ids. Source: apps/game/data/missions/side-missions.json (the 5 side
+      # quests); core-story.json holds the 9 story missions. STALENESS DIRECTION IS
+      # DELIBERATE: a side quest added later and not listed here scores as REQUIRED, i.e.
+      # a loud false failure, rather than a silent free pass (O2). If the game ever marks
+      # side quests in player-state, replace this with `optional_field`.
+      optional_ids:
+        - "undercity_intro"
+        - "carnival_chaos"
+        - "data_broker_job"
+        - "ghost_protocol_test"
+        - "foundation_research"
+      note: >-
+        `missions[]` only lists missions the player has ACCEPTED — the AVAILABLE list is
+        printed by the `missions` command into terminal text and never reaches state
+        (verified live 2026-07-22: 4 missions offered, `missions` state array empty).
+        So "revealed" here means "this quest line became live", and the judged behaviour
+        is whether the pilot then FOLLOWED it rather than accepting and wandering off.
+        Quest lines the pilot never accepted are invisible to this metric. Closing that
+        gap needs a game-side change (expose available missions in player-state).
+
+  # Recon in NEXUS is scoped to the host you are on, so `ls`/`analyze` at a NEW server is
+  # a fresh observation, not a repeat. Keying the memory digest by currentServerId keeps
+  # that distinction — otherwise legitimate per-host recon looks like a loop.
+  action_context_path: "currentServerId"
+
+  # NEXUS's read layer is terminal-ONLY: `discoveredServers` is a bare IP list, so a
+  # server's security level (`scan`), its vulnerability NAMES (`analyze` — the sole source,
+  # and `exploit` needs an exact match) and its files (`ls`) are printed once and then lost
+  # when the rolling buffer moves on. Retaining the latest output per (action, server) is
+  # what lets the agent still know at step 30 what it learned at step 4.
+  terminal_recall_budget: 3000
+  key_state_paths:
+    - { path: "level", label: "level" }
+    - { path: "credits", label: "credits" }
+    - { path: "toolTier", label: "toolkit", note: "buy up via `market`/`buy <tier>`; +0/20/35/40/50%" }
+    - { path: "compromisedServersCount", label: "servers_owned" }
+    - { path: "missionsCompletedCount", label: "missions_done" }
+    - { path: "gameStatus.completedStoryMissions", label: "story_missions", note: "0..8 -> win at 8" }
+  summary_paths:
+    - { path: "credits", label: "credits_gained" }
+    - { path: "compromisedServersCount", label: "servers_compromised" }
+    - { path: "missionsCompletedCount", label: "missions_completed" }
+  win_path: "gameStatus.isComplete"
+  # rngCounter advances on EVERY command by design (NX-OBS-1), including a refused/
+  # no-op one — without excluding it, the playtester's contradiction detector never
+  # sees an "empty" delta for this game and can never auto-flag a stuck loop. Found
+  # 2026-07-21 when a real Haiku playtest re-issued `accept the_breadcrumb` 11 times
+  # after its first (and only) real effect, with the detector silently never firing.
+  ignore_delta_fields:
+    - "rngCounter"
+  # ls/analyze render their payload into terminal text, not structured state, so they
+  # ALWAYS look like a no-op delta regardless of whether they revealed something new.
+  # Without this, the contradiction detector auto-flags normal repeatable recon as a
+  # false-positive "stuck loop" (found 2026-07-21: `ls` on a fresh server connection).
+  display_only_verbs:
+    - "ls"
+    - "analyze"

@@ -28,6 +28,10 @@ engine:
   # harness_cwd defaults (in the adapter) to the DDD repo root inferred from
   # harness_entry; override with the DDD_HARNESS_CWD env var. harness_entry itself
   # is overridable with the DDD_HARNESS_PATH env var.
+  # decks[0] plays seat 0, and _pending_seat() always resolves seat 0 first, so this
+  # key IS the deck x seat cell selector for a balance batch. L-010 measured both
+  # cells by flipping it (see RESULTS.md); it is restored here to the FORWARD order,
+  # which is what every ladder script's pinned expectation was recorded under.
   decks: ["bb_competitive", "sw_competitive"]
   format: "COMPETITIVE"
   # All three waves ON — this is the game DDD actually ships: apps/ladder (a CI
@@ -101,6 +105,38 @@ action_space:
   # something outside the harness's legal list — deliberately, so the engine's
   # refusal paths can be asserted state-inert. Every other id is drawn from the
   # legal list, so the adapter cannot send an illegal action by accident.
+
+# LLM playtest tier (L-002 legal-action drive mode). Additive + config-only: it
+# feeds the prompt's KEY VALUES line and the per-run summary. The trial/exploit
+# ladder ignores this block entirely.
+playtest:
+  # 11000: the guide carries the full card reference for both competitive decks
+  # (~4.5k chars) PLUS, since L-011, the actual rules of the read layer (type
+  # triangle, stance, echo, chains, keyword meanings — ~4k more). Truncating it
+  # re-creates the blind-play defect L-009/L-011 exist to prevent.
+  guide_char_budget: 11000
+  # Fog of war (L-009): the engine's redacted opponent view exposes only
+  # hasCommitted — never WHAT was committed. The adapter's normalized state
+  # carries the god-view committedKind/committedCard because the card-
+  # conservation invariant needs them; hide them from the LLM prompt so the
+  # second mover cannot see the first mover's card-vs-pass bit (the exact
+  # information DDD's prediction mechanic plays around).
+  redact_state_fields:
+    - p0.committedKind
+    - p0.committedCard
+    - p1.committedKind
+    - p1.committedCard
+  key_state_paths:
+    - { path: "p0.hp", label: "P0 HP", note: "0-30" }
+    - { path: "p1.hp", label: "P1 HP", note: "0-30" }
+    - { path: "turn", label: "turn" }
+    - { path: "phase", label: "phase" }
+    - { path: "pendingSeat", label: "acting seat" }
+  summary_paths:
+    - { path: "p0.hp", label: "p0_hp_delta" }
+    - { path: "p1.hp", label: "p1_hp_delta" }
+  win_path: null
+  loss_path: null
 
 # VESTIGIAL — required by UgtConfig; UNUSED by the exploit-hunter/trial path.
 # DDD is tested by invariants + determinism, not rewards. Do not add reward

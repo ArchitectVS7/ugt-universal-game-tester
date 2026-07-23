@@ -266,6 +266,26 @@ def inv_softlock(before, action, info, after, ctx):
     return None
 
 
+def trajectories_match(first: list, second: list) -> tuple[bool, str]:
+    """True only when two NON-EMPTY, same-length trajectories agree step for step.
+
+    Two empty trajectories are the vacuous-pass trap this guard exists to close:
+    `len([]) == len([])` is True and `next(zip([], []))` is None, so the old inline
+    `same_len and divergence is None` predicate reported a clean replay without ever
+    comparing a driven step. Empty input therefore FAILS here — nothing was measured.
+    A negative case is pinned in integrations/tarot-war/determinism_selftest.py.
+    """
+    if not first or not second:
+        return False, (f"empty trajectory — nothing compared "
+                       f"(first={len(first)} steps, second={len(second)} steps)")
+    if len(first) != len(second):
+        return False, f"length differs: {len(first)} vs {len(second)} steps"
+    div = next((i for i, (x, y) in enumerate(zip(first, second)) if x != y), None)
+    if div is not None:
+        return False, f"first divergence at step {div}: {first[div]} vs {second[div]}"
+    return True, f"{len(first)} steps identical"
+
+
 INVARIANTS = [
     Invariant("state_readable", inv_ready),
     Invariant("scores_never_decrease", inv_scores),
@@ -350,16 +370,11 @@ def main() -> int:
         replay_report = replay_hunter.run(episodes=1, steps_per_episode=STEPS_PER_EPISODE,
                                           log=lambda m: print(f"    {m}"))
         first, second = adapter.stats[0], replay_adapter.stats[0]
-        same_len = len(first["traj"]) == len(second["traj"])
-        divergence = next((i for i, (x, y) in enumerate(zip(first["traj"], second["traj"]))
-                           if x != y), None)
+        traj_ok, traj_detail = trajectories_match(first["traj"], second["traj"])
         ck("same-seed replay reproduces episode 0 step for step (TW-R3 end to end)",
-           same_len and divergence is None and not replay_report.findings,
-           f"{len(first['traj'])} steps identical" if same_len and divergence is None
-           else f"len {len(first['traj'])} vs {len(second['traj'])}, "
-                f"first divergence at step {divergence}: "
-                f"{first['traj'][divergence] if divergence is not None and divergence < len(first['traj']) else '-'} vs "
-                f"{second['traj'][divergence] if divergence is not None and divergence < len(second['traj']) else '-'}")
+           traj_ok and not replay_report.findings,
+           traj_detail if not replay_report.findings
+           else f"{traj_detail}; replay produced {len(replay_report.findings)} finding(s)")
 
         replay_adapter.page = None   # page belongs to the primary adapter
         replay_adapter.browser = None

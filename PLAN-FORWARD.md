@@ -49,7 +49,7 @@ NEXUS ladder re-run).
 
 | # | Game | Transport / adapter | Ladder result | Game bugs → fixed upstream | Status |
 |---|------|--------------------|---------------|----------------------------|--------|
-| 1 | SpacerQuest | Socket.IO+HTTP real server, `realclient.py` | Phases 0–2 + LLM campaigns (see archived plan) | 9 findings (7 Gate-C ranked + 2 API exploits), all fixed & re-verified live | **ON HOLD** — game being redesigned away from 1991 BBS style; integration archived to `integrations/spacerquest_old/` |
+| 1 | SpacerQuest | Socket.IO+HTTP real server, `realclient.py` | Phases 0–2 + LLM campaigns (see archived plan) | 9 findings (7 Gate-C ranked + 2 API exploits), all fixed & re-verified live | **DELETED 2026-07-21** — entirely superseded by the Rimward rebuild at `integrations/spacerquest/`; its integration (`integrations/spacerquest_old/`) is gone from the tree, history preserved in `Dev/PLAN-FORWARD-spacerquest.md` and `Dev/UGT-TRACK-RECORD.md` |
 | 2 | Warzones | browser, `playwright.py` | R1 23/23 · R2 12/12 · R3 6/6 | 2 criticals (empty commodity registry, flee-never-resolves) fixed; 400-step same-seed replay byte-identical | Done 2026-07-07 (WZ-R3 deferred to game v0.9) |
 | 3 | Tarot-war | browser, `playwright.py` | R1 22/22 · R2 12/12 · R3 7/7 | 8 findings ALL closed (7 fixed upstream); game suite 434→448 | Done 2026-07-07; LLM tier pending |
 | 4 | NEXUS | live HTTP test routes, `nexus_http.py` | spike 8/8 · R1 25/25 · R2 36/36 · R3 9/9 | 5 fixes pinned; game suite 1265/173 green | Done 2026-07-09; LLM tier pending |

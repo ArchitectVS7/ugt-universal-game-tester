@@ -1,24 +1,59 @@
 # NEXUS UGT Integration — HANDOFF (resume here)
 
-Single doorway for a fresh session. Last updated **2026-07-08**, after Phase 0.
+Single doorway for a fresh session. Last updated **2026-07-22**, after L-023.
 Companions: `ROLLOUT.md` (the phased plan), `README.md` (run recipe + findings
-registry + ladder table).
+registry + ladder table), `RESULTS.md` (the L-xxx findings log — L-014..L-023
+is the LLM-tier arc).
 
 ---
 
 ## TL;DR — where we are
 
-Phase 0, **R1, R2 and R3** of the UGT bridge are **complete and verified live** —
-**the NEXUS trial ladder is COMPLETE.** Both repos are on `main` and green. No
-open defects. Next up (out of ladder): the LLM balance-playtester tier, gated on
-API credits (see the note at the bottom of the ladder section).
+**The ladder is COMPLETE and green on the current build: spike 8/8 · R1 25/25 ·
+R2 66/66 · R3 9/9 · content-metric 29/29** (2026-07-22, ep-0 replay
+byte-identical). The LLM playtest channel AND the pilot are validated
+(gemma4:26b, L-022). **Next step: the first Anthropic balance batch** — credits
+are topped up; the pre-batch blockers are all resolved:
+- **NX-L22-1 FIXED** (`e981df1`+`c4f80da`): 8 zero-risk verbs paid xp on every
+  repeat (worst: `analyze` +50xp/+20skill per spam); all now first-time-only
+  per target via `xp-novelty.ts`, reset by reset-episode. The live R2 gate
+  caught a lost-update clobber of the novelty array that 1332 green unit tests
+  missed (see RESULTS L-023).
+- **NX-L23-1 FIXED** (`e981df1`): the FIRST mission (`tutorial_awakening`) was
+  uncompletable by any play — its find_clue-by-IP objective needed an
+  `analyze_target` event nothing emitted. `analyze` now emits it; R2 drives the
+  mission to completion via natural recon.
+- Game gates: unit **1333/1333**, integration **197/197**, lint/typecheck clean.
+
+**Batch guardrail: never pool any pre-`e981df1` run (incl. L-022's gemma4
+numbers) with post-fix runs — the xp economy and first-mission completability
+both changed.**
+
+**Branch state (2026-07-22):** game work is on `feat/nx-l20-observability-agility`
+(NX-L14-1..NX-L23-1 series); UGT work on `fix/ugt-harness-false-positives`.
+Merge both to `main` before the batch so its numbers pin to main commits.
+
+**NEXUS is the next game up for the LLM balance tier, and its §B pre-flight is DONE
+(`RESULTS.md` L-014/L-015/L-016).** Read `LESSONS.md` §B (P1–P9) before
+touching this tier. Three starvation defects were found and fixed *before* spending a
+batch: `terminal_char_budget` 600→2400 (measured: `scan` returns **1,666 chars / 27
+servers**, so the old tail-budget hid every low-security target — i.e. the pilot could
+not choose targets by the term that dominates its odds), `guide_char_budget`
+3500→9000, and a strategy guide that taught none of the success-rate math and actively
+misstated hardcore's modifier. Framework-side, `playtester.py::_fit()` now WARNs on any
+budget truncation for every game (it was silent before). **Do not pool the L-006 run's
+numbers with any post-L-014 batch.** One game-side characterization is open and should
+reach the game owner: **NX-L14-1 — the progression economy is inert** (no command
+spends credits; the 0→+50% tool-tier axis is hardcoded to BASIC; skills are not
+player-directed; failed rolls cost nothing), which reframes the deferred
+progression-math rebalance below — two of its four knobs are unreachable in play.
 
 | | |
 |---|---|
-| **NEXUS game** | `~/Dev/Games/nexus-world-builder`, app in `apps/game`. On `main` = `origin/main`. Gates green: typecheck+lint clean, **unit 1265/1265, integration 173/173** (0 skip). |
-| **UGT framework** | `~/Dev/Games/_UGT Universal Game Tester`. On `main` (NO git remote — local commits only). Nexus integration under `integrations/nexus/` + adapter `ugt/adapters/nexus_http.py`. |
+| **NEXUS game** | `~/Dev/Games/nexus-world-builder`, app in `apps/game`. L-014..L-023 series on `feat/nx-l20-observability-agility` (merge to `main` pending). Gates green: typecheck+lint clean, **unit 1333/1333, integration 197/197** (0 skip). |
+| **UGT framework** | `~/Dev/Games/_UGT Universal Game Tester`. LLM-tier arc on `fix/ugt-harness-false-positives` (merge to `main` pending). Nexus integration under `integrations/nexus/` + adapter `ugt/adapters/nexus_http.py`. |
 
-**Work on `main` in both repos now** — the earlier "do not merge to main" constraint
+**Work on `main` in both repos** — the earlier "do not merge to main" constraint
 is LIFTED (user merged the fix branch via PRs #121/#122). The old
 `fix/code-review-2026-07` (nexus) and `integration/nexus-bridge` (UGT) branches are
 merged/stale.
@@ -168,6 +203,24 @@ paths the R3 directed heuristic biases toward.
 
 - Adapter: `ugt/adapters/nexus_http.py`
 - Scripts/config: `integrations/nexus/{spike_nexus,smoke_nexus_adapter,verify_dod}.py`, `ugt.config.yaml`
+- LLM playtest (L-006): after the Live bring-up recipe above (server on :3100,
+  PID-verified) + `ollama serve`, run
+  `TEST_API_KEY=… python3 integrations/nexus/playtest_nexus.py --provider ollama`.
+  It uses the L-002 direct-adapter entry point in `action_mode="text"`: the LLM TYPES
+  raw command lines through the adapter's `type_text`/`get_terminal_text` (the real
+  terminal UX), and `NexusHttpAdapter.type_text_step` reports each transition so deltas
+  are genuine (see RESULTS.md "L-006" for the fix-round-1 root-cause repair to the
+  shared loop's type_text branch). `strategy-guide.md` + the additive `playtest:`
+  config block drive it. Exit 0 + "PLAYTEST MET" = ≥20 actions, ≥1 typed command with a
+  real state delta, invariant suite ran, and the progressive-content metric ran.
+- Progressive-content engagement metric (L-020): `playtest.revealed_content` in
+  `ugt.config.yaml` → `ugt/core/playtester.py::_RevealTracker`. Answers the owner's
+  "is the pilot agile about newly revealed commands / quest lines?" criterion; numbers
+  land in `results/playtest-report.json` under `content_engagement` (+ three keys in
+  `summary`). Its own gate needs NO server and NO LLM:
+  `python3 integrations/nexus/verify_content_metric.py` (27/27, mutation-tested — it
+  replays synthetic logs where the pilot ignores content and asserts the metric FAILS).
+  Read the two shipped limitations in RESULTS.md L-020 before quoting any number.
 - Game endpoints: `apps/game/src/app/api/test/{reset-episode,player-state,closed-alpha,bootstrap-player}/route.ts`
 - Game endpoint tests: `apps/game/tests/integration/api/{reset-episode,player-state}.test.ts`
 - Winnability reference: `apps/game/tests/integration/missions/full-story-winnable.test.ts`

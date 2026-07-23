@@ -39,7 +39,17 @@ and asserts (~35-40 checks):
     runs -> identical command sequence, CommandResult stream, rngCounter
     progression and normalized final player-state; non-vacuous because the
     transcript carries a "[Success Rate:" roll AND the seeded sp3ctr3 delivery
-    (met_sp3ctr3) fired inside the prefix.
+    (met_sp3ctr3) fired inside the prefix,
+  * GRIND RESISTANCE (NX-L22-1): zero-risk info commands (cat/analyze/scan) pay
+    xp FIRST-TIME-ONLY per target — a repeat pays nothing and moves no state, the
+    exact L-022 grind line (6x re-read of one file) yields zero xp, and
+    reset-episode clears the novelty set so the next episode's first read pays
+    again (the NX-L15-1 reset-baseline lesson, asserted over the wire),
+  * FIRST-MISSION COMPLETABILITY (NX-L23-1): tutorial_awakening — uncompletable
+    by ANY play before the fix, since nothing emitted the `analyze_target` event
+    its find_clue-by-IP objective needs — is driven to `completed` via natural
+    recon (accept -> scan 192.168.1.1 -> connect 192.168.1.105 -> analyze) and
+    pays its reward exactly once.
 
 No game logic is reimplemented; every effect is read back from player-state. A
 failed check is DATA — it prints as a FINDING and fails the gate, to be fixed
@@ -537,6 +547,271 @@ def main() -> int:
         ck("mission-reward credits are MODE-INVARIANT (M1 credits Δ == 1000 in all 3 modes)",
            len(m1_credits) == 3 and cr_vals == {1000},
            f"credits={m1_credits}")
+
+        # ══ ECONOMY SPINE (NX-L14-1 / L-015) ════════════════════════════════
+        # The tool-tier economy is a major system reachable only by player verbs
+        # (`market` / `buy <tier>`), so R2 must drive it to a real outcome like every
+        # other mode — a green R2 that never touches it would be a vacuous pass on the
+        # newest subsystem in the game. Driven here on the post-spine player, which has
+        # real mission income, so the purchase is made the way a player would make it.
+        print("\n  == ECONOMY: market / buy / tool tier ==")
+
+        def _cmd(c):
+            _, _, _, info = ad.type_text_step(c)
+            return info["result"], ad._read_state()
+
+        # NOTE on sequencing: this runs AFTER three full spines, so the player is rich
+        # (~55k credits, level 20) and still on `basic`. Ladder UP from there — an earlier
+        # draft bought `zero_day` first and then read the correct refusal of the
+        # `commercial` DOWNGRADE as a failure. The insufficient-funds case therefore
+        # cannot be tested on this player at all; it is done last, on a fresh reset.
+        econ_before = ad._read_state()
+        ck("economy preconditions: player starts on the free basic toolkit",
+           econ_before.get("toolTier") == "basic",
+           f"tier={econ_before.get('toolTier')} credits={econ_before.get('credits')}")
+
+        r_mkt, s_mkt = _cmd("market")
+        ck("market lists the toolkit catalogue and is READ-ONLY",
+           bool(r_mkt.get("success"))
+           and "zero_day" in (r_mkt.get("output") or "")
+           and s_mkt.get("credits") == econ_before.get("credits")
+           and s_mkt.get("toolTier") == econ_before.get("toolTier"),
+           f"success={r_mkt.get('success')} creditsΔ="
+           f"{s_mkt.get('credits', 0) - econ_before.get('credits', 0)} "
+           f"tier={s_mkt.get('toolTier')}")
+
+        # Ascend the ladder properly: buy the cheapest rung first.
+        r_buy, s_buy = _cmd("buy commercial")
+        spent = (s_mkt.get("credits") or 0) - (s_buy.get("credits") or 0)
+        ck("buy commercial debits EXACTLY 1500 and sets toolTier",
+           r_buy.get("success") is True and s_buy.get("toolTier") == "commercial"
+           and spent == 1500,
+           f"success={r_buy.get('success')} spent={spent} tier={s_buy.get('toolTier')}")
+        if r_buy.get("success") and spent != 1500:
+            finding(f"buy commercial debited {spent} credits, not the 1500 sticker price")
+
+        # Re-buying what you own must refuse inertly.
+        r_re, s_re = _cmd("buy commercial")
+        ck("re-buying the tier you already own is REFUSED and state-inert",
+           r_re.get("success") is False and s_re.get("credits") == s_buy.get("credits")
+           and s_re.get("toolTier") == "commercial",
+           f"success={r_re.get('success')} credits={s_re.get('credits')} "
+           f"tier={s_re.get('toolTier')}")
+
+        # Downgrading must refuse inertly too (basic is not even purchasable).
+        r_dn, s_dn = _cmd("buy basic")
+        ck("downgrading is REFUSED and state-inert",
+           r_dn.get("success") is False and s_dn.get("credits") == s_buy.get("credits")
+           and s_dn.get("toolTier") == "commercial",
+           f"success={r_dn.get('success')} tier={s_dn.get('toolTier')}")
+
+        # THE point of the feature: the purchased tier must reach the odds math. This is
+        # the check that fires if anyone re-hardcodes ToolTier.BASIC at a call site.
+        ad.type_text_step("scan")
+        tgt = (s_dn.get("discoveredServers") or [None])[0]
+        ck("economy: a target host was discoverable for the odds check", bool(tgt),
+           f"target={tgt}")
+        if tgt:
+            ad.type_text_step(f"connect {tgt}")
+            r_hack, _ = _cmd("escalate")
+            out = r_hack.get("output") or ""
+            ck("a purchased tier reaches the success-rate breakdown (Tool: +20%)",
+               "Tool: +20%" in out,
+               f"breakdown={[l for l in out.splitlines() if 'Tool' in l or 'Base' in l]}")
+            if "Basic" in out:
+                finding("odds breakdown still reports Basic tools after a commercial "
+                        "purchase — a success-rate call site is still hardcoded")
+
+        # Climbing a second rung charges the new tier's full price (no trade-in).
+        r_bm, s_bm = _cmd("buy black_market")
+        spent2 = (s_dn.get("credits") or 0) - (s_bm.get("credits") or 0)
+        ck("climbing to black_market charges its FULL 6000 (no trade-in credit)",
+           r_bm.get("success") is True and s_bm.get("toolTier") == "black_market"
+           and spent2 == 6000,
+           f"success={r_bm.get('success')} spent={spent2} tier={s_bm.get('toolTier')}")
+
+        ck("credits never went negative across the economy sequence",
+           (s_bm.get("credits") or 0) >= 0, f"credits={s_bm.get('credits')}")
+
+        # Insufficient funds needs a POOR player, which the post-spine one is not.
+        # A fresh reset gives the post_tutorial baseline: 1000 credits, basic tier.
+        poor = ad.reset()
+        r_poor, s_poor = _cmd("buy commercial")
+        ck("buy beyond your means is REFUSED and state-inert (fresh 1000-credit player)",
+           r_poor.get("success") is False
+           and s_poor.get("credits") == poor.get("credits")
+           and s_poor.get("toolTier") == "basic",
+           f"success={r_poor.get('success')} credits={s_poor.get('credits')} "
+           f"(was {poor.get('credits')}) tier={s_poor.get('toolTier')}")
+
+        # ══ GATED ACCESS SEMANTICS (NX-L16-1 / NX-L17-1) ════════════════════
+        # The game deliberately distinguishes "you have not reached this yet" from
+        # "this does not exist", and throttles its [HINT] line to attempts 1/5/10 so
+        # repeated refusals do not nag. Both are player-facing CONTENT, so they belong
+        # in R2 — and neither had any gate coverage, which is how the economy sat
+        # untested at a green 36/36 (LESSONS.md O10).
+        # Runs on the fresh post-reset player from the economy leg above, whose hint
+        # counters reset-episode has just zeroed.
+        print("\n  == GATED ACCESS: blocked vs nonexistent, hint throttling ==")
+
+        st0 = ad._read_state()
+        r_gate, _ = _cmd("connect 10.42.0.1")      # real host, story-gated
+        r_none, s_none = _cmd("connect 10.99.99.99")  # no such host
+        gate_out = r_gate.get("output") or ""
+        none_out = r_none.get("output") or ""
+
+        ck("a story-gated host is REFUSED with an access-denied message",
+           r_gate.get("success") is False and "blocked" in gate_out
+           and "Access denied" in gate_out,
+           f"success={r_gate.get('success')} first={gate_out.splitlines()[:1]}")
+        ck("a NONEXISTENT host is refused with a DIFFERENT, 'no such server' message",
+           r_none.get("success") is False and "No server at" in none_out,
+           f"first={none_out.splitlines()[:1]}")
+        # THE regression guard: a change that collapsed these into one message would
+        # pass every other check in the ladder.
+        ck("gated-host and nonexistent-host messages are DISTINGUISHABLE",
+           gate_out != none_out and "No server at" not in gate_out
+           and "blocked" not in none_out,
+           "gated!=missing and neither leaks the other's wording")
+        ck("both connection refusals are state-inert",
+           s_none.get("credits") == st0.get("credits")
+           and s_none.get("compromisedServersCount") == st0.get("compromisedServersCount")
+           and s_none.get("discoveredServersCount") == st0.get("discoveredServersCount"),
+           f"credits={s_none.get('credits')} disc={s_none.get('discoveredServersCount')}")
+
+        # Hint cadence on gated ADDRESSES: attempt 1 already fired above, so 2/3/4
+        # must be silent and 5 must fire again.
+        addr_hits = ["HINT" in gate_out]
+        for _ in range(4):
+            r, _ = _cmd("connect 10.42.0.1")
+            addr_hits.append("HINT" in (r.get("output") or ""))
+        ck("gated-address [HINT] throttles to attempts 1 and 5 (silent on 2-4)",
+           addr_hits == [True, False, False, False, True],
+           f"attempts 1..5 -> {addr_hits}")
+
+        # Gated COMMANDS: `talk` is still gated at the post_tutorial baseline.
+        r_cmd, _ = _cmd("talk sp3ctr3")
+        cmd_out = r_cmd.get("output") or ""
+        ck("a gated COMMAND says blocked/access-denied, NOT 'Command not found'",
+           r_cmd.get("success") is False and "blocked" in cmd_out
+           and "Command not found" not in cmd_out,
+           f"first={cmd_out.splitlines()[:1]}")
+        r_typo, _ = _cmd("zzqq_not_a_command")
+        ck("a genuine TYPO still says 'Command not found' (unknown != gated)",
+           r_typo.get("success") is False
+           and "Command not found" in (r_typo.get("output") or ""),
+           f"first={(r_typo.get('output') or '').splitlines()[:1]}")
+
+        # The two counters must be independent: the 5 address attempts above must not
+        # have consumed the command tally, so this command run still reads 1..5.
+        cmd_hits = ["HINT" in cmd_out]
+        for _ in range(4):
+            r, _ = _cmd("talk sp3ctr3")
+            cmd_hits.append("HINT" in (r.get("output") or ""))
+        ck("gated-command [HINT] throttles 1/5 INDEPENDENTLY of the address counter",
+           cmd_hits == [True, False, False, False, True],
+           f"attempts 1..5 -> {cmd_hits} (address counter already at 5)")
+
+        # NOTE ordering: these run AFTER the cadence assertions above. `help <gated>`
+        # shares the gated-COMMAND tally, so issuing it earlier would consume an attempt
+        # and shift the 1/5 cadence the check above asserts — caught by reasoning about
+        # the counter rather than by a red run, but it would have been a real failure.
+        # NX-L19-1: `help <locked>` was the last place the old "pretend it does not
+        # exist" behaviour survived. All three refusal surfaces must now agree, while
+        # `help <unknown>` deliberately still reads as a typo.
+        r_hg, _ = _cmd("help talk")
+        hg_out = r_hg.get("output") or ""
+        ck("help <GATED command> gives the access-denied message, not 'Unknown command'",
+           r_hg.get("success") is False and "blocked" in hg_out
+           and "Unknown command" not in hg_out,
+           f"first={hg_out.splitlines()[:1]}")
+        r_hu, _ = _cmd("help zzqq_not_a_command")
+        hu_out = r_hu.get("output") or ""
+        ck("help <UNKNOWN command> STILL says 'Unknown command' (unknown != gated)",
+           r_hu.get("success") is False and "Unknown command" in hu_out
+           and "blocked" not in hu_out and "Access denied" not in hu_out,
+           f"first={hu_out.splitlines()[:1]}")
+
+        # ══ NX-L23-1: THE FIRST MISSION IS COMPLETABLE ══════════════════════
+        # tutorial_awakening's find_neighbor objective (find_clue targeting IP
+        # 192.168.1.105) could only ever match an `analyze_target` event — and
+        # nothing emitted one, so the game's FIRST mission was uncompletable by
+        # any play (the L-020 pilot sat at 0/2 for 19 steps for exactly this
+        # reason). `analyze` now emits the event; drive the mission to
+        # `completed` via natural recon and assert the reward lands once.
+        print("\n  == NX-L23-1: tutorial_awakening completable via natural recon ==")
+        ad.difficulty = "normal"   # the hardcore spine above left x1.5 xp set
+        aw0 = ad.reset(f"{seed}-l23")
+        r_acc2, _ = _cmd("accept tutorial_awakening")
+        ck("tutorial_awakening is offered and acceptable at post_tutorial",
+           r_acc2.get("success") is True, f"success={r_acc2.get('success')}")
+        r_sc, s_sc = _cmd("scan 192.168.1.1")
+        aw = _mission(s_sc, "tutorial_awakening") or {}
+        ck("scan 192.168.1.1 completes the scan_home objective (1/2)",
+           r_sc.get("success") is True and aw.get("objectivesCompleted") == 1,
+           f"success={r_sc.get('success')} "
+           f"objectives={aw.get('objectivesCompleted')}/{aw.get('objectivesTotal')}")
+        _cmd("connect 192.168.1.105")
+        r_an, s_an = _cmd("analyze")
+        aw2 = _mission(s_an, "tutorial_awakening") or {}
+        aw_done = aw2.get("status") == "completed"
+        ck("analyze on 192.168.1.105 completes find_neighbor -> MISSION COMPLETED",
+           r_an.get("success") is True and aw_done,
+           f"success={r_an.get('success')} status={aw2.get('status')} "
+           f"objectives={aw2.get('objectivesCompleted')}/{aw2.get('objectivesTotal')}")
+        aw_credits = (s_an.get("credits") or 0) - (aw0.get("credits") or 0)
+        ck("tutorial_awakening pays its +500 credit reward exactly once",
+           aw_done and aw_credits == 500, f"creditsΔ={aw_credits}")
+
+        # ══ NX-L22-1: GRIND RESISTANCE ══════════════════════════════════════
+        # Zero-risk informational commands paid xp on EVERY repeat — an
+        # unbounded, risk-free faucet on the dominant term of every hack roll
+        # (level), found when the L-022 pilot spent its last four steps
+        # re-reading one file. They now pay first-time-only per target (novelty
+        # keys in Player.gameState, cleared by reset-episode). The refusal/
+        # output text is unchanged; only the reward is gated.
+        print("\n  == NX-L22-1: grind resistance (first-time-only info xp) ==")
+        ad.reset(f"{seed}-l22")
+        _cmd("connect 192.168.1.105")
+        r_c1, s_c1 = _cmd("cat /Users/jmiller/Documents/work_vpn.txt")
+        r_c2, s_c2 = _cmd("cat /Users/jmiller/Documents/work_vpn.txt")
+        ck("first cat of a file pays its base +5 xp",
+           r_c1.get("success") is True and int(r_c1.get("xpGain") or 0) == 5,
+           f"xpGain={r_c1.get('xpGain')}")
+        ck("re-reading the SAME file pays NOTHING (success unchanged, xp flat)",
+           r_c2.get("success") is True and not r_c2.get("xpGain")
+           and s_c2.get("xp") == s_c1.get("xp"),
+           f"xpGain={r_c2.get('xpGain')} xp {s_c1.get('xp')} -> {s_c2.get('xp')}")
+        r_a1, s_a1 = _cmd("analyze")
+        r_a2, s_a2 = _cmd("analyze")
+        ck("first analyze pays +50; a REPEAT pays neither xp nor skill (was the "
+           "worst faucet: +50xp/+20skill per spam)",
+           int(r_a1.get("xpGain") or 0) == 50 and not r_a2.get("xpGain")
+           and not r_a2.get("skillGain") and s_a2.get("xp") == s_a1.get("xp"),
+           f"first={r_a1.get('xpGain')} repeat={r_a2.get('xpGain')}")
+        r_s1, s_s1 = _cmd("scan")
+        r_s2, s_s2 = _cmd("scan")
+        ck("bare scan pays once (+25); a repeat pays NOTHING",
+           int(r_s1.get("xpGain") or 0) == 25 and not r_s2.get("xpGain")
+           and s_s2.get("xp") == s_s1.get("xp"),
+           f"first={r_s1.get('xpGain')} repeat={r_s2.get('xpGain')}")
+        # The exact L-022 grind line, replayed: six consecutive re-reads of the
+        # same file must leave xp perfectly flat.
+        grind_xp = s_s2.get("xp")
+        flat = True
+        for _ in range(6):
+            _rg, _sg = _cmd("cat /Users/jmiller/Documents/work_vpn.txt")
+            flat = flat and _sg.get("xp") == grind_xp
+        ck("the L-022 grind line itself (6x re-read) now yields ZERO xp",
+           flat, f"xp flat at {grind_xp}" if flat
+           else f"xp moved during the grind (now {_sg.get('xp')})")
+        # Reset must clear the novelty set — the NX-L15-1 class of bug, proven
+        # over the wire: the NEXT episode's first read pays again.
+        ad.reset(f"{seed}-l22b")
+        _cmd("connect 192.168.1.105")
+        r_c3, _ = _cmd("cat /Users/jmiller/Documents/work_vpn.txt")
+        ck("reset-episode CLEARS the novelty set (first read pays again post-reset)",
+           int(r_c3.get("xpGain") or 0) == 5, f"xpGain={r_c3.get('xpGain')}")
 
     except Exception as exc:  # noqa: BLE001
         import traceback

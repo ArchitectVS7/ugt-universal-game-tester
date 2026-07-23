@@ -472,6 +472,10 @@ class DddHarnessAdapter(BaseAdapter):
         corrupting the run.
         """
         before = self._hash_stream[-1] if self._hash_stream else None
+        if isinstance(action, dict):
+            # Underscore-prefixed keys are display-only annotations added by
+            # legal_actions() (_card/_hand) — never part of the wire action.
+            action = {k: v for k, v in action.items() if not k.startswith("_")}
         resp = self._request({
             "op": "act",
             "matchId": self._match_id,
@@ -488,6 +492,94 @@ class DddHarnessAdapter(BaseAdapter):
     def replay_current(self) -> dict:
         """Ask the harness to re-simulate the recorded action log and verify it."""
         return self._request({"op": "replay", "matchId": self._match_id})
+
+    # ── legal-action drive mode (L-002 playtest seam) ─────────────────────────
+    # A thin, game-agnostic channel for the LLM playtester: expose the SAME legal
+    # list the ladder scripts read via `_legal`, and apply ONE chosen legal action
+    # verbatim. Both methods are pure relays composed of existing primitives
+    # (`_pending_seat`, `_legal`, `send_raw_action`, `_read_state`) — no rules, no
+    # fabricated effects (the sim_bridge discipline this file enforces).
+    def legal_actions(self):
+        """Legal action objects for the seat the engine is waiting on — the SAME
+        list the ladder scripts read via `_legal`, made playable-as-shown for a
+        wire client. Returns [] when the match has ended (no pending seat).
+
+        Two enrichments, both relays of the harness's own responses (never
+        fabricated):
+
+        - COMMIT_SELECTION actions get `targets` filled via `fill_targets` —
+          the engine's `legalActions` always reports `targets: []` and its
+          `targets` op is the only way a wire client discovers eligible ids
+          (harness router.ts contract). Sending the raw list entry verbatim
+          replays the L-007 "targeted cards played blank" wire defect on this
+          side of the wire; the exploit-hunter path (`_select`) has always
+          filled, this brings `apply_legal` to parity. They also get an
+          `_card` annotation: the card's `defId` from the seat's OWN hand view
+          (fog-of-war safe — it is the acting player's own hand).
+        - MULLIGAN actions get a `_hand` annotation listing the hand's defIds,
+          so a mulligan decision can actually be made on card identity.
+
+        Underscore-prefixed keys are display-only for the LLM prompt and are
+        stripped by `send_raw_action` before anything reaches the engine."""
+        seat = self._pending_seat()
+        if seat is None:
+            return []
+        actions, _ = self._legal(seat)
+        views = self._views or []
+        hand = (views[seat].get("me", {}).get("hand") or []) if seat < len(views) else []
+        hand_defids = [c.get("defId") for c in hand]
+        enriched = []
+        for action in actions:
+            if action.get("t") == "COMMIT_SELECTION":
+                action = self.fill_targets(seat, action)
+                action = {**action, "_card": self.defid_of(seat, action.get("instanceId"))}
+            elif action.get("t") == "MULLIGAN":
+                action = {**action, "_hand": hand_defids}
+            enriched.append(action)
+        return enriched
+
+    def seat_view(self, seat: int) -> dict:
+        """The engine's own raw `PlayerView` for `seat`, as last returned by
+        `create`/`act` — the exact shape `packages/harness`'s wire protocol
+        exposes (fog-of-war already applied by the engine). Pure cache read, no
+        request. This is NOT the redacted `p0`/`p1` dict `_normalize` builds for
+        the LLM prompt (which strips even hand identity) — it is the fuller view
+        `@ddd/ai`'s strategies need, and it is exactly what this seat is entitled
+        to see, never the other seat's."""
+        views = self._views or [{}, {}]
+        return views[seat] if seat < len(views) else {}
+
+    def apply_legal(self, action, legal_count=None):
+        """Apply ONE legal action object verbatim and return the standard
+        (state, terminated, truncated, info) 4-tuple.
+
+        `action` MUST be a member of the list `legal_actions()` returned this step
+        (the LLM picks it by index). It is sent verbatim through `send_raw_action`,
+        so the engine — never this adapter — decides the outcome; a legal action
+        that is unexpectedly refused surfaces as `result.ok is False`, which the DDD
+        invariant suite (`inv_no_error_on_legal`) turns into a real finding. `info`
+        carries the `command`/`result` shape those invariants read."""
+        resp = self.send_raw_action(action)
+        after = self._read_state()
+        terminated = after.get("resultKind", "ONGOING") != "ONGOING"
+        name = action.get("t") if isinstance(action, dict) else str(action)
+        result = {
+            **resp,
+            "legalCount": legal_count or 0,
+            "probe": False,
+            "actionName": name,
+        }
+        info = {
+            "command": "act",
+            "action": action,
+            "actionName": name,
+            "seat": resp.get("seat"),
+            "probe": False,
+            "stateHash": after.get("stateHash"),
+            "result": result,
+            "legalCount": legal_count or 0,
+        }
+        return after, terminated, False, info
 
     # ── seat / action selection (transport policy, NOT game logic) ───────────
     def _pending_seat(self):
@@ -663,6 +755,16 @@ class DddHarnessAdapter(BaseAdapter):
             "hp": me.get("hp"),
             "focus": me.get("focus"),
             "stance": me.get("stance"),
+            # PUBLIC prediction-layer fields (rulebook §6.2/§6.3) — the engine
+            # marks all four PUBLIC in state/types.ts. Dropping them starved the
+            # LLM tier of the game's entire read layer (L-011): echo is the
+            # opponent's last card's {cardType, focusCost} ghost, chain.history
+            # its rolling last-3 played types. statuses/modifiers are the live
+            # Burn ticks / future-cost deltas a real client shows.
+            "echo": me.get("echo"),
+            "chain": me.get("chain"),
+            "statuses": me.get("statuses"),
+            "modifiers": me.get("modifiers"),
             "handCount": len(me.get("hand", []) or []),
             "deckCount": me.get("deckCount"),
             "graveyardCount": len(me.get("graveyard", []) or []),

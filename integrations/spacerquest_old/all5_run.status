@@ -1,6 +1,0 @@
-[all5] START Sat Jul  4 02:00:30 CDT 2026
-[all5] TRAIN trader start Sat Jul  4 02:00:30 CDT 2026
-[all5] TRAIN trader exit=0 Sat Jul  4 02:45:12 CDT 2026
-[all5] EVAL  trader start Sat Jul  4 02:45:12 CDT 2026
-[all5] EVAL  trader exit=0 Sat Jul  4 03:07:02 CDT 2026
-[all5] TRAIN explorer start Sat Jul  4 03:07:02 CDT 2026

@@ -148,6 +148,26 @@ class Episode:
 CONTACT_RANGE = 32.0
 
 
+def heuristic_combat_action(state, contact_range=CONTACT_RANGE):
+    """R1's section-2 combat policy, extracted verbatim so it is the SINGLE
+    definition of "how a player drives combat here" — reused by the macro-layer
+    playtest (L-004) between level-up decisions, so that tier isolates the LLM's
+    judgment to the mutation choice and drives the fight with the exact policy R1
+    validates, not a rewrite.
+
+    Play like a player: close the distance, swing in range, and dodge out when
+    hurt with something on top of us. Returns one action id
+    (A_IDLE/A_DODGE/A_ATTACK/A_CHASE)."""
+    if state["enemy_count"] == 0:
+        return A_IDLE
+    if state["player_hp"] < state["player_max_hp"] * 0.5 \
+            and state["nearest_enemy_dist"] <= contact_range:
+        return A_DODGE
+    if state["nearest_enemy_dist"] <= 130:
+        return A_ATTACK
+    return A_CHASE
+
+
 def main() -> int:
     seed = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_SEED
     cfg = UgtConfig(CONFIG_PATH)
@@ -182,16 +202,10 @@ def main() -> int:
             if st["enemy_count"] > 0:
                 saw_enemies = True
             # Play like a player: close the distance, swing in range, and dodge
-            # out when hurt with something on top of us.
-            if st["enemy_count"] == 0:
-                action = A_IDLE
-            elif st["player_hp"] < st["player_max_hp"] * 0.5 \
-                    and st["nearest_enemy_dist"] <= CONTACT_RANGE:
-                action = A_DODGE
-            elif st["nearest_enemy_dist"] <= 130:
-                action = A_ATTACK
-            else:
-                action = A_CHASE
+            # out when hurt with something on top of us. Extracted to
+            # heuristic_combat_action() so L-004's macro playtest reuses this
+            # exact policy verbatim between level-ups.
+            action = heuristic_combat_action(st)
             _, term, _, _ = ep.step(action)
             if term:
                 break
