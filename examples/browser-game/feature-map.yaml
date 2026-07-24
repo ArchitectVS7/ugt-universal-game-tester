@@ -1,0 +1,56 @@
+# Feature Map — BrowserExampleGame (Credit Clicker)
+# Used by: ugt verify --config ugt.config.yaml --feature-map feature-map.yaml
+#
+# The browser example runs the SAME "credit clicker" game as examples/mock-game,
+# driven through a real headless browser instead of a subprocess. The features are
+# therefore the same — this shows that a feature map is transport-agnostic: it
+# asserts on state deltas, not on how the state was produced.
+#
+# Prereq: start the game server first (./serve.sh) so http://localhost:8080 is up.
+# Run order is by priority: critical → major → minor. Features whose precondition
+# is never met are reported NOT_REACHED (not a failure).
+
+game: "BrowserExampleGame"
+version: "1.0"
+
+features:
+  - id: game.wait_is_neutral
+    description: "The wait action does not change credits or AP"
+    action: "wait"
+    assertion:
+      - "state.player.credits == before.player.credits"
+      - "state.player.ap == before.player.ap"
+    priority: major
+
+  - id: economy.invest_increases_credits
+    description: "Investing credits increases the player credit balance"
+    action: "invest_credits"
+    assertion: "state.player.credits > before.player.credits"
+    priority: critical
+    precondition: "state.player.ap >= 2"
+
+  - id: economy.invest_costs_ap
+    description: "Investing costs action points"
+    action: "invest_credits"
+    assertion: "state.player.ap < before.player.ap"
+    priority: critical
+    precondition: "state.player.ap >= 2"
+
+  - id: game.end_turn_advances_counter
+    description: "Ending the turn increments the turns_elapsed counter"
+    action: "end_turn"
+    assertion: "state.turns_elapsed > before.turns_elapsed"
+    priority: critical
+
+  - id: game.end_turn_restores_ap
+    description: "Ending the turn restores AP to 10"
+    action: "end_turn"
+    assertion: "state.player.ap == 10"
+    priority: major
+
+  - id: game.win_condition
+    description: "Reaching 500 credits triggers a victory (exposed via the state hook)"
+    action: "invest_credits"
+    assertion: "state.victory == True"
+    priority: critical
+    precondition: "state.player.credits >= 450 and state.player.ap >= 2"

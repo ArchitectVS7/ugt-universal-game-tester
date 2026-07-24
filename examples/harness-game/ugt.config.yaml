@@ -1,0 +1,48 @@
+project:
+  name: "ForagingRun"
+  version: "1.0.0"
+
+# ── How this game is driven ──────────────────────────────────────────────────
+# This is an ENGINE-FIRST integration: the game runs in its own process
+# (harness.py) and speaks JSON-lines, and a purpose-built transport-only adapter
+# (harness_adapter.py) is constructed DIRECTLY by the trial-ladder scripts
+# (spike/smoke/verify_round{1,2,3}.py) — the same pattern the real subprocess-
+# harness integrations use. It is therefore NOT registered under an `engine.type`
+# in ugt/core/env.py, so the bare `ugt verify` / `ugt playtest` CLI paths don't
+# wire to it; run the ladder scripts instead (see README.md). The sibling
+# examples/mock-game shows the `engine.type: simulation` CLI path.
+#
+# The sections below document the config SHAPE a game provides to UGT.
+
+observation_space:
+  type: "box"
+  shape: 5
+  mappings:
+    - { path: "hp",        min: 0, max: 10 }
+    - { path: "supplies",  min: 0, max: 99 }
+    - { path: "coins",     min: 0, max: 99 }
+    - { path: "location",  min: 0, max: 4 }
+    - { path: "day",       min: 0, max: 12 }
+
+action_space:
+  type: "discrete"
+  size: 6
+  actions:
+    0: { name: "wait" }       # safe no-op
+    1: { name: "forage" }     # gather supplies (small hp risk)
+    2: { name: "rest" }       # spend 1 supply, recover 2 hp
+    3: { name: "travel" }     # spend 2 supplies, advance one location
+    4: { name: "trade" }      # spend 2 coins for 3 supplies
+    5: { name: "end_day" }    # advance the day; resolves win/loss
+
+evaluation:
+  victory_key: "won"
+
+# reward_profiles feed the LEGACY RL train/evaluate path only (demoted as a
+# balance judge — see PLAN-FORWARD.md). The current ladder judges correctness and
+# robustness with invariants (invariants.py), not a reward formula.
+reward_profiles:
+  arrive:
+    formula: "(state.location * 10) + (state.hp * 1) - (state.day * 0.5)"
+    win_bonus: 200
+    loss_penalty: 100

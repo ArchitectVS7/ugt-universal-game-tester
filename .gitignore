@@ -25,7 +25,7 @@ Dev/STATUS.md
 integrations/
 
 # Node (integration harnesses shell out to node). No trailing slash so this also
-# catches node_modules symlinks (e.g. examples/spacerquest/node_modules).
+# catches node_modules symlinks pointing at an upstream game's dependencies.
 node_modules
 
 # Virtual environments

@@ -1,11 +1,23 @@
+import os
+import random
 import sys
 import json
 
 class MockGame:
     def __init__(self):
+        # Reproducibility: seed from UGT_SEED and advance per episode, exactly as a
+        # real bridge should (see UGT-USER-MANUAL.md §4a). The core economy here is
+        # deterministic; the seed drives `enemy.credits` — a genuine per-episode
+        # random walk — so two runs with the same UGT_SEED are byte-identical and a
+        # different seed produces a different enemy trajectory. Nothing the
+        # feature-map asserts depends on it.
+        self.base_seed = int(os.environ.get("UGT_SEED", 12345))
+        self.episode_count = 0
+        self.rng = random.Random(self.base_seed)
         self.credits = 100
         self.ap = 10
         self.turns_elapsed = 0
+        self.enemy_credits = 0
         self.victory = False
         self.defeat = False
 
@@ -16,7 +28,7 @@ class MockGame:
                 "ap": self.ap
             },
             "enemy": {
-                "credits": 0
+                "credits": self.enemy_credits
             },
             "turns_elapsed": self.turns_elapsed,
             "victory": self.victory,
@@ -24,9 +36,13 @@ class MockGame:
         }
 
     def reset(self):
+        # Per-episode seed so a same-seed re-run reproduces every episode.
+        self.rng = random.Random(self.base_seed + self.episode_count)
+        self.episode_count += 1
         self.credits = 100
         self.ap = 10
         self.turns_elapsed = 0
+        self.enemy_credits = self.rng.randint(0, 100)
         self.victory = False
         self.defeat = False
         return self.get_state()
@@ -45,6 +61,8 @@ class MockGame:
             # end_turn
             self.turns_elapsed += 1
             self.ap = 10
+            # A seeded random walk for the rival economy (reproducible per seed).
+            self.enemy_credits = max(0, min(100, self.enemy_credits + self.rng.randint(-20, 20)))
 
         # Check endgame
         if self.credits >= 500:

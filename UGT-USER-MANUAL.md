@@ -77,6 +77,12 @@ definition reused by both the scripted rounds and the exploit-hunter, so the tie
 normalization — stays in the game's `integrations/<game>/` files. A failed check is DATA: findings print
 inline, fail the gate, and get fixed upstream in the game.
 
+> **Worked example:** `examples/harness-game/` is a complete, dependency-free implementation of this whole
+> ladder — a tiny deterministic game (`engine.py`) driven engine-first over a JSON-lines harness through a
+> transport-only adapter, with all five rungs (`spike_foraging.py` … `verify_round3.py`) runnable in one
+> command. It is the fastest way to see the ladder, the invariant-suite reuse across R1/R2/R3, and the
+> exploit-hunter + determinism check in action. Read its `README.md` first.
+
 ### What happens once R3 passes
 
 R3 answers "does it work / does it break" — it does **not** answer "is it good." A green ladder is the

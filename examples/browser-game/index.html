@@ -34,12 +34,16 @@
 
     // === UGT Interface Hooks ===
 
-    // Returns current game state as a flat JSON object
+    // Returns current game state as a flat JSON object.
+    // Terminal flags (victory/defeat) are exposed so a black-box tester can SEE
+    // the win/loss outcome — a field the tester can't infer, it must be surfaced.
     window.__GET_STATE__ = function() {
         return {
             player: { credits: gameState.credits, ap: gameState.ap },
             enemy: { credits: 0 },
-            turns_elapsed: gameState.turns_elapsed
+            turns_elapsed: gameState.turns_elapsed,
+            victory: gameState.victory,
+            defeat: gameState.defeat
         };
     };
 

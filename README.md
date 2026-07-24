@@ -27,6 +27,10 @@ These three tiers are run in a standardized sequence per game integration — th
 R2 full content spine → R3 exploit-hunter + determinism. Each integration lives in its own
 `integrations/<game>/` directory (a self-contained set of ladder scripts + a findings log).
 
+**`examples/harness-game/` is a complete, dependency-free worked example of that whole ladder** — a tiny
+deterministic game driven engine-first over a JSON-lines harness, with all five rungs runnable in one
+command. Start there to see the methodology end to end.
+
 There is also an older RL train/evaluate path (`ugt train` / `ugt evaluate`, PPO/DQN/A2C via
 stable-baselines3), still functional against `simulation`/`browser` engines, but demoted as a
 balance-judgment tool in favor of the LLM playtester — see `PLAN-FORWARD.md` for why.
