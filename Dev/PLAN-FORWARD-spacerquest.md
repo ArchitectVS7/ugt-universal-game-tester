@@ -378,4 +378,4 @@ integration. Revisit when a task below actually blocks the current game, not on 
 | Onboard a new game + methodology | `UGT-USER-MANUAL.md` |
 | Real game routes (nav/arrive/combat) | `SpacerQuest/spacerquest-web/src/app/routes/`, `src/sockets/game.ts` |
 | Retired bridge (do not extend) | `integrations/spacerquest/sim_bridge.ts` |
-| Superseded docs (why + where content went) | `archive/README.md` |
+| Superseded docs (why + where content went) | `README.md` (this folder) |

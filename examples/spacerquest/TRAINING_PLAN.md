@@ -1,5 +1,11 @@
 # SpacerQuest UGT Policy Training Plan
 
+> **⚠️ RETIRED — part of the `sim_bridge.ts` cautionary example, not a live plan.** This
+> roadmap was written against the retired bridge described in `README.md` in this same
+> folder — do not execute it or use it as a template for a new integration. See
+> `../../PLAN-FORWARD.md` and `../../Dev/PLAN-FORWARD-spacerquest.md` for the current
+> SpacerQuest (Rimward) direction.
+
 This plan outlines the roadmap for training and evaluating reinforcement learning agents (PPO policy) on SpacerQuest v4.0.
 
 ---

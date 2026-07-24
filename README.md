@@ -73,6 +73,9 @@ fabricating behavior.
 ## Where to go next
 
 - **`PLAN-FORWARD.md`** — current direction: what's been proven, what's next, links to full history.
+- **`LESSONS.md`** — the canonical cross-game lessons registry: core methodology, the mandatory LLM-playtest
+  pre-flight information-integrity audit (read before any balance batch), and operational discipline. Read
+  this before any test run.
 - **`UGT-USER-MANUAL.md`** — onboarding a new game, including the trial-ladder methodology in depth.
 - **`PLAYTEST-DESIGN.md`** — design spec for the LLM balance-playtester tier.
 - **`integrations/README.md`** — the index of every game this framework has actually been run against,

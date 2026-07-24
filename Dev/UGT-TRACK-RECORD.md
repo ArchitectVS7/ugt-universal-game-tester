@@ -1,7 +1,7 @@
 # UGT Track Record — Has It Earned Its Place?
 
 *Compiled 2026-07-21; refreshed same day after the L-001–L-006 LLM-tier push. Sources: `PLAN-FORWARD.md`,
-`archive/PLAN-FORWARD-spacerquest.md`, every `integrations/<game>/{HANDOFF,RESULTS,README}.md`,
+`PLAN-FORWARD-spacerquest.md` (this folder), every `integrations/<game>/{HANDOFF,RESULTS,README}.md`,
 `PLAYTEST-DESIGN.md`, `UGT-USER-MANUAL.md`, `TASKS.md` (L-001–L-006 delivery notes), the surviving
 `integrations/spacerquest_old/results/**/*.json` campaign logs, and git history of `ugt/core`, `ugt/adapters`,
 `ugt/cli.py`, `ugt/utils`.*

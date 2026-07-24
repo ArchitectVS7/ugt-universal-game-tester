@@ -135,3 +135,24 @@ instead is the PRD's own specified-but-unbuilt "Simulation" test tier
 The **LLM balance playtester** tier (does the galaxy produce good *games*?) is
 not run here — it is credit-gated and pending, as for the other engine-first
 integrations.
+
+---
+
+## L-003: LLM playtest tier wired + validated (2026-07-21)
+
+`integrations/nexus-dominion/playtest_nexus_dominion.py` wires
+`NexusDominionHarnessAdapter` to the L-002 structured legal-action drive mode
+via a `PlaytestNexusDominionAdapter` subclass (pure relays, no new game
+logic), a `playtest:` block added to `ugt.config.yaml`, and a new
+`strategy-guide.md` covering the 4X loop. Part of the same cross-game rollout
+that wired the tier for ddd/nexus/pond/tarot-war (`Dev/TASKS-2026-07-21-llm-playtest-rollout.md`).
+
+Validated live with `--provider ollama` (gemma4:26b): **22 actions taken, 18
+state-delta steps, 0 invariant violations.** — commit `557eea5`
+
+This closes the "credit-gated, pending" status the characterization section
+above still describes for the LLM tier as of the 2026-07-16 ladder
+completion — superseded by this entry. The **statistically-powered balance
+batch** (multiple runs, seat/turn-order controlled) has not been run; that
+remains the actual next step for this tier, same as for the other
+engine-first integrations.

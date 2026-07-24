@@ -1,11 +1,13 @@
 # DDD — a two-player deterministic dueling card game
 
 > **FULL LADDER COMPLETE AND GREEN** as of the 2026-07-12 evening re-run vs DDD commit
-> `0eb0df83` (zero open R3 findings). **LLM playtest tier newly validated 2026-07-21**
-> (commit `7fc6f72`, "L-002") — call this out prominently: `HANDOFF.md`/`RESULTS.md`
-> (both last touched 2026-07-12) still say the playtest tier is "NOT done" /
-> "credit-gated" / "not yet wired". **That claim is now FALSE.** See "LLM playtest"
-> below, and correct `HANDOFF.md`/`RESULTS.md` to match next time either is touched.
+> `0eb0df83` (zero open R3 findings). **LLM playtest tier wired 2026-07-21 (L-002/L-007)
+> and extensively exercised through L-013 (2026-07-22)**: fixed-opponent matchup batches
+> (gemma4:26b then Haiku 4.5) reproduce a Blitzblade-over-Swarm win-rate asymmetry that
+> does not move with a stronger model — pointing away from "the LLM just plays Swarm
+> badly" and toward the deck or the graveyard-recursion mechanic itself. Cause is still
+> undetermined; see "LLM playtest" below. **LLM re-runs are PAUSED pending explicit user
+> go** (L-011) — do not spend another balance batch without it.
 
 DDD is a two-player deterministic dueling card game: 30 HP per seat, a 0–5 focus
 resource, a 7-card hand cap, a 40-card COMPETITIVE deck or a 25-card TUTORIAL deck,
@@ -63,19 +65,45 @@ engine's refusal paths are state-inert; an *accepted* probe is itself a finding.
   targets" was **FALSE**. Only `@ddd/sim`'s random policies skip target-filling;
   `@ddd/ai` does fill targets (`packages/ai/src/eval/candidate.ts:45`, tiers 2+3).
 
-## LLM playtest (new, 2026-07-21)
+## LLM playtest (wired 2026-07-21, exercised through L-013 2026-07-22)
 
-As of commit `7fc6f72` ("L-002"), a structured/legal-action playtest drive mode is
-built and **validated end-to-end** against `DddHarnessAdapter`: a new
-`playtest_game_with_adapter()` entry point in `ugt/core/playtester.py`, driven here by
-`playtest_ddd.py` + `strategy-guide.md`. A live ollama run completed **25 actions, 0
-invariant violations**. This closes the "credit-gated"/"not yet wired" status that
-`HANDOFF.md`/`RESULTS.md` still carry from 2026-07-12 — this tier is no longer pending.
+A structured/legal-action playtest drive mode is built and validated end-to-end against
+`DddHarnessAdapter`: a `playtest_game_with_adapter()` entry point in
+`ugt/core/playtester.py`, driven here by `playtest_ddd.py` (single-run) and
+`playtest_ddd_matchup.py` (fixed-opponent matchup mode, added L-012) +
+`strategy-guide.md`. Full detail and corrections chain in `RESULTS.md` L-007..L-013;
+condensed:
 
-Run it with:
+- **L-007** — tier wired; ollama run, 25 actions, 0 invariant violations.
+- **L-008** — first multi-run batch (92.6% seat-0 win rate) — later found **CONFOUNDED**
+  by seat/turn-order, not comparable to DDD's own T6.2 (36%).
+- **L-009** — root-caused L-008 as **blind play**: 3 harness defects (no card identity in
+  prompt, a god-view leak, unfilled targets) found and fixed before any further batch.
+- **L-010** — seat-swapped pooled batch (Haiku 4.5): Blitzblade 89.8% win rate.
+- **L-011** — root-caused L-010 as **rules-blind**: the adapter dropped public
+  echo/chain state and the guide taught no triangle/stance rules; both fixed. A stance
+  design recommendation was filed to the DDD repo. **LLM re-runs PAUSED pending explicit
+  user go** — the pause is still in effect.
+- **L-012** — a **fixed-opponent matchup** smoke test (LLM plays one seat vs. DDD's own
+  tier1/2/3 AI, not self-play) reproduces the Blitzblade-over-Swarm asymmetry; cause
+  (deck / pilot / mechanic) undetermined.
+- **L-013** — Haiku 4.5 re-run of the same matchup design: Blitzblade's win rate improves
+  with model strength (2W–4L → 3W–3L), **Swarm's does not move at all** (0/15 wins across
+  both models) — shifts hypothesis weight away from pure pilot skill, still unresolved
+  against `apps/probe`'s own GREEN parity gates. Tracked as DDD's own T6.2/T6.3, not a
+  UGT-side item.
+
+Run a single-seat smoke run with:
 
 ```bash
 python3 integrations/ddd/playtest_ddd.py
+```
+
+Or the fixed-opponent matchup mode (see `RESULTS.md` L-012 before running — this is the
+mode the PAUSED note above applies to):
+
+```bash
+python3 integrations/ddd/playtest_ddd_matchup.py
 ```
 
 ## How to run (full ladder, from the UGT repo root)
@@ -86,16 +114,22 @@ python3 integrations/ddd/smoke_ddd_adapter.py  #  5/5 through the BaseAdapter co
 python3 integrations/ddd/verify_round1.py      # R1 — one full match + determinism
 python3 integrations/ddd/verify_round2.py      # R2 — the full content spine
 python3 integrations/ddd/verify_round3.py      # R3 — ExploitHunter + refusal battery
-python3 integrations/ddd/playtest_ddd.py       # LLM playtest (L-002 drive mode)
+python3 integrations/ddd/playtest_ddd.py       # LLM playtest, single-run (L-002 drive mode)
+python3 integrations/ddd/playtest_ddd_matchup.py --runs N  # fixed-opponent matchup batch (L-012)
 ```
 
 Supporting files:
 - **`invariants.py`** — shared predicates (`inv_hash_present`, `inv_hp_bounds`,
   `inv_focus_bounds`, `inv_hand_cap`, `inv_card_conservation`, `inv_turn_monotonic`,
   `inv_no_error_on_legal`, `inv_legal_nonempty_while_ongoing`), imported by every
-  `verify_round*.py` script and by `playtest_ddd.py`.
+  `verify_round*.py` script and by `playtest_ddd*.py`.
 - **`ugt.config.yaml`** — drives action ids, observation mappings, and the `playtest`
   config block.
+- **`analyze_playtest_batch.py`** — win-rate/CI analyzer over a batch's pooled JSON
+  artifacts (added during the L-008..L-010 balance-batch work).
+- **`archive_batch.py`** — files a completed batch's raw artifacts under
+  `results/batch-<label>/` (added L-013, after an early run clobbered a same-named
+  artifact from a different seat/model cell).
 
 ## Prerequisites
 
@@ -107,12 +141,11 @@ Supporting files:
 
 ## Folder hygiene
 
-Nothing is archived here. All 12 tracked files (`HANDOFF.md`, `README.md`,
-`RESULTS.md`, `invariants.py`, `playtest_ddd.py`, `smoke_ddd_adapter.py`,
-`spike_ddd.py`, `strategy-guide.md`, `ugt.config.yaml`, `verify_round1.py`,
-`verify_round2.py`, `verify_round3.py`) are load-bearing and current — this pass is a
-**content currency fix** (correcting the stale playtest-tier status), not a
-decluttering job.
+Nothing is archived here. Every tracked file (`HANDOFF.md`, `README.md`, `RESULTS.md`,
+`invariants.py`, `playtest_ddd.py`, `playtest_ddd_matchup.py`, `analyze_playtest_batch.py`,
+`archive_batch.py`, `smoke_ddd_adapter.py`, `spike_ddd.py`, `strategy-guide.md`,
+`ugt.config.yaml`, `verify_round1.py`, `verify_round2.py`, `verify_round3.py`) is
+load-bearing and current — there is nothing superseded to move out of this folder.
 
 ## Where to go next
 

@@ -14,11 +14,10 @@ exist in place of endings.
 findings, same-seed replay byte-identical. This was game #6 in the UGT
 portfolio.
 
-**LLM playtest tier newly wired and validated 2026-07-21** (commit `557eea5`,
-"L-003") — this postdates the 2026-07-16 ladder docs. `HANDOFF.md` and
-`RESULTS.md` still carry the older "credit-gated, pending" line for the
-playtest tier; that line is now out of date and superseded by the section
-below.
+**LLM playtest tier wired and validated 2026-07-21** (commit `557eea5`,
+"L-003", see `RESULTS.md`) — 22 actions, 18 state-delta steps, 0 invariant
+violations via `--provider ollama`. The statistically-powered balance batch
+has not been run yet.
 
 **Start with `HANDOFF.md`** for the full resume-here state. `RESULTS.md` is
 the commit-traceable findings log. Historical material (the pre-build

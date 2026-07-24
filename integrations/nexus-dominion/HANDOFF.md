@@ -4,6 +4,12 @@
 R2 17/17 · R3 43/43.** 10 defects found + fixed upstream (see `RESULTS.md`).
 Game suite 1137 green, tsc clean, build green.
 
+**LLM playtest tier (2026-07-21, L-003): wired + validated.**
+`playtest_nexus_dominion.py` drives the game via the structured legal-action
+mode; ollama/gemma4:26b run — 22 actions, 18 state-delta steps, 0 invariant
+violations. See `RESULTS.md` L-003. The statistically-powered balance batch
+has not been run yet — that's the actual next step for this tier.
+
 ## What this is
 
 Game #6. An **engine-first JSON-lines subprocess** trial (the DDD pattern), not
@@ -56,9 +62,9 @@ override with `NEXUS_DOMINION_HARNESS_PATH` / `NEXUS_DOMINION_HARNESS_CWD`.
 
 ## Open / next
 
-1. **LLM balance playtester tier** (credit-gated, pending — same gap as the
-   other engine-first integrations). Would drive the `press_key`-less structured
-   order interface; a JSON-order drive mode already exists (this adapter is it).
+1. **Statistically-powered LLM balance batch** — the tier is wired and smoke-
+   validated (L-003 above); a multi-run, seat/turn-order-controlled batch
+   (the DDD/nexus pattern) has not been run yet.
 2. **Design-pass items** the trial characterized but did not gate (see
    `RESULTS.md`): propose-pact auto-accept, flat transit time, instant
    colonisation, idle rank-climb (U-110 finding 4 residual). These belong to the

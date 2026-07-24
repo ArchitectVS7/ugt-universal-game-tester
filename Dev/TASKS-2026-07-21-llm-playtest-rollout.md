@@ -12,7 +12,7 @@ Sources of truth: `UGT-TRACK-RECORD.md` (why this list exists), `PLAN-FORWARD.md
 "`ugt playtest` structured-JSON drive mode"), `PLAYTEST-DESIGN.md` (the LLM tier's design spec — state-delta
 assertions, expected_outcome commitment, RNG seams), `ugt/core/playtester.py` (the tier itself),
 `ugt/core/exploit_hunter.py` (the shared, already-hardened R3 driver — the reference-good pattern for M0), and
-the archived `archive/TASKS-2026-07-20-pond-r2-gate-repair.md` (this list's Standing constraints reuse its
+the archived `TASKS-2026-07-20-pond-r2-gate-repair.md` (this folder; this list's Standing constraints reuse its
 "no vacuous passes" language, since that repair is exactly the failure class M0 is checking for elsewhere).
 Per repo `CLAUDE.md` there is no pytest suite — these scripts *are* the tests.
 
