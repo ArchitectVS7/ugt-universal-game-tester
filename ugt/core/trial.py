@@ -3,9 +3,9 @@ Trial-ladder scaffold — the game-agnostic skeleton shared by every per-game
 verify_round{1,2,3}.py script (the R1 "one loop" / R2 "full spine" / R3
 "exploit-hunter walk" ladder documented in UGT-USER-MANUAL.md).
 
-Extracted from the NEXUS trial scripts (integrations/nexus/), where the same
-three pieces were duplicated verbatim across rounds — and, before that, across
-the warzones and tarot-war trials:
+Extracted from the fourth game trial's ladder scripts, where the same three
+pieces were duplicated verbatim across rounds — and, before that, across the
+two browser-game trials that preceded it:
 
   * GateRunner       — the [PASS]/[FAIL] check accumulator, [FINDING] registry,
                        and the "ROUND N MET — p/t" footer with its exit code.

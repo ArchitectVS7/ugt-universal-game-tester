@@ -15,8 +15,8 @@
 > each with its evidence and source. Read it before onboarding a game, before advancing a ladder rung, and
 > before any LLM playtest run. New lessons go there, not here.
 
-The nine core rules — **read the full text and the evidence behind each in `LESSONS.md` §A**; they are not
-restated here to avoid drift between two copies:
+The nine core rules, as one-line index entries only — **the full text and the evidence behind each live in
+`LESSONS.md` §A**, the single canonical copy; if a line below ever disagrees with LESSONS, LESSONS wins:
 
 - **M1 · Drive the REAL game, never a re-implementation.** If your adapter contains game *rules*, you're
   testing the adapter, not the game. (A simulation bridge that quietly dropped combat is the founding lesson.)
@@ -125,7 +125,7 @@ R3 answers "does it work / does it break" — it does **not** answer "is it good
    - 6c. Reading the Coverage Report
    - 6d. Troubleshooting Verify
 7. [Quick Sanity Check — `ugt smoke-test`](#7-quick-sanity-check--ugt-smoke-test)
-8. [Phase 2 — Balance Testing](#8-phase-2--balance-testing)
+8. [Phase 2 — RL Train & Evaluate (legacy balance path)](#8-phase-2--rl-train--evaluate-legacy-balance-path)
    - 8a. Training an Agent
    - 8b. Running Evaluation
    - 8c. Reading the Results
@@ -177,7 +177,7 @@ are a legacy path, not the current balance tier; see the note at the end of "The
 │  │               UniversalGameEnv (Gymnasium)               │ │
 │  └──────────────────────────┬────────────────────────────── ┘ │
 └─────────────────────────────┼───────────────────────────────┘
-                              │ one of two adapters
+                              │ one adapter per engine.type
               ┌───────────────┴──────────────────┐
               │                                  │
               ▼                                  ▼
@@ -195,6 +195,11 @@ are a legacy path, not the current balance tier; see the note at the end of "The
 ```
 
 UGT never imports your game code directly. It talks to your game through a **bridge** — a thin wrapper that translates UGT's standard protocol into your game's API. You write the bridge; UGT handles everything else.
+
+The diagram shows the two engine types this manual walks through (`simulation` and `browser`). A third,
+`real_server` (RealClientAdapter), drives a live game server over HTTP + Socket.IO instead of a bridge —
+see the architecture section of `README.md`. Integrations may also construct purpose-built harness adapters
+directly (the JSON-lines subprocess pattern); the ladder scripts in `examples/harness-game/` show that shape.
 
 ---
 
@@ -686,9 +691,15 @@ ugt smoke-test --config ugt.config.yaml --profile aggro
 
 ---
 
-## 8. Phase 2 — Balance Testing
+## 8. Phase 2 — RL Train & Evaluate (legacy balance path)
 
-Balance testing trains an RL agent to play your game, then evaluates it across many episodes and checks whether the trained agent performs meaningfully better than random play.
+> **Current position (M7):** RL-as-balance-judgment was tried and demoted — random/heuristic pressure is
+> what RL-style agents are actually good at (the exploit-hunter robustness tier), while **balance and
+> strategy verdicts now come from the LLM playtest tier (Section 9)**. The commands below still work and
+> remain useful for learnability probes on `simulation`/`browser` games; just don't read a trained-vs-random
+> gap as a balance verdict on its own.
+
+This phase trains an RL agent to play your game, then evaluates it across many episodes and checks whether the trained agent performs meaningfully better than random play.
 
 This is a two-step process: **train**, then **evaluate**.
 

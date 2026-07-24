@@ -42,7 +42,9 @@ import time
 from ugt.adapters.base import BaseAdapter
 
 DEFAULTS = {
-    "game_root": os.path.expanduser("~/Dev/Games/the-pond"),
+    # No baked-in default: set engine.game_root in the config or the POND_ROOT
+    # env var (path to the game's Godot project root).
+    "game_root": "",
     "harness_script": "res://tests/harness/ugt_harness.gd",
     "godot_bin": "",              # "" -> find_godot() lookup (gate.sh order)
     "seed": 20260719,
@@ -51,7 +53,7 @@ DEFAULTS = {
 }
 
 # id -> action name. MUST stay in lockstep with
-# integrations/pond/ugt.config.yaml and `_compose` below. Every id is a pure
+# the integration's ugt.config.yaml and `_compose` below. Every id is a pure
 # input macro; the only state consulted is the harness's own enemy list /
 # player position (structural reads), never game rules.
 _DEFAULT_ACTION_NAMES = {
@@ -105,6 +107,11 @@ class PondHarnessAdapter(BaseAdapter):
             os.environ.get("POND_ROOT")
             or eng.get("game_root")
             or DEFAULTS["game_root"])
+        if not self.game_root:
+            raise ValueError(
+                "No game root: set engine.game_root in the config or the "
+                "POND_ROOT env var (path to the game's Godot project root)."
+            )
         self.harness_script = str(eng.get("harness_script",
                                           DEFAULTS["harness_script"]))
         self.godot_bin = str(

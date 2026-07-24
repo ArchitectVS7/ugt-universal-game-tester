@@ -159,6 +159,15 @@ terminal RPG, its only writer across 14 shipped missions is a single side quest)
 lower bound and must say so in its own output.
 *(→ a content-engagement metric verifier, 27/27, mutation-tested.)*
 
+### P8 · Never pool batches across an information fix
+Any change to P1–P6 changes what was being measured. Mark the boundary explicitly in the integration's
+findings log (e.g. "the 89.8% batch must not be pooled with any post-fix batch") and re-baseline.
+
+### P9 · One clean run proves the channel, not the balance
+A single sanity run establishes that the pilot can see and act. Balance verdicts need a batch with seats/roles
+swapped and pooled (a card game pooled a deck×seat design because turn order confounded the first batch),
+reported with a confidence interval, and compared against the game's own authoritative gate if it has one.
+
 ### P10 · The pilot needs MEMORY, not just state — a sliding window is not memory
 State tells the agent where it *is*; it does not tell it what it has already tried. Without a
 cumulative record, an agent re-runs actions it completed long ago, and the run looks busy while
@@ -206,15 +215,6 @@ buffer) and **`playtest.available_actions_path`** (drive the verb list from the 
 unlocked-command list, so the agent is never advertised a verb the game will refuse, and a verb
 unlocked mid-run becomes visible the step it unlocks).
 *(→ `playtest.history_window` / `_action_ledger_block`.)*
-
-### P8 · Never pool batches across an information fix
-Any change to P1–P6 changes what was being measured. Mark the boundary explicitly in the integration's
-findings log (e.g. "the 89.8% batch must not be pooled with any post-fix batch") and re-baseline.
-
-### P9 · One clean run proves the channel, not the balance
-A single sanity run establishes that the pilot can see and act. Balance verdicts need a batch with seats/roles
-swapped and pooled (a card game pooled a deck×seat design because turn order confounded the first batch),
-reported with a confidence interval, and compared against the game's own authoritative gate if it has one.
 
 ### P11 · A prompt-level warning is advice, not a guarantee — a hard loop ceiling needs code, not prose
 A text warning that grows more insistent every step ("you've done this 8 times now") still relies on the

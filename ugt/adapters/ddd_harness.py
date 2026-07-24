@@ -35,7 +35,9 @@ import subprocess
 from ugt.adapters.base import BaseAdapter
 
 DEFAULTS = {
-    "harness_entry": "/Users/vs7/Dev/Games/DDD/packages/harness/bin/harness.mjs",
+    # No baked-in default: set engine.harness_entry in the config or the
+    # DDD_HARNESS_PATH env var (path to the game's harness.mjs).
+    "harness_entry": "",
     "node_bin": "node",
     "decks": ["bb_competitive", "sw_competitive"],
     "format": "COMPETITIVE",
@@ -52,7 +54,7 @@ DEFAULTS = {
 WAVE_KEYS = ("stanceEcho", "chainsPredictions", "typeTriangle")
 
 # id -> name default, if the config doesn't carry action_mappings. MUST stay in
-# lockstep with integrations/ddd/ugt.config.yaml (UgtConfig enforces
+# lockstep with the integration's ugt.config.yaml (UgtConfig enforces
 # size == len(actions)) and with `_select` below.
 #
 # Every id is STRUCTURAL: it selects among the actions the HARNESS itself
@@ -102,6 +104,11 @@ class DddHarnessAdapter(BaseAdapter):
             or eng.get("harness_entry")
             or DEFAULTS["harness_entry"]
         )
+        if not self.harness_entry:
+            raise ValueError(
+                "No harness entrypoint: set engine.harness_entry in the config "
+                "or the DDD_HARNESS_PATH env var (path to the game's harness.mjs)."
+            )
         self.node_bin = str(eng.get("node_bin", DEFAULTS["node_bin"]))
         # Default cwd = the DDD repo root inferred from the harness path
         # (…/DDD/packages/harness/bin/harness.mjs -> …/DDD). @ddd/engine resolves

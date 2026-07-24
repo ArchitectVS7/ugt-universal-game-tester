@@ -40,7 +40,9 @@ import subprocess
 from ugt.adapters.base import BaseAdapter
 
 DEFAULTS = {
-    "harness_entry": "/Users/vs7/Dev/Games/nexus-dominion/harness/ugt-harness.mjs",
+    # No baked-in default: set engine.harness_entry in the config or the
+    # NEXUS_DOMINION_HARNESS_PATH env var (path to the game's ugt-harness.mjs).
+    "harness_entry": "",
     "node_bin": "node",
     # PRD defaults: 250 systems / 10 sectors / 100 empires. Ladder scripts may
     # shrink for speed; the harness refuses a missing seed (never defaults it).
@@ -69,7 +71,7 @@ BLACK_REGISTER_ITEMS = ["empire-dossier", "covenant-map", "advance-signals"]
 TRADE_RESOURCES = ["food", "ore", "fuelCells"]
 
 # id -> action name. MUST stay in lockstep with
-# integrations/nexus-dominion/ugt.config.yaml and `_orders_for` below.
+# the integration's ugt.config.yaml and `_orders_for` below.
 _DEFAULT_ACTION_NAMES = {
     0: "pass",                    # commit an empty order list
     1: "claim_adjacent",          # claim-system: unclaimed adjacent to owned
@@ -134,6 +136,12 @@ class NexusDominionHarnessAdapter(BaseAdapter):
             or eng.get("harness_entry")
             or DEFAULTS["harness_entry"]
         )
+        if not self.harness_entry:
+            raise ValueError(
+                "No harness entrypoint: set engine.harness_entry in the config or "
+                "the NEXUS_DOMINION_HARNESS_PATH env var (path to the game's "
+                "ugt-harness.mjs)."
+            )
         self.node_bin = str(eng.get("node_bin", DEFAULTS["node_bin"]))
         # Default cwd = the game repo root inferred from the harness path
         # (…/nexus-dominion/harness/ugt-harness.mjs -> …/nexus-dominion).

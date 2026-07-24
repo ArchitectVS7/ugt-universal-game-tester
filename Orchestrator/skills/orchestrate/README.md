@@ -62,6 +62,11 @@ target repo's `TASKS.md` header and briefs every sub-agent with them:
 - the **standing constraints** (the reviewer enforces them)
 - the **source-of-truth pointers** (the intro docs)
 
+It also honors an optional **`**Format check:**`** header line: name your
+formatter there (`cargo fmt`, `ruff format`, `npm run format:check`, …) and the
+coder runs it before the gate; omit the line and the step is skipped — no
+JS/npm toolchain is assumed.
+
 So on any repo: run `/tasklist` to author a compliant `TASKS.md` (its header
 carries the gate + constraints for that project), then `/orchestrate`. No
 per-repo edits to the script.

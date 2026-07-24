@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
     name="ugt-tester",
     version="1.0.0",
-    description="Universal Game Tester (UGT) — RL-driven game testing and balance analysis framework",
+    description="Universal Game Tester (UGT) — agent-driven game testing: correctness, robustness, and LLM balance analysis",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
     author="Antigravity Team",
@@ -19,7 +19,7 @@ setup(
     extras_require={
         "dashboard": ["tensorboard"],
         "playtest":  ["anthropic>=0.25.0", "python-dotenv>=1.0.0"],
-        # Real-server adapter (drives the live spacerquest-web game over HTTP + Socket.IO).
+        # Real-server adapter (drives a live game server over HTTP + Socket.IO).
         "realclient": ["requests", "python-socketio[client]>=5", "websocket-client"],
     },
     entry_points={

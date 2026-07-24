@@ -27,7 +27,7 @@ clear locally when the command is a disconnect).
 R0 / NX-P0-1: a `fresh` reset leaves the whole hacking surface locked behind the
 tutorial gate, so this adapter resets with `baseline: "post_tutorial"` by default
 (configurable via engine.baseline) — the game-side reset route was extended to seed a
-just-past-tutorial player. See integrations/nexus/README.md.
+just-past-tutorial player. Details in the integration's own README (internal).
 """
 from __future__ import annotations
 

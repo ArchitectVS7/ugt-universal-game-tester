@@ -1,10 +1,10 @@
 """
-RealClientAdapter — drives the LIVE spacerquest-web server (Socket.IO + HTTP).
+RealClientAdapter — drives a LIVE game server (Socket.IO + HTTP), engine.type "real_server".
 
 This is the Phase-0 real-client adapter: UGT "plays the game with the game" instead of a
-shadow reimplementation. It is the productionized lift of the validated spike
-(`integrations/spacerquest/spike_realclient.py`); see the memory note
-`architecture-pivot-real-server` for the why and the verified protocol.
+shadow reimplementation. It is the productionized lift of a validated protocol spike
+against the BBS-style space-trading game it was built for (the game whose bridge
+reimplementation drift motivated the M1 rule — see LESSONS.md).
 
 Scope of this module (Phase 0, Step 1 + parts of 2 & 4):
   - server lifecycle (optional spawn/attach) + Socket.IO/HTTP client   [Step 1]
@@ -18,7 +18,7 @@ Explicitly NOT in this module:
     naming the action, rather than inventing game logic here (that reimplementation drift is
     exactly what the pivot retired).
 
-Verified server protocol (see spike / memory note):
+Verified server protocol (established by the spike, re-verified live):
   - screen ids are lowercase-kebab (`main-menu`); an unknown id SILENTLY falls back to main-menu.
   - screen:request emits TWO identical {output} renders  -> settle to the last.
   - a menu key returns {output:'\\x1b[2J\\x1b[H', nextScreen:'<id>'}, NOT content -> then request nextScreen.
@@ -70,7 +70,7 @@ class RealClientAdapter(BaseAdapter):
         # Optional server lifecycle: if server_cmd is set we spawn+manage it; else we attach
         # to an already-running server at base_url.
         self.server_cmd = eng.get("server_cmd")            # e.g. "npx tsx src/app/index.ts"
-        self.server_cwd = eng.get("server_cwd")            # path to spacerquest-web
+        self.server_cwd = eng.get("server_cwd")            # path to the game's server checkout
         self.server_env_file = eng.get("server_env_file")  # e.g. ".env.ugt" (relative to cwd)
         self.server_boot_timeout = float(eng.get("server_boot_timeout", DEFAULTS["server_boot_timeout"]))
 

@@ -56,7 +56,7 @@ const NEXT_TASK = {
     title: { type: 'string' },
     block: { type: 'string', description: 'the full task block, verbatim' },
     accept: { type: 'string', description: 'the **Accept:** acceptance criteria line(s)' },
-    isUi: { type: 'boolean', description: 'true if this is an M3/UI task or its coder builds packages/ui' },
+    isUi: { type: 'boolean', description: 'true if this task is UI work (its milestone is a UI milestone, or its body/coder notes say it builds UI)' },
     resuming: {
       type: 'boolean',
       description: 'true iff the chosen task was ALREADY IN-PROGRESS (a resume of an interrupted run), not a fresh TODO',

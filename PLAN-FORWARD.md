@@ -45,7 +45,8 @@ Tech stacks exercised so far include TypeScript engines (deck-building card, 4X/
 integration reuses is `ugt/core/trial.py` (`GateRunner`, `InvariantSuite`, `first_divergence`).
 
 **Every integration to date has surfaced game bugs that were fixed upstream** — the dual-validation payoff
-(LESSONS M2). The current per-game ledger, with real pass counts and open items, is in `Dev/STATUS.md`.
+(LESSONS M2). The current per-game ledger, with real pass counts and open items, is kept in the internal
+status ledger (`Dev/STATUS.md` — not part of the shared surface).
 
 ---
 
@@ -79,7 +80,8 @@ information-integrity audit that two balance batches paid for the hard way.
 
 ## Next steps (framework-level)
 
-The game-specific next steps live in `Dev/STATUS.md`. The cross-game, framework-level priorities:
+The game-specific next steps live in the internal status ledger (`Dev/STATUS.md`, not part of the shared
+surface); this document keeps only the cross-game, framework-level priorities:
 
 1. **Land the LLM balance tier as a first-class, repeatable batch.** The playtester is wired and
    smoke-validated on several games, but the CI-gated, seat/turn-order-controlled batch that produces a

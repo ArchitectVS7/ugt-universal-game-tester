@@ -293,7 +293,10 @@ Fable," and it passes `planModel: "fable"` through.
 directory after each commit (e.g. a `graphify-out/` regeneration), that would trip
 the dirty-tree precondition. The skill detects a `graphify-out/` directory and
 passes `treeIgnore: ["graphify-out/"]` automatically; for other generated dirs,
-mention it and the same knob applies.
+mention it and the same knob applies. (graphify itself is a separate, optional
+skill — it is not part of this bundle, and without it every graphify reference
+here is simply inert: the planner's existence check finds no `graphify-out/`
+and moves on.)
 
 **Skip remote CI for one run** — when CI can't produce a verdict (billing block,
 runners offline) or is deliberately disabled, the run can skip the push-and-poll CI
