@@ -1,62 +1,89 @@
 # NEXUS UGT Integration — HANDOFF (resume here)
 
-Single doorway for a fresh session. Last updated **2026-07-22**, after L-023.
-Companions: `ROLLOUT.md` (the phased plan), `README.md` (run recipe + findings
-registry + ladder table), `RESULTS.md` (the L-xxx findings log — L-014..L-023
-is the LLM-tier arc).
+Single doorway for a fresh session. Last updated **2026-07-24** (post-L-030 +
+the tutorial-skip disable fix). Companions: `ROLLOUT.md` (the phased plan),
+`README.md` (run recipe + findings registry + ladder table), `RESULTS.md`
+(the L-xxx findings log — L-014..L-030 is the LLM-tier + E2E arc).
 
 ---
 
 ## TL;DR — where we are
 
-**The ladder is COMPLETE and green on the current build: spike 8/8 · R1 25/25 ·
-R2 66/66 · R3 9/9 · content-metric 29/29** (2026-07-22, ep-0 replay
-byte-identical). The LLM playtest channel AND the pilot are validated
-(gemma4:26b, L-022). **Next step: the first Anthropic balance batch** — credits
-are topped up; the pre-batch blockers are all resolved:
-- **NX-L22-1 FIXED** (`e981df1`+`c4f80da`): 8 zero-risk verbs paid xp on every
-  repeat (worst: `analyze` +50xp/+20skill per spam); all now first-time-only
-  per target via `xp-novelty.ts`, reset by reset-episode. The live R2 gate
-  caught a lost-update clobber of the novelty array that 1332 green unit tests
-  missed (see RESULTS L-023).
-- **NX-L23-1 FIXED** (`e981df1`): the FIRST mission (`tutorial_awakening`) was
-  uncompletable by any play — its find_clue-by-IP objective needed an
-  `analyze_target` event nothing emitted. `analyze` now emits it; R2 drives the
-  mission to completion via natural recon.
-- Game gates: unit **1333/1333**, integration **197/197**, lint/typecheck clean.
+**Both repos are on `main`, no open branches.** Game gates on the current
+build: **typecheck clean, lint 0 errors, unit 1364/1364, E2E 78/78 (chromium)**.
+Ladder last confirmed green pre-E2E-work (2026-07-22): **spike 8/8 · R1 25/25 ·
+R2 66/66 · R3 9/9 · content-metric 29/29**, ep-0 replay byte-identical — not
+re-run since (L-024..L-030 and the tutorial-skip fix below touched the LLM
+playtest tier and the Playwright E2E suite, not the ladder scripts; re-run the
+ladder before trusting those numbers on a build more than a few commits newer).
 
-**Batch guardrail: never pool any pre-`e981df1` run (incl. L-022's gemma4
-numbers) with post-fix runs — the xp economy and first-mission completability
-both changed.**
+**LLM playtest tier status:** channel + pilot validated (gemma4:26b, L-022);
+Haiku 4.5 smoke comparisons run (L-024, L-028, both n=1). **The statistically
+powered Anthropic balance batch (N runs, CI-gated) still has NOT been run** —
+this is the actual next step for the tier, distinct from the smoke runs done
+so far. Two UGT-side stall-detection gaps are known and unclosed (see "Open
+UGT-side gaps" below) — read them before spending a batch, since they affect
+how much a long run's stall/loop behavior can be trusted.
 
-**Branch state (2026-07-22):** game work is on `feat/nx-l20-observability-agility`
-(NX-L14-1..NX-L23-1 series); UGT work on `fix/ugt-harness-false-positives`.
-Merge both to `main` before the batch so its numbers pin to main commits.
-
-**NEXUS is the next game up for the LLM balance tier, and its §B pre-flight is DONE
-(`RESULTS.md` L-014/L-015/L-016).** Read `LESSONS.md` §B (P1–P9) before
-touching this tier. Three starvation defects were found and fixed *before* spending a
-batch: `terminal_char_budget` 600→2400 (measured: `scan` returns **1,666 chars / 27
-servers**, so the old tail-budget hid every low-security target — i.e. the pilot could
-not choose targets by the term that dominates its odds), `guide_char_budget`
-3500→9000, and a strategy guide that taught none of the success-rate math and actively
-misstated hardcore's modifier. Framework-side, `playtester.py::_fit()` now WARNs on any
-budget truncation for every game (it was silent before). **Do not pool the L-006 run's
-numbers with any post-L-014 batch.** One game-side characterization is open and should
-reach the game owner: **NX-L14-1 — the progression economy is inert** (no command
-spends credits; the 0→+50% tool-tier axis is hardcoded to BASIC; skills are not
-player-directed; failed rolls cost nothing), which reframes the deferred
-progression-math rebalance below — two of its four knobs are unreachable in play.
+**Recent arc (2026-07-22 → 2026-07-24, see `RESULTS.md` L-024..L-030 for full detail):**
+- **L-024**: first gemma4 vs Haiku 4.5 smoke comparison (40 actions each), n=1.
+- **L-025/L-026**: found + fixed **NX-L26-1** (game bug, `0d99b21`) — `ls`/`cat`/`cd`
+  silently swallowed a leading Unix flag (`ls -la <path>` silently read path `"-la"`,
+  zero error). UGT-side: soft repeat-warning upgraded to a hard deterministic
+  block (`playtest.repeat_block_threshold`).
+- **L-027**: strategy guide §2b added so the pilot samples side-quest content
+  instead of tunnel-visioning the main spine.
+- **L-028**: first long-form Anthropic run (Haiku 4.5, 600-action budget) —
+  deepest run yet (4 missions completed, 20 servers compromised), no win;
+  surfaced a stall shape (diffuse repetition across many targets) the
+  adjacency-only hard block doesn't catch.
+- **L-029/L-030**: real-browser Playwright audit found a game-crashing bug
+  (`useWorldSync.ts`, fixed) and 32 pre-existing E2E failures; all 32 fixed for
+  real (no hollow passes) → **E2E suite 79/79 green** at the time (`e07b41b`).
+  Surfaced **NX-L30-1** (see next).
+- **2026-07-24, same-day follow-up (this session, commit `b15c44d`,
+  nexus-world-builder `main`)**: **NX-L30-1 resolved — `tutorial skip` is now
+  DISABLED** (`TUTORIAL_SKIP_ENABLED = false` in `executors.ts`), not fixed via
+  XP-grant. Owner's call: brand-new players shouldn't skip the tutorial at all;
+  a returning-player skip-with-real-XP-bump is filed as a **P2 backlog item**
+  in the game's own `TODO.md` (blocked on a schema concept of "account has
+  prior progress" that doesn't exist yet — `Player` is strictly 1:1 with
+  `User`). All 8 tests that exercised skip were updated (pinning tests now
+  assert the refusal; setup-shortcut tests switched to a real DB seed
+  `db-helpers.ts::seedPlayerProgression`). E2E count moved 79/79 → **78/78**
+  (one redundant skip-pinning test consolidated during the rewrite). Also
+  confirmed **NX-L19-1 (`help <locked-command>` giving the real access-denied
+  shape) was already fixed** — an earlier "still open" note in this doc/memory
+  was stale; no action needed there.
 
 | | |
 |---|---|
-| **NEXUS game** | `~/Dev/Games/nexus-world-builder`, app in `apps/game`. L-014..L-023 series on `feat/nx-l20-observability-agility` (merge to `main` pending). Gates green: typecheck+lint clean, **unit 1333/1333, integration 197/197** (0 skip). |
-| **UGT framework** | `~/Dev/Games/_UGT Universal Game Tester`. LLM-tier arc on `fix/ugt-harness-false-positives` (merge to `main` pending). Nexus integration under `integrations/nexus/` + adapter `ugt/adapters/nexus_http.py`. |
+| **NEXUS game** | `~/Dev/Games/nexus-world-builder`, app in `apps/game`, on `main` (latest: `b15c44d`). Gates green: typecheck+lint clean, **unit 1364/1364, E2E 78/78 (chromium)**. |
+| **UGT framework** | `~/Dev/Games/_UGT Universal Game Tester`, on `main`. Nexus integration under `integrations/nexus/` + adapter `ugt/adapters/nexus_http.py`. |
 
-**Work on `main` in both repos** — the earlier "do not merge to main" constraint
-is LIFTED (user merged the fix branch via PRs #121/#122). The old
-`fix/code-review-2026-07` (nexus) and `integration/nexus-bridge` (UGT) branches are
-merged/stale.
+## Open items (not blocking, but real)
+
+- **The powered Anthropic balance batch hasn't been run** — the tier's actual
+  deliverable. Everything to date is n=1 smoke comparisons.
+- **NX-L14-1 (game, characterization only)** — the progression economy is
+  inert (no command spends credits, tool-tier bonus hardcoded to BASIC, skills
+  not player-directed, failed rolls cost nothing). Never handed to the owner
+  as its own decision point; feeds the deferred progression-math rebalance.
+- **Open UGT-side stall-detection gaps (playtester.py, game-agnostic, not
+  NEXUS-specific):**
+  1. The hard repeat-block only catches immediate-adjacency loops (same
+     action 3x running). L-028's Haiku run showed diffuse repetition across
+     many different futile targets (`progress` retried 30-48 times,
+     interleaved with other dead attempts) that never trips it. Would need
+     per-target futile-attempt tracking across a whole run — not built.
+  2. Even where the block fires, L-026's gemma4 run showed an oscillation
+     pattern: try a blocked command twice, get forced to `wait` on the 3rd
+     (which resets the adjacency counter), then return to the SAME dead
+     target. Bounds damage per cycle, doesn't stop returning to a proven-dead
+     target.
+- **Returning-player tutorial skip + XP bump** — filed as P2 in
+  nexus-world-builder's own `TODO.md`, blocked on a new schema field. Not
+  urgent; documented so it isn't lost.
 
 ---
 
