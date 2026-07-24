@@ -6,14 +6,14 @@
 > the balance tier** (competent play, N runs with confidence intervals — "is the game good?"); the
 > **exploit-hunter (RL/random) is the robustness tier** (crashes, soft-locks, invariant violations — "does the
 > game break?"). This doc keeps only the design content that still applies to that role, ported to how the
-> project actually works today: Python, driving the **real** `spacerquest-web` server via `RealClientAdapter`,
-> not a TypeScript harness or a bridge reimplementation.
+> project actually works today: Python, driving the **real** running game as a client (a live server, a real
+> browser, or the game's own subprocess harness), never a bridge reimplementation.
 
 > **Before running this tier against any game, work through `LESSONS.md` §B — the pre-flight
-> information-integrity audit (P1–P9).** It is the accumulated cost of the DDD balance rounds: a playtest can
-> report `PLAYTEST MET`, zero violations and a confident win rate while the pilot is blind to card identities,
-> to the game's public read layer, or to the rules that create its skill. Every check there needs a written,
-> cited disposition before a batch is worth running.
+> information-integrity audit (P1–P11).** It is the accumulated cost of two real balance rounds: a playtest can
+> report `PLAYTEST MET`, zero violations and a confident win rate while the pilot is blind to entity
+> identities, to the game's public read layer, or to the rules that create its skill. Every check there needs
+> a written, cited disposition before a batch is worth running.
 
 ## Where this fits today
 
@@ -31,12 +31,12 @@ not a redesign — the contract below already fits `RealClientAdapter.get_termin
   executed — this constrains the model to commit to a prediction (improves reliability) and makes the run log
   human-readable when triaging a failure.
 - **Probabilistic features must be forced, where they're still probabilistic.** Any RNG-gated mechanic needs an
-  injectable seam so both outcomes can be tested deterministically. **Correction from the archived doc:**
-  combat encounters in SpacerQuest turned out to be deterministic already (`generateEncounter()` fires on every
-  trip, gated only by `NpcRoster` seeding — `ENCOUNTER_CHANCE` is dead config, confirmed by grep). This
-  principle still applies to *other*, not-yet-investigated probabilistic mechanics (travel hazards, pub
-  gambling) — don't assume they're deterministic without checking, and don't assume RNG seams are needed
-  everywhere just because they were needed for combat.
+  injectable seam so both outcomes can be tested deterministically. **Caveat from experience:** don't assume a
+  mechanic is RNG-gated without checking — one game's combat encounters turned out to be deterministic already
+  (an encounter fired on *every* trip, gated only by roster seeding; the `ENCOUNTER_CHANCE` config was dead
+  code, confirmed by grep). This principle applies to genuinely probabilistic mechanics (e.g. travel hazards,
+  gambling minigames) — verify a mechanic is really RNG-gated first, and don't assume RNG seams are needed
+  everywhere just because one mechanic needed one.
 - **Recovery never skips verification.** If the LLM's expected screen doesn't appear, record it as a mismatch
   (potential bug or reasoning error) before attempting recovery — never silently reset and move on.
 
@@ -109,4 +109,4 @@ def generate_hazard(distance: int, rng: RngFn = random.random) -> dict:
 Rule: any game function that calls `random.random()`/`Math.random()` directly is untestable for that branch —
 it needs an injectable `rng` parameter with the real RNG as the default. This is a change to the **game**, not
 the harness, and should only be made where a probabilistic feature actually needs deterministic test coverage
-(confirm it's really RNG-gated first — see the encounter-chance correction above).
+(confirm it's really RNG-gated first — see the caveat above).

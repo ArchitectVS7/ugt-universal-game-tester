@@ -24,8 +24,8 @@ story of why that rule exists.
 
 These three tiers are run in a standardized sequence per game integration — the **trial ladder**: spike
 (raw protocol round-trip) → smoke (same path through the framework's adapter contract) → R1 playability →
-R2 full content spine → R3 exploit-hunter + determinism. See `integrations/README.md` for how every game
-in this repo has actually scored against that ladder.
+R2 full content spine → R3 exploit-hunter + determinism. Each integration lives in its own
+`integrations/<game>/` directory (a self-contained set of ladder scripts + a findings log).
 
 There is also an older RL train/evaluate path (`ugt train` / `ugt evaluate`, PPO/DQN/A2C via
 stable-baselines3), still functional against `simulation`/`browser` engines, but demoted as a
@@ -78,10 +78,9 @@ fabricating behavior.
   this before any test run.
 - **`UGT-USER-MANUAL.md`** — onboarding a new game, including the trial-ladder methodology in depth.
 - **`PLAYTEST-DESIGN.md`** — design spec for the LLM balance-playtester tier.
-- **`integrations/README.md`** — the index of every game this framework has actually been run against,
-  with real pass counts and headline findings.
 - **`Dev/`** — ideation, lessons learned, superseded design docs, and other historical/retrospective
   material (start at `Dev/README.md`).
 
-This README is deliberately framework-level and game-agnostic. For "how does UGT do against game X",
-follow the link above into `integrations/`.
+This README, and the four docs above it, are deliberately framework-level and game-agnostic. The concrete
+per-game integrations (which specific games have been run and how they scored) live under `integrations/`,
+which is kept internal.

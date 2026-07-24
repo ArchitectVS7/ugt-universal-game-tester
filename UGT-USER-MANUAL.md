@@ -15,46 +15,27 @@
 > each with its evidence and source. Read it before onboarding a game, before advancing a ladder rung, and
 > before any LLM playtest run. New lessons go there, not here.
 
-The core methodology, in brief (full text + evidence in `LESSONS.md` §A):
+The nine core rules — **read the full text and the evidence behind each in `LESSONS.md` §A**; they are not
+restated here to avoid drift between two copies:
 
-1. **Drive the REAL game, never a re-implementation.** The single biggest failure mode: building an adapter/bridge
-   that reimplements game logic (travel, combat, economy) instead of calling the running game. Whatever the bridge
-   forgets silently does not exist for the agent — we shipped a "bridge" with **no combat**, and every trained
-   agent learned a game that couldn't fight. If your adapter contains game *rules*, you're testing the adapter,
-   not the game. Prefer, in order: (a) drive the game's real server/UI as a client; (b) call the game's own
-   functions (single source of truth); never (c) a parallel copy.
-2. **Dual validation — expect to find game bugs and pause.** UGT validates two things: that it can test the game,
-   *and* the game itself. Finding a real game bug and **pausing to fix the game** is a successful outcome of the
-   process, not a distraction. Budget for round-trips between "test" and "fix the game."
-3. **Failed tests are data — record them.** Negative results (an agent that collapses, a mechanic that's
-   unreachable, a reward that rewards the wrong thing) are often the most valuable findings. Write them down as
-   durable notes so the next session doesn't re-learn them.
-4. **Prove learnability cheaply before scaling.** Before spending real compute, prove an agent can beat a random
-   baseline on the *simplest reachable* version of the objective (small action set, reachable goal, hard
-   beat-random gate). If it can't clear that bar cheaply, more compute won't save it — change the approach. (This
-   is the surviving idea from the now-archived Gate-1 learnability spec.)
-5. **Verify ≠ Train ≠ Play.** A feature passing a *verifier* (often with crutches like extra credits or perfect
-   nav) does **not** mean an agent can reach it under real play. Make sure the environment an agent trains/plays
-   in is the same MDP you certified.
-6. **Reward realized outcomes, not activity.** Reward the thing you actually want (profit, wins, progress), not a
-   proxy for effort (number of trips, actions taken) — proxies get gamed. Express agent "personalities" as reward
-   *weights* over a shared action set, not by hiding actions.
-7. **Right tool per question.** *Correctness* → verify. *Robustness / does-it-break* → a cheap random/RL
-   exploit-hunter (no reward engineering). *Balance / is-it-good* → an LLM playtester (competent play beats
-   volume). Don't force one agent to answer all three.
-8. **Test over the wire — a green in-process suite cannot see serialization-boundary bugs.** The game's own
-   client and tests route around the wire, so defects on it are invisible to them: DDD had 1,251 in-process
-   tests green while 7 of 40 cards played blank for every wire client (a field never exposed) and `create`
-   accepted a config `replay` would refuse (a missing config key silently played a *different game*). Demand
-   exact-config-key sets, treat a refusal as different from silent inertness, kill vacuous greens, and when
-   an invariant never fires, suspect your own invariant first.
-9. **Audit your own findings before citing them.** UGT itself has over-claimed from small samples and misread
-   cumulative counters. Investigate before *confirming*, not just before dismissing — and record corrections
-   in the integration's `RESULTS.md` rather than deleting the mistake.
+- **M1 · Drive the REAL game, never a re-implementation.** If your adapter contains game *rules*, you're
+  testing the adapter, not the game. (A simulation bridge that quietly dropped combat is the founding lesson.)
+- **M2 · Dual validation** — finding a real game bug and pausing to fix it upstream is a success, not a
+  distraction.
+- **M3 · Failed tests are data** — record negative results so the next session doesn't re-learn them.
+- **M4 · Prove learnability cheaply** before spending compute.
+- **M5 · Verify ≠ Train ≠ Play** — a verifier crutch (extra credits, perfect nav) doesn't prove reachability
+  under real play.
+- **M6 · Reward realized outcomes, not activity** — express play styles as reward *weights*, not by hiding
+  actions.
+- **M7 · Right tool per question** — correctness → verify; robustness → exploit-hunter; balance → LLM
+  playtester. Don't force one agent to answer all three.
+- **M8 · Test over the wire** — a green in-process suite cannot see serialization-boundary bugs.
+- **M9 · Audit your own findings** before citing them; record corrections rather than deleting them.
 
-> The tier model below is the current shape. Note: on SpacerQuest, RL as a *balance oracle* was tried and
-> demoted to exploit-hunting (see `PLAN-FORWARD.md`); the LLM tier carries strategy/balance. Keep the phase
-> *order* (cheap correctness first), but pick the agent per the "right tool per question" rule above.
+> The tier model below is the current shape. Note: RL as a *balance oracle* was tried and demoted to
+> exploit-hunting (see `PLAN-FORWARD.md`); the LLM tier carries strategy/balance. Keep the phase *order* (cheap
+> correctness first), but pick the agent per the "right tool per question" rule (M7) above.
 
 ---
 
