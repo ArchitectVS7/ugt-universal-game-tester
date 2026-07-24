@@ -9,7 +9,7 @@
 > are named by genre and tech stack (e.g. "a TypeScript deck-building card game", "a Godot bullet-hell
 > roguelike") rather than by project name.
 
-Referenced from: `README.md`, `CLAUDE.md` (Start here), `UGT-USER-MANUAL.md` (methodology), `PLAYTEST-DESIGN.md`
+Referenced from: `README.md` (Start here), `UGT-USER-MANUAL.md` (methodology), `PLAYTEST-DESIGN.md`
 (tier-3 spec).
 
 ---

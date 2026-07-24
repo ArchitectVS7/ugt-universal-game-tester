@@ -18,10 +18,12 @@ results/
 
 # Internal-only docs / not part of the shareable framework surface.
 # The per-game integrations name upstream projects and reference upstream repos;
-# the status ledger is the concrete, named counterpart to the genericized root docs.
-# NOTE: these are still git-tracked from before they were ignored — to actually drop
-# them from the shared repo, run `git rm -r --cached integrations Dev/STATUS.md`.
-Dev/STATUS.md
+# Dev/ is the historical archive (named games throughout, incl. in filenames) with
+# the status ledger as the concrete, named counterpart to the genericized root docs;
+# CLAUDE.md is Claude's working guidance for THIS repository, not shareable doc surface.
+# All were untracked with `git rm -r --cached` (files remain on disk, internal-only).
+CLAUDE.md
+Dev/
 integrations/
 
 # Node (integration harnesses shell out to node). No trailing slash so this also

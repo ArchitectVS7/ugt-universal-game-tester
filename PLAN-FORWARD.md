@@ -119,4 +119,4 @@ Revisit when an item actually blocks the current game, not on a schedule:
 | Trial-ladder scaffold | `ugt/core/trial.py` (+ `ugt/core/exploit_hunter.py` for R3) |
 | Framework overview + install | `README.md` |
 | Per-game status ledger + game-specific next steps (**internal**) | `Dev/STATUS.md` |
-| Superseded / historical docs (why + where content went) | `Dev/README.md` |
+| Superseded / historical docs (**internal**; why + where content went) | `Dev/README.md` |

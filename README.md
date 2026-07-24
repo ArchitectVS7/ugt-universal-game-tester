@@ -82,9 +82,6 @@ fabricating behavior.
   this before any test run.
 - **`UGT-USER-MANUAL.md`** — onboarding a new game, including the trial-ladder methodology in depth.
 - **`PLAYTEST-DESIGN.md`** — design spec for the LLM balance-playtester tier.
-- **`Dev/`** — ideation, lessons learned, superseded design docs, and other historical/retrospective
-  material (start at `Dev/README.md`).
-
 This README, and the four docs above it, are deliberately framework-level and game-agnostic. The concrete
 per-game integrations (which specific games have been run and how they scored) live under `integrations/`,
-which is kept internal.
+and the historical/retrospective design docs live under `Dev/` — both are kept internal.
