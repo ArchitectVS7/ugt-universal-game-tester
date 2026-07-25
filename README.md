@@ -38,9 +38,12 @@ balance-judgment tool in favor of the LLM playtester — see `PLAN-FORWARD.md` f
 ## Install
 
 ```bash
-pip install -e .                  # core framework
-pip install -e ".[dashboard]"     # + tensorboard (for `ugt dashboard`)
-pip install -e ".[playtest]"      # + anthropic SDK (for `ugt playtest`)
+pip install -e .                  # core (numpy + gymnasium + pyyaml — no heavy deps)
+pip install -e ".[browser]"       # + Playwright headless browser (for engine.type: browser)
+playwright install chromium       # required after [browser] install — downloads browser binaries
+pip install -e ".[rl]"            # + stable-baselines3/PyTorch (for ugt train / ugt evaluate)
+pip install -e ".[playtest]"      # + anthropic SDK (for ugt playtest)
+pip install -e ".[dashboard]"     # + tensorboard (for ugt dashboard)
 pip install -e ".[realclient]"    # + requests/python-socketio/websocket-client (for real_server adapter)
 ```
 

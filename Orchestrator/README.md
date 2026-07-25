@@ -196,7 +196,9 @@ run to stop there for review instead of rolling into the next milestone.
 
 ## The `TASKS.md` format (in brief)
 
-`TASKS.md` lives at the repo root and has two parts. The full spec is in
+`TASKS.md` lives at the repo root and has two parts. It is a per-project working file —
+if you are using the Orchestrator within a shared framework repo, add `TASKS.md` to that
+repo's `.gitignore` so it stays on disk but out of the shared surface. The full spec is in
 [`skills/tasklist/task-format.md`](skills/tasklist/task-format.md); the short version:
 
 **Header** (written once) — an Orchestrator protocol blurb, then the two lines the
