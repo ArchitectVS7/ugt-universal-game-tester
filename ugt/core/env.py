@@ -1,10 +1,8 @@
-import logging
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 from ugt.adapters.playwright import PlaywrightAdapter
 from ugt.adapters.subprocess import SubprocessAdapter
-from ugt.utils.formula_evaluator import evaluate_reward_formula
 
 def get_value_by_path(nested_dict, path, aggregator=None):
     """Safely traverse a nested dictionary using a dot-separated path."""
@@ -38,28 +36,18 @@ def get_value_by_path(nested_dict, path, aggregator=None):
 class UniversalGameEnv(gym.Env):
     """
     Universal Gymnasium Environment dynamically driven by a ugt.config.yaml file.
-    Translates raw JSON game state and declarative rewards into a standard Gymnasium loop.
+    Translates raw JSON game state into a standard Gymnasium observation/action loop.
+    Used by `ugt smoke-test` for a quick wiring check — reward is always 0.0 since
+    nothing in UGT's three testing tiers consumes it (verify/exploit-hunter/playtest
+    all drive an adapter directly, not this env).
     """
     spec = None
 
-    def __init__(self, config, profile_name):
+    def __init__(self, config):
         super().__init__()
         self.config = config
-        self.profile_name = profile_name
-        self.profile = self.config.get_reward_profile(profile_name)
+        self.action_space = spaces.Discrete(self.config.action_size)
 
-        # Setup spaces dynamically.
-        # Gate 1: if training.action_subset is set, the RL agent sees only those real
-        # action IDs. Its policy indexes 0..N-1; step() remaps to the real game action.
-        self.action_subset = None
-        training_cfg = getattr(config, "data", {}).get("training", {})
-        subset = training_cfg.get("action_subset") if training_cfg else None
-        if subset:
-            self.action_subset = list(subset)
-            self.action_space = spaces.Discrete(len(self.action_subset))
-        else:
-            self.action_space = spaces.Discrete(self.config.action_size)
-        
         # Build observation limits
         obs_min = []
         obs_max = []
@@ -86,7 +74,6 @@ class UniversalGameEnv(gym.Env):
 
         self.adapter.connect()
         self.raw_state = {}
-        self.prev_raw_state = {}  # Previous state for delta-based reward formulas
 
     def _map_state_to_obs(self, raw_state):
         """Translate raw nested JSON dict into a flat numpy observation vector."""
@@ -100,49 +87,19 @@ class UniversalGameEnv(gym.Env):
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        self.prev_raw_state = {}
         self.raw_state = self.adapter.reset()
         obs = self._map_state_to_obs(self.raw_state)
         info = self.raw_state.get("info", {})
         return obs, info
 
     def step(self, action):
-        # Gate 1: translate the agent's subset index into the real game action id.
-        real_action = self.action_subset[int(action)] if self.action_subset else int(action)
-        prev_state = self.raw_state
-        next_state, terminated, truncated, info = self.adapter.step(real_action)
-        self.prev_raw_state = prev_state
+        next_state, terminated, truncated, info = self.adapter.step(int(action))
         self.raw_state = next_state
 
         # Translate state to flat numerical observation vector
         obs = self._map_state_to_obs(next_state)
 
-        # Dynamically calculate reward. Pass prev_state as "before" so formulas can
-        # express deltas: (state.character.score - before.character.score) * 10
-        reward = 0.0
-        formula = self.profile.get("formula")
-        if formula:
-            try:
-                reward = float(evaluate_reward_formula(
-                    formula, next_state, extra_context={"before": prev_state}
-                ))
-            except Exception as e:
-                logging.warning(
-                    "Reward formula evaluation failed (falling back to 0.0). "
-                    "Formula: '%s' | Error: %s | State keys: %s",
-                    formula, e, list(next_state.keys()) if isinstance(next_state, dict) else type(next_state)
-                )
-                reward = 0.0
-
-        # Apply endgame victory/loss bonuses
-        if terminated:
-            is_win = next_state.get("victory", False)
-            if is_win:
-                reward += float(self.profile.get("win_bonus", 0))
-            else:
-                reward -= float(self.profile.get("loss_penalty", 0))
-
-        return obs, reward, terminated, truncated, info
+        return obs, 0.0, terminated, truncated, info
 
     def close(self):
         self.adapter.close()

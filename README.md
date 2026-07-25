@@ -31,19 +31,13 @@ R2 full content spine → R3 exploit-hunter + determinism. Each integration live
 deterministic game driven engine-first over a JSON-lines harness, with all five rungs runnable in one
 command. Start there to see the methodology end to end.
 
-There is also an older RL train/evaluate path (`ugt train` / `ugt evaluate`, PPO/DQN/A2C via
-stable-baselines3), still functional against `simulation`/`browser` engines, but demoted as a
-balance-judgment tool in favor of the LLM playtester — see `PLAN-FORWARD.md` for why.
-
 ## Install
 
 ```bash
 pip install -e .                  # core (numpy + gymnasium + pyyaml — no heavy deps)
 pip install -e ".[browser]"       # + Playwright headless browser (for engine.type: browser)
 playwright install chromium       # required after [browser] install — downloads browser binaries
-pip install -e ".[rl]"            # + stable-baselines3/PyTorch (for ugt train / ugt evaluate)
 pip install -e ".[playtest]"      # + anthropic SDK (for ugt playtest)
-pip install -e ".[dashboard]"     # + tensorboard (for ugt dashboard)
 pip install -e ".[realclient]"    # + requests/python-socketio/websocket-client (for real_server adapter)
 ```
 
@@ -53,13 +47,10 @@ Run these from your game project directory, next to a `ugt.config.yaml`:
 
 ```bash
 ugt init                                                        # scaffold ugt.config.yaml
-ugt smoke-test --config ugt.config.yaml --profile aggro         # 5 random steps, verify wiring
+ugt smoke-test --config ugt.config.yaml                         # 5 random steps, verify wiring
 ugt verify --config ugt.config.yaml --feature-map feature-map.yaml --max-turns 50
-ugt train --config ugt.config.yaml --profile aggro
-ugt evaluate --config ugt.config.yaml --model ./models/ppo_aggro_final --episodes 1000
 ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md --max-actions 100 \
   [--provider anthropic|ollama] [--model <name>]
-ugt dashboard --logdir ./logs                                   # TensorBoard
 ```
 
 Full onboarding walkthrough (how to write your `ugt.config.yaml`, pick an `engine.type`, and run the trial

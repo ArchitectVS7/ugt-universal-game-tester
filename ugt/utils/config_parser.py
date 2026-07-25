@@ -70,29 +70,6 @@ class UgtConfig:
                     f"the number of defined actions ({len(act['actions'])}). These must be equal."
                 )
 
-        if "reward_profiles" not in self.data or not isinstance(self.data["reward_profiles"], dict):
-            raise ConfigError("Missing required section: reward_profiles (must be a dictionary)")
-
-        # Validate training section (optional but checked if present)
-        training = self.data.get("training", {})
-        if training:
-            if "parallel_envs" in training:
-                pe = training["parallel_envs"]
-                if not isinstance(pe, int) or pe < 1:
-                    raise ConfigError("training.parallel_envs must be a positive integer")
-            if "algorithm" in training:
-                algo = training["algorithm"]
-                if algo not in ("PPO", "DQN", "A2C"):
-                    raise ConfigError(f"training.algorithm must be one of PPO, DQN, A2C (got '{algo}')")
-            if "checkpoint_freq" in training:
-                cf = training["checkpoint_freq"]
-                if not isinstance(cf, int) or cf < 1:
-                    raise ConfigError("training.checkpoint_freq must be a positive integer")
-            if "seed" in training:
-                s = training["seed"]
-                if not isinstance(s, int):
-                    raise ConfigError("training.seed must be an integer (e.g. seed: 42)")
-
     @property
     def project_name(self):
         return self.data["project"]["name"]
@@ -125,13 +102,3 @@ class UgtConfig:
     @property
     def action_mappings(self):
         return self.data["action_space"].get("actions", {})
-
-    @property
-    def reward_profiles(self):
-        return self.data["reward_profiles"]
-
-    def get_reward_profile(self, name):
-        profile = self.reward_profiles.get(name)
-        if not profile:
-            raise ConfigError(f"Reward profile '{name}' not found in configuration.")
-        return profile

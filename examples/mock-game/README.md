@@ -18,7 +18,7 @@ are byte-identical.
 | File | Role |
 |---|---|
 | `sim_game.py` | The whole game AND its subprocess bridge (newline-delimited JSON on stdin/stdout). Reads `UGT_SEED`. |
-| `ugt.config.yaml` | `engine.type: simulation`; observation space, action space, reward profiles. |
+| `ugt.config.yaml` | `engine.type: simulation`; observation space, action space. |
 | `feature-map.yaml` | The correctness assertions `ugt verify` checks (state deltas per action). |
 | `strategy-guide.md` | The briefing the LLM playtester reads (tier 3). |
 
@@ -26,7 +26,7 @@ are byte-identical.
 
 ```bash
 # Tier 0 — wiring sanity (5 random steps)
-ugt smoke-test --config ugt.config.yaml --profile aggro
+ugt smoke-test --config ugt.config.yaml
 
 # Tier 1 — correctness (drives the feature map, writes results/coverage-report.json)
 ugt verify --config ugt.config.yaml --feature-map feature-map.yaml --max-turns 60
@@ -44,9 +44,6 @@ exercised ≠ feature failed). Raise `--max-turns` or lower the precondition to 
 
 ## Notes
 
-- **Legacy RL path:** `ugt train` / `ugt evaluate` also work against this example
-  (it's a `simulation` engine), but RL was demoted as a balance judge — see
-  `../../PLAN-FORWARD.md`. Prefer `ugt playtest` for balance.
 - **Reproducibility:** `UGT_SEED=7 python3 sim_game.py` fed the same commands twice
   yields identical `enemy.credits` trajectories; a different seed diverges. The core
   economy is deterministic regardless, so the feature-map assertions are stable.

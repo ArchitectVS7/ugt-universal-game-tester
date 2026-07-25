@@ -3,8 +3,8 @@
 > **Purpose of this document:** A practical, end-to-end guide for plugging a new game into UGT,
 > teaching it the rules, and running the three test phases in the correct order.
 >
-> **What this is not:** a tutorial on reinforcement learning. You don't need to understand RL
-> internals to use UGT. You do need to understand your game's state, actions, and win condition.
+> **What this is not:** a tutorial on any single testing technique. You need to understand your
+> game's state, actions, and win condition — UGT handles the rest.
 
 ---
 
@@ -33,17 +33,14 @@ The nine core rules, as one-line index entries only — **the full text and the 
 - **M8 · Test over the wire** — a green in-process suite cannot see serialization-boundary bugs.
 - **M9 · Audit your own findings** before citing them; record corrections rather than deleting them.
 
-> The tier model below is the current shape. Note: RL as a *balance oracle* was tried and demoted to
-> exploit-hunting (see `PLAN-FORWARD.md`); the LLM tier carries strategy/balance. Keep the phase *order* (cheap
-> correctness first), but pick the agent per the "right tool per question" rule (M7) above.
+> The tier model below is the current shape: keep the phase *order* (cheap correctness first), and pick
+> the agent per the "right tool per question" rule (M7) above.
 
 ---
 
 ## The Three-Tier Testing Model
 
-**Run these in order. Each tier depends on the previous one being healthy.** (This supersedes an older
-framing that cast Phase 2 as RL balance-training — that path still runs, see the note at the end of this
-section, but it is no longer the balance judge. The LLM playtester is.)
+**Run these in order. Each tier depends on the previous one being healthy.**
 
 | Tier | Command / mechanism | Question answered | Output file |
 |------|---------------------|--------------------|-------------|
@@ -88,7 +85,7 @@ inline, fail the gate, and get fixed upstream in the game.
 R3 answers "does it work / does it break" — it does **not** answer "is it good." A green ladder is the
 *prerequisite* for the next tier, not the end of testing:
 
-1. **Tier 3 — LLM playtest** (`ugt playtest`, §9 below). An LLM plays through a realistic input channel
+1. **Tier 3 — LLM playtest** (`ugt playtest`, §8 below). An LLM plays through a realistic input channel
    (keypresses, typed terminal commands, or a legal-action list for harness-style games with no terminal)
    and judges balance/strategy, producing `results/playtest-report.json` with state-delta-based bug reports.
    Only makes sense once the ladder is green — balance verdicts on a game that still crashes are noise.
@@ -97,13 +94,6 @@ R3 answers "does it work / does it break" — it does **not** answer "is it good
    onboarding clarity, and accessibility that no automated tier can see by construction (an engine-level or
    LLM-driven test can confirm the mechanics work; only a human can confirm the game *reads* well). Every
    integration's `HANDOFF.md` should carry a UAT status line once this tier is reached.
-
-> **Legacy path, not part of the current model:** `ugt train` / `ugt evaluate` (PPO/DQN/A2C via
-> stable-baselines3) still exist and work against `simulation`/`browser` engines, and are documented in §8
-> below for games that still use them. They were the original "Phase 2" balance judge but were demoted after
-> a well-documented collapse (RL trained an agent that gamed the reward instead of playing well) — the LLM
-> playtester is the current balance/judgment tier. Don't reach for `train`/`evaluate` as a substitute for
-> `ugt playtest` on a new integration.
 
 ---
 
@@ -118,26 +108,19 @@ R3 answers "does it work / does it break" — it does **not** answer "is it good
 5. [Teaching UGT the Rules — `ugt.config.yaml`](#5-teaching-ugt-the-rules--ugtconfigyaml)
    - 5a. Observation Space
    - 5b. Action Space
-   - 5c. Reward Profiles
 6. [Phase 1 — Verify (Correctness Testing)](#6-phase-1--verify-correctness-testing)
    - 6a. Writing a Feature Map
    - 6b. Running `ugt verify`
    - 6c. Reading the Coverage Report
    - 6d. Troubleshooting Verify
 7. [Quick Sanity Check — `ugt smoke-test`](#7-quick-sanity-check--ugt-smoke-test)
-8. [Phase 2 — RL Train & Evaluate (legacy balance path)](#8-phase-2--rl-train--evaluate-legacy-balance-path)
-   - 8a. Training an Agent
-   - 8b. Running Evaluation
-   - 8c. Reading the Results
-   - 8d. Interpreting Collapse Detection
-   - 8e. Seed-Band Stability
-9. [Phase 3 — Playtest (LLM Player)](#9-phase-3--playtest-llm-player)
-   - 9a. Writing a Strategy Guide
-   - 9b. Running `ugt playtest`
-   - 9c. Reading the Playtest Report
-10. [Frontend UI Testing (Browser Games)](#10-frontend-ui-testing-browser-games)
-11. [Configuration Reference](#11-configuration-reference)
-12. [Troubleshooting](#12-troubleshooting)
+8. [Phase 2 — Playtest (LLM Player)](#8-phase-2--playtest-llm-player)
+   - 8a. Writing a Strategy Guide
+   - 8b. Running `ugt playtest`
+   - 8c. Reading the Playtest Report
+9. [Frontend UI Testing (Browser Games)](#9-frontend-ui-testing-browser-games)
+10. [Configuration Reference](#10-configuration-reference)
+11. [Troubleshooting](#11-troubleshooting)
 
 ---
 
@@ -153,8 +136,7 @@ Testing Model" above for the full table and exit criteria):
 | **3. Playtest** | `ugt playtest` | Does the game feel right to a reasoning agent? (balance) | ~30 min |
 
 All three tiers share the same `ugt.config.yaml` and bridge protocol. Once your bridge is written, all three
-are available. (`ugt train`/`ugt evaluate` — RL training — still exist for `simulation`/`browser` engines but
-are a legacy path, not the current balance tier; see the note at the end of "The Three-Tier Testing Model".)
+are available.
 
 ---
 
@@ -163,18 +145,19 @@ are a legacy path, not the current balance tier; see the note at the end of "The
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        ugt.config.yaml                       │
-│  (observation space, action space, reward profiles, seed)    │
+│      (observation space, action space, seed)                 │
 └──────────────────────────┬──────────────────────────────────┘
                            │ read by
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                     UGT Python Core                          │
+│                    cli.py (ugt command)                      │
 │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────┐ │
-│  │  trainer.py  │  │ evaluator.py │  │  cli.py (ugt cmd)  │ │
+│  │  verifier.py │  │ exploit_hunter│  │  playtester.py     │ │
 │  └──────┬───────┘  └──────┬───────┘  └─────────┬──────────┘ │
 │         │                 │                     │            │
 │  ┌──────▼─────────────────▼─────────────────────▼──────────┐ │
-│  │               UniversalGameEnv (Gymnasium)               │ │
+│  │            an adapter (BaseAdapter subclass)              │ │
 │  └──────────────────────────┬────────────────────────────── ┘ │
 └─────────────────────────────┼───────────────────────────────┘
                               │ one adapter per engine.type
@@ -215,9 +198,6 @@ ugt --help
 # For browser (UI) testing, install Playwright browsers:
 pip install playwright
 playwright install chromium
-
-# Optional: TensorBoard for visualizing training:
-pip install tensorboard
 ```
 
 ---
@@ -512,48 +492,9 @@ action_space:
 
 ---
 
-### 5c. Reward Profiles
-
-**What it is:** A formula that scores each game state, plus bonuses for winning and losing. Think of this as "what the agent is trying to maximize."
-
-```yaml
-reward_profiles:
-  # Profile for aggressive play style
-  aggro:
-    formula: "(state.player.credits * 0.001) + (state.enemy.strength * -0.1) - (state.turn * 0.5)"
-    win_bonus: 500
-    loss_penalty: 100
-
-  # Profile for economic / defensive play style
-  eco:
-    formula: "(state.player.credits * 0.005) - (state.turn * 0.2)"
-    win_bonus: 500
-    loss_penalty: 200
-```
-
-**The formula language:**
-- Variables are accessed as `state.path.to.field`
-- Operators: `+`, `-`, `*`, `/`, `**`
-- Built-in functions: `min(a, b)`, `max(a, b)`, `abs(x)`
-- All other Python functions are blocked for safety
-
-**Critical guidance — reward design determines whether balance testing is valid:**
-
-1. **Win/loss bonuses matter more than the formula.** The formula provides shaping (guides the agent toward good play), but the win/loss outcome is what you actually care about. Make `win_bonus` large relative to the formula (e.g., winning should be worth 10× the typical per-step formula value).
-
-2. **The formula is a proxy — design it carefully.** If the formula rewards something other than the actual win condition, the agent will optimize that thing and ignore winning. Example: rewarding credits accumulation might produce an agent that hoards credits and never fights, even if fighting is required to win.
-
-3. **Use different profiles to test different play styles.** One profile per intended strategy (aggressive, economic, stealth, etc.). Train a separate agent for each profile and compare their win rates — if one strategy dominates all others, that's a balance signal.
-
-4. **Check that your formula produces negative values on loss states.** A formula that's always positive (even in losing states) means the `loss_penalty` is the only signal distinguishing win from loss, which makes learning harder.
-
-5. **You can define as many profiles as you want.** Each trains and evaluates independently.
-
----
-
 ## 6. Phase 1 — Verify (Correctness Testing)
 
-`ugt verify` drives your game through a feature map — a YAML file listing every testable behavior — and checks that each feature's state change is what you declared. Run this before training.
+`ugt verify` drives your game through a feature map — a YAML file listing every testable behavior — and checks that each feature's state change is what you declared. Run this before playtesting.
 
 ### 6a. Writing a Feature Map
 
@@ -666,217 +607,40 @@ ugt verify --config ugt.config.yaml --feature-map feature-map.yaml
 
 ## 7. Quick Sanity Check — `ugt smoke-test`
 
-The smoke test verifies that your bridge responds correctly before any training. Takes ~10 seconds, requires no model or feature map.
+The smoke test verifies that your bridge responds correctly before you write a feature map. Takes ~10
+seconds, requires no model or feature map.
 
 ```bash
 cd examples/your-game/
-ugt smoke-test --config ugt.config.yaml --profile aggro
+ugt smoke-test --config ugt.config.yaml
 ```
 
-**What it tests:** bridge connectivity, state dict structure, observation vector mapping, reward formula evaluation. It does NOT test whether game features behave correctly — use `ugt verify` for that.
+**What it tests:** bridge connectivity, state dict structure, observation vector mapping. It does NOT test
+whether game features behave correctly — use `ugt verify` for that.
 
 **Expected output on success:**
 ```
 [*] Starting connection smoke test for project: MyGame
 [+] Connection established! Initial observation vector: [100.  10.   0.   0.]
-[*] Running 5 steps with random action commands...
-  [Step 1] Action ID: 2 | Obs: [100.  10.   1.   0.] | Reward: -0.50 | Terminated: False
+[*] Running 5 steps with random action commands to verify action space and state mapping...
+  [Step 1] Action ID: 2 | Obs: [100.  10.   1.   0.] | Terminated: False
   ...
-[+] Smoke test passed!
+[+] Smoke test passed successfully! Adapter communication and state mappings are fully operational.
 ```
 
 **What to fix if it fails:**
 - `Connection failed` / `Failed to spawn subprocess` — check your `engine.entry` command; run it manually first
 - `Invalid JSON response` — your bridge is printing non-JSON to stdout; redirect debug output to stderr
 - `observation_space.shape does not match` — number of `mappings:` entries doesn't equal `shape:`
-- `Reward formula evaluation failed` — state paths in formula don't exist in returned state
 - `Terminated: True` on step 1 — `reset()` isn't actually starting a fresh game
 
 ---
 
-## 8. Phase 2 — RL Train & Evaluate (legacy balance path)
-
-> **Current position (M7):** RL-as-balance-judgment was tried and demoted — random/heuristic pressure is
-> what RL-style agents are actually good at (the exploit-hunter robustness tier), while **balance and
-> strategy verdicts now come from the LLM playtest tier (Section 9)**. The commands below still work and
-> remain useful for learnability probes on `simulation`/`browser` games; just don't read a trained-vs-random
-> gap as a balance verdict on its own.
-
-This phase trains an RL agent to play your game, then evaluates it across many episodes and checks whether the trained agent performs meaningfully better than random play.
-
-This is a two-step process: **train**, then **evaluate**.
-
-### 8a. Training an Agent
-
-```bash
-ugt train --config ugt.config.yaml --profile aggro
-```
-
-This runs PPO (or DQN/A2C if configured) for `total_timesteps` steps and saves the model to `models/ppo_aggro_final.zip`.
-
-**Config settings that matter:**
-
-```yaml
-training:
-  seed: 42               # Reproducibility seed — same seed → same training run
-  algorithm: "PPO"       # PPO is the best default; DQN for single-env; A2C for speed
-  total_timesteps: 200000  # More steps = more learning, but diminishing returns
-  parallel_envs: 1        # >1 uses SubprocVecEnv for faster data collection
-  checkpoint_freq: 20000  # Saves intermediate models every N steps
-```
-
-**How long to train:**
-- Simple games (3–5 actions, clear reward signal): 50,000–100,000 steps
-- Medium games (10–15 actions, sparse reward): 200,000–500,000 steps
-- Complex games: 1M+ steps, may require reward shaping
-
-**Training one profile per play style:**
-
-```bash
-ugt train --config ugt.config.yaml --profile aggro
-ugt train --config ugt.config.yaml --profile eco
-```
-
-Monitor training with TensorBoard:
-
-```bash
-ugt dashboard --logdir ./logs
-# opens http://localhost:6006 — watch the "ep_rew_mean" curve
-```
-
-A healthy training curve shows `ep_rew_mean` rising over time and eventually plateauing. A flat or oscillating curve that never improves is an early warning of a poor reward signal or action space design.
-
----
-
-### 8b. Running Evaluation
-
-```bash
-ugt evaluate \
-  --config ugt.config.yaml \
-  --model models/ppo_aggro_final \
-  --profile aggro \
-  --episodes 100
-```
-
-This runs two passes:
-1. **Trained policy:** 100 episodes with the saved model (deterministic/greedy)
-2. **Random baseline:** 100 episodes with random action selection
-
-Then it compares them and writes a JSON report to `results/`.
-
-**For stability testing across seeds:**
-
-```bash
-ugt evaluate \
-  --config ugt.config.yaml \
-  --model models/ppo_aggro_final \
-  --profile aggro \
-  --episodes 100 \
-  --seed-band 3
-```
-
-This runs evaluation with seeds 42, 43, 44 and produces a combined stability report showing how consistent the results are across different random conditions.
-
----
-
-### 8c. Reading the Results
-
-The evaluation writes `results/{profile}_eval_summary.json` (or `results/INVALID_{profile}_eval_summary.json` if collapse is detected). Key fields:
-
-```json
-{
-  "evaluation_seed": 42,
-  "collapse_detected": false,
-  "collapse_reasons": [],
-
-  "outcomes": {
-    "wins": 34,
-    "losses": 66,
-    "win_rate": "34.00%"
-  },
-
-  "confidence_intervals": {
-    "win_rate_95ci":     { "low": 0.2490, "high": 0.4392 },
-    "reward_mean_95ci":  { "low": 120.4,  "high": 185.2  }
-  },
-
-  "reward_stats": {
-    "mean":   152.3,
-    "std":    88.1
-  },
-
-  "action_entropy": 0.7842,
-
-  "random_baseline": {
-    "mean_reward": -45.2,
-    "win_rate": "4.00%",
-    "wins": 4
-  }
-}
-```
-
-**How to interpret:**
-
-| Field | What it means | Healthy sign |
-|-------|--------------|--------------|
-| `win_rate` | % of episodes the agent won | Higher than random; depends on game difficulty |
-| `win_rate_95ci` | Where the true win rate probably lies | Interval doesn't cross random baseline's win rate |
-| `reward_stats.std` | Variance across episodes | > 0 (zero means collapsed policy) |
-| `action_entropy` | How spread the agent's choices are (0=one action only, 1=perfectly varied) | > 0.4 for most games |
-| `random_baseline.mean_reward` | What random play scores | Trained mean should be clearly above this |
-| `random_baseline.win_rate` | How often random play wins | Trained win rate should be clearly above this |
-
-**Comparing profiles for balance:**
-
-Run evaluation for each profile and compare win rates. If `aggro` wins 60% and `eco` wins 5%, the game heavily favors aggressive play — that's a balance signal. Ideal balance: no single profile dominates, or they're competitive within a reasonable margin (±10–15%) on the same game.
-
----
-
-### 8d. Interpreting Collapse Detection
-
-If UGT prints `COLLAPSE DETECTED` and writes `INVALID_*.json`, the trained policy failed to learn. The report names the reason:
-
-**`zero_variance`** — Every episode returned the exact same reward. The agent is stuck in a deterministic loop, possibly because all actions lead to the same state (e.g., illegal action no-ops dominate).
-- Fix: Check that at least some actions have different effects. Add a print to your bridge to verify actions are actually changing state.
-
-**`not_above_random`** — The trained agent performs no better than random play.
-- Fix: Check your reward formula. Is it rewarding the right things? Does the win_bonus significantly outweigh the per-step formula noise? Try training longer. Try a simpler observation space first.
-
-**`low_entropy`** — The agent uses only 1–2 actions across all episodes.
-- Fix: Check that other actions are legal and have meaningful effects. The agent is ignoring actions because they produce no reward signal — either they're no-ops or they're being penalized. Check your formula for biases against certain actions.
-
-**General rule:** A collapsed result is not failure of UGT — it is information about your game's bridge or reward design. Fix the underlying cause before re-running.
-
----
-
-### 8e. Seed-Band Stability
-
-The seed-band report (from `--seed-band 3`) adds:
-
-```json
-{
-  "seed_band_stability": {
-    "seeds_tested": 3,
-    "seeds": [42, 43, 44],
-    "win_rate_mean": 34.00,
-    "win_rate_std":   2.45,
-    "reward_mean_mean": 152.3,
-    "reward_mean_std":   8.1,
-    "collapse_detected_any": false,
-    "collapse_count": 0
-  }
-}
-```
-
-**A low `win_rate_std` (< 5%) means the result is stable** — the win rate is consistent across seeds, which means it's measuring something real about the game, not a lucky/unlucky random outcome. A high `win_rate_std` (> 15%) means the result is noisy and you need more episodes or more seeds.
-
----
-
-## 9. Phase 3 — Playtest (LLM Player)
+## 8. Phase 2 — Playtest (LLM Player)
 
 `ugt playtest` runs an Anthropic-powered agent through your game. Unlike the scripted verifier, the LLM player reads the game state and reasons about what to do next — it can find bugs that no scripted test would look for, because it plays like a real player would.
 
-### 9a. Writing a Strategy Guide
+### 8a. Writing a Strategy Guide
 
 Create `strategy-guide.md` alongside your config. This is the single most important input: a 1–3 page document that teaches the LLM how your game works.
 
@@ -888,7 +652,7 @@ Include:
 
 See `examples/mock-game/strategy-guide.md` for a working example.
 
-### 9b. Running `ugt playtest`
+### 8b. Running `ugt playtest`
 
 > **Persistent-state games:** Set `diagnose_resets_episode: false` in your config before the first LLM
 > playtest run. By default the `diagnose` action resets the episode — in a game with persistent campaign
@@ -918,7 +682,7 @@ ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md
 
 Both figures include input context growth across the run. Pass `--model claude-haiku-4-5` to use Haiku. For a first run, use `--max-actions 30` to verify it's working before committing to a full run.
 
-### 9c. Reading the Playtest Report
+### 8c. Reading the Playtest Report
 
 `results/playtest-report.json`:
 
@@ -955,7 +719,7 @@ Both figures include input context growth across the run. Pass `--model claude-h
 
 ---
 
-## 10. Frontend UI Testing (Browser Games)
+## 9. Frontend UI Testing (Browser Games)
 
 The browser adapter drives your game's actual frontend through a real Chromium browser (headless). This tests:
 - That the JS hooks respond correctly
@@ -982,24 +746,20 @@ npm run dev
 
 # Terminal 2: run the smoke test
 cd path/to/your/game
-ugt smoke-test --config ugt.config.yaml --profile aggro
+ugt smoke-test --config ugt.config.yaml
 ```
 
 The smoke test drives 5 random actions through the browser and confirms the hooks are wired correctly. Watch both terminals: your game server's logs will show exactly which requests UGT is triggering.
 
-**Step 4: Run random-play UI stress test:**
+**Step 4: Run a random-play UI stress test:**
 
-There is no dedicated "UI stress test" command — use `evaluate` with a random or lightly-trained model and a high episode count. Because the trained policy is deterministic, it will repeat similar action sequences. For broader coverage, evaluate with a model that was trained for fewer steps (or use the random baseline component, which runs automatically):
-
-```bash
-ugt evaluate \
-  --config ugt.config.yaml \
-  --model models/ppo_aggro_final \
-  --profile aggro \
-  --episodes 200
-```
-
-The random baseline (which runs automatically alongside the trained eval) is especially valuable here — it exercises many different action sequences and is more likely to find soft-locks or crashes than the trained policy's narrow repertoire.
+There is no dedicated "UI stress test" command — use the exploit-hunter (Tier 2 of the trial ladder,
+`ugt/core/exploit_hunter.py`) directly against your browser adapter. It drives random/heuristic actions
+through the real UI and re-checks your invariants after every step, which is exactly what a UI stress pass
+needs: many different action sequences, not a single scripted path. See "The trial ladder" section above for
+how R3 wires this up (`verify_round3.py` in a real integration; `examples/harness-game/verify_round3.py` for
+a complete worked example — swap its subprocess adapter for a `PlaywrightAdapter` and it drives your browser
+game the same way).
 
 **What to look for:**
 - Any episode that terminates with 0 steps (crashed on step 1)
@@ -1018,7 +778,7 @@ This lets you watch UGT play your game in real time. Useful when diagnosing why 
 
 ---
 
-## 11. Configuration Reference
+## 10. Configuration Reference
 
 ```yaml
 project:
@@ -1050,19 +810,6 @@ action_space:
 evaluation:
   victory_key: "player_won"   # State key that indicates a win (default: checks common names)
 
-reward_profiles:
-  profile_name:
-    formula: "state.player.credits * 0.01"   # AST-safe expression
-    win_bonus: 500          # Added to reward on win
-    loss_penalty: 100       # Subtracted from reward on loss
-
-training:
-  seed: 42                  # Reproducibility seed (int)
-  algorithm: "PPO"          # PPO | DQN | A2C
-  total_timesteps: 200000
-  parallel_envs: 1          # >1 requires SubprocVecEnv-compatible bridge
-  checkpoint_freq: 20000    # Save checkpoint every N steps (optional)
-
 playtest:
   # diagnose_resets_episode (default: true)
   # When the LLM playtester issues a `diagnose` action it signals confusion or a
@@ -1077,7 +824,7 @@ playtest:
 
 ---
 
-## 12. Troubleshooting
+## 11. Troubleshooting
 
 ### Bridge hangs on reset / step
 
@@ -1087,32 +834,10 @@ Your bridge is not flushing stdout. Add `flush=True` to every `print()` call, or
 
 Something is printing to stdout before (or instead of) your JSON. Common culprits: import-time print statements, framework startup banners, Python warnings. Redirect everything non-JSON to stderr.
 
-### Agent always picks the same action
-
-This is the `low_entropy` collapse signal. Most likely causes:
-1. Most actions are no-ops in your bridge (illegal states) — the agent learned that only 1–2 actions do anything.
-2. Your reward formula heavily penalizes certain actions even when they're valid.
-3. Not enough training steps — add `total_timesteps`.
-
-### Win rate is 0% but game is winnable
-
-The agent hasn't learned to win. Possible causes:
-1. The `win_bonus` is too small relative to per-step formula rewards — the agent doesn't care about winning.
-2. The win condition requires a long sequence of correct actions and the agent hasn't explored it. Try training longer or adding intermediate reward shaping.
-3. Your bridge's `terminated` flag is not correctly returning `True` when the game ends.
-
-### Smoke test passes but training diverges / plateaus immediately
-
-The observation space is missing a key piece of information the agent needs to make decisions. Ask: what does a skilled human player watch that your observation space doesn't include? Add those fields.
-
-### "INVALID_" prefix on eval report
-
-See Section 7d. The three collapse signals are: zero reward variance, not better than random, low action entropy. Each has a specific fix.
-
 ### Browser: game doesn't mount / __GET_STATE__ not found
 
 UGT waits up to 10 seconds for `window.__GET_STATE__` to exist. If your game takes longer to initialize, the hook registration is in a component that mounts after a delay. Move it to the earliest possible lifecycle point, or add an explicit wait before registering hooks.
 
 ### Reproducibility: two runs produce different results
 
-Check that your bridge reads `UGT_SEED` from the environment. Check that there's no `Math.random()` or `random.random()` call in your bridge that isn't seeded by `UGT_SEED`. Check that `training.seed` is set in your config.
+Check that your bridge reads `UGT_SEED` from the environment. Check that there's no `Math.random()` or `random.random()` call in your bridge that isn't seeded by `UGT_SEED`.
