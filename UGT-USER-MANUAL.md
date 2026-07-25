@@ -912,7 +912,7 @@ ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md
 #   --output path.json   custom output path (default: results/playtest-report.json)
 ```
 
-**Cost note:** Each action is one Anthropic API call (claude-opus-4-8, ~512 tokens output). 100 actions ≈ 50K tokens ≈ $0.75 at current pricing. For a first run, use `--max-actions 30` to verify it's working.
+**Cost note:** Each action is one Anthropic API call (claude-opus-4-8, ~512 tokens output, $25/MTok). 100 actions ≈ 51K output tokens ≈ $1.28 output cost, plus input context (growing per turn) ≈ $0.75–$2.00 input. Total: roughly **$2–4 per 100-action run** at current pricing; shorter runs scale linearly. For a first run, use `--max-actions 30` to verify it's working.
 
 ### 9c. Reading the Playtest Report
 

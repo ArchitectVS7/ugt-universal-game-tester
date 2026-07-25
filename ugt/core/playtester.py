@@ -105,15 +105,15 @@ def playtest_game(config, strategy_guide, max_actions=100, output_path=None, pro
 def playtest_game_with_adapter(adapter, provider, strategy_guide, max_actions=100,
                                output_path=None, model=None, runs=1, invariants=None,
                                action_mode="legal_action", config=None):
-    """Playtest via an ALREADY-CONSTRUCTED adapter instance (L-002).
+    """Playtest via an ALREADY-CONSTRUCTED adapter instance.
 
     The three JSON-lines harness adapters (a trading-card game, a sci-fi board game, and
     a roguelike survival shooter) are not registered under an `engine.type` in env.py —
     each game's own ladder scripts
     build the adapter directly. This entry point takes that adapter and runs the
     SAME LLM loop as `playtest_game`; the only difference is the input/action
-    channel (`action_mode`, e.g. "legal_action"). It is the integration seam L-006
-    (the hacking RPG's text-driven mode) will reuse.
+    channel (`action_mode`, e.g. "legal_action"). Text-driven integrations (e.g.
+    a terminal RPG's command-line mode) use this entry point directly.
 
     adapter        — a connected-or-not adapter instance (connect() is called here).
                      For action_mode="legal_action" it MUST expose legal_actions()
@@ -306,7 +306,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
     # step and the recent-actions window slides, so neither survives an interleaved loop.
     action_ledger = {}
     # (action, context) -> {text, step}: the LATEST terminal output each action produced,
-    # so terminal-only knowledge (the hacking RPG's security levels / vuln names / file lists) survives
+    # so terminal-only knowledge (a terminal RPG's security levels / vuln names / file lists) survives
     # past the single rolling buffer. Populated one step late: at the top of iteration N+1
     # the fetched terminal_text IS the output of action N, so no extra adapter call.
     terminal_recall = {}
@@ -320,7 +320,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
     quest_recall = {}
     _quest_commands = set((playtest_cfg or {}).get("quest_commands") or [])
     # Immediate-adjacency guard: distinct from noop_streaks (material-delta-gated, and
-    # bypassed entirely for display_only_verbs so legitimate repeatable recon like the hacking RPG's
+    # bypassed entirely for display_only_verbs so legitimate repeatable recon like a terminal RPG's
     # `ls` never trips it). This tracks ONLY whether the literal previous step picked the
     # SAME (action_type, value) as this one, regardless of delta or display-only status —
     # "used often" (spaced out, or after other actions) is fine and untouched; "used
@@ -328,7 +328,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
     # warning fed into the prompt (repeat_streak), then a HARD, deterministic block once
     # `playtest.repeat_block_threshold` is reached — a text warning alone is advisory and
     # a model can simply not follow it (live evidence: gemma4:26b repeated one command
-    # 163x in a row on the hacking RPG, restating "I'm stuck" almost every time regardless).
+    # 163x in a row on a terminal RPG, restating "I'm stuck" almost every time regardless).
     _last_seq_key = None
     _consecutive_repeat = 0
     repeat_streak = {}  # {noop_key: current back-to-back run length}, single active entry
@@ -404,7 +404,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         # ── Hard repeat block: deterministic, not a prompt-level nudge ───────────────
         # The `repeat_streak` warning below (fed into the NEXT prompt) is a soft
         # signal — it asks the model to reconsider, it doesn't stop it. That's not
-        # enough for a weak/local model: a live run on the hacking RPG had gemma4:26b repeat the
+        # enough for a weak/local model: a live run on a terminal RPG integration had gemma4:26b repeat the
         # literal same command, `ls /home/jmiller`, 163 times in a row, restating
         # "I'm stuck in a loop" almost every time while picking it again anyway — a
         # markdown warning is advisory, and an LLM can simply not follow it. This
@@ -539,12 +539,12 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
                 # match) — but the WRONG one for a long-running, persistent campaign
                 # where "I don't know what to do next" and "the game state is broken"
                 # are very different problems that got conflated into one response.
-                # Found 2026-07-23 on the hacking RPG: a single `diagnose` (correct, well-reasoned
+                # Found 2026-07-23 on a terminal RPG integration: a single `diagnose` (correct, well-reasoned
                 # self-diagnosis of a stuck state) erased ~310 turns of real, valid
                 # campaign progress — a cost the model was never even told about (the
                 # LLM_ACTION_SCHEMA description just says "flag... confusing or
                 # broken", no mention of a reset). Games that document their own
-                # "no loss state" design (the hacking RPG, the trading-card game, the sci-fi board game) should set this
+                # "no loss state" design (a terminal RPG, the trading-card game, the sci-fi board game) should set this
                 # False so pilot confusion costs a turn, not the whole run.
                 if bool(playtest_cfg.get("diagnose_resets_episode", True)):
                     pre_reset = current_state
@@ -659,7 +659,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         #
         # "turn_number" is excluded by default, but a game may have its OWN administrative
         # field that ticks on every command regardless of whether the command had any real
-        # effect (e.g. the hacking RPG's rngCounter, which advances even on a refused/no-op command by
+        # effect (e.g. a terminal RPG's rngCounter, which advances even on a refused/no-op command by
         # design — NX-OBS-1). Without excluding that field too, EVERY action in such a game
         # always has a "non-empty" delta and this whole detector goes permanently inert for
         # that game. Games declare extra fields to ignore via playtest.ignore_delta_fields
@@ -670,7 +670,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
             if k not in _ignore_delta_fields and k.rsplit(".", 1)[-1] not in _ignore_delta_fields
         }
         noop_key = f"{action_type}:{value}"
-        # Some commands (e.g. the hacking RPG's `ls`/`analyze`) are legitimately display-only: their real
+        # Some commands (e.g. a terminal RPG's `ls`/`analyze`) are legitimately display-only: their real
         # payload is rendered into terminal_text, not into any structured state field, so they will
         # NEVER show a material delta no matter how useful the information they just revealed was.
         # Tracking them in noop_streaks would auto-flag normal, repeatable recon as a "stuck loop"
@@ -683,7 +683,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         # Key the ledger by (action, CONTEXT) so location-scoped recon is not conflated:
         # `ls` at four different servers is four legitimate observations, not one repeat.
         # `playtest.action_context_path` names the state field that defines "where you are"
-        # (the hacking RPG: currentServerId). Absent -> context None, i.e. plain per-action keying.
+        # (e.g. a terminal RPG: currentServerId). Absent -> context None, i.e. plain per-action keying.
         _ctx_path = playtest_cfg.get("action_context_path")
         _ctx = _resolve_path(before_state, str(_ctx_path)) if _ctx_path else None
         _led = action_ledger.setdefault(
@@ -1141,7 +1141,7 @@ def _action_ledger_block(ledger, cap=24):
 
     LESSONS.md P10 ("the pilot needs memory, not just state"). The prompt otherwise shows
     only the current turn plus a short sliding window, so anything learned earlier is
-    simply gone: on the hacking RPG, 2026-07-22, a 40-step run cycled the same six-step loop over the
+    simply gone: on a terminal RPG, 2026-07-22, a 40-step run cycled the same six-step loop over the
     same two servers five times with **zero** consecutive repeats, so `noop_streaks`
     (which counts only CONSECUTIVE no-delta repeats and resets on any productive step)
     never fired, and the recent-actions window had slid past every repeat before the next
@@ -1149,7 +1149,7 @@ def _action_ledger_block(ledger, cap=24):
     report and were never shown back to the agent.
 
     IMPORTANT — this block must NOT read as "do not repeat yourself". Repetition is
-    correct play in most games: location-scoped recon (the hacking RPG's `ls`/`scan`/`analyze`) SHOULD
+    correct play in most games: location-scoped recon (a terminal RPG's `ls`/`scan`/`analyze`) SHOULD
     be re-run every time the agent reaches a new place, and penalising that would suppress
     the exact behaviour the game wants. That is why entries are keyed by CONTEXT
     (`playtest.action_context_path`, e.g. `currentServerId`) — `ls` at four different
@@ -1196,7 +1196,7 @@ def _terminal_recall_block(recall, budget):
     (action, context) it has run — bounded by `playtest.terminal_recall_budget` chars.
 
     LESSONS.md P10, the deeper half. In some games the read layer lives ONLY in terminal
-    output, never in structured state: the hacking RPG exposes `discoveredServers` as bare IPs, so a
+    output, never in structured state: e.g. a terminal RPG may expose `discoveredServers` as bare IPs, so a
     server's SECURITY LEVEL (from `scan`), its VULNERABILITY NAMES (from `analyze`, the sole
     source, and `exploit` needs an exact match) and its FILE LIST (from `ls`) are printed
     once and then lost when the single rolling terminal buffer moves on. The agent is left
@@ -1236,8 +1236,7 @@ def _terminal_recall_block(recall, budget):
 class _RevealTracker:
     """Measures whether the pilot is AGILE about content the game reveals mid-run.
 
-    The question this answers (owner-specified, the hacking RPG's RESULTS.md L-017 item 3 / L-019
-    "still open" 1): when a game unlocks a new command or opens a new quest line, does
+    The question this answers: when a game unlocks a new command or opens a new quest line, does
     the pilot notice and *do something about it* — or does it keep playing the game it
     already knew? Until now that was an eyeball judgement, which LESSONS.md P7 rejects:
     competence is read off the log, never inferred from the exit code.
@@ -1545,10 +1544,10 @@ def _quest_block(playtest_cfg, current_state, quest_recall):
 
     Two config knobs, both optional and game-agnostic:
     - `playtest.quest_state_path`: a state field holding a list of mission/quest dicts
-      (e.g. the hacking RPG's `missions`). Rendered as one compact line per entry (id/title, status,
+      (e.g. a terminal RPG's `missions`). Rendered as one compact line per entry (id/title, status,
       objective counts if present) — always fresh, since it comes straight from `current_state`.
     - `playtest.quest_commands`: verb names whose terminal output IS the quest detail view
-      (e.g. the hacking RPG's `progress`/`missions` print the actual objective TEXT that never reaches
+      (e.g. a terminal RPG's `progress`/`missions` print the actual objective TEXT that never reaches
       structured state at all). Their latest output is shown here too.
 
     Why this needs to be its own block instead of relying on the generic terminal-recall
@@ -1612,7 +1611,7 @@ def _available_actions_line(playtest_cfg, current_state, fallback):
 
     ⚠️ This knob originally REPLACED the vocabulary with the game's live list, on the
     reasoning that the agent should never be advertised a verb the game will refuse. Live
-    probing on the hacking RPG, 2026-07-22, showed that is dangerous: `unlockedCommands` there is a
+    probing on a terminal RPG, 2026-07-22, showed that is dangerous: `unlockedCommands` there is a
     *hack-verb* unlock list (scan/connect/ls/cat/exploit/crack/escalate/backdoor/…) that
     omits `status`, `missions`, `accept`, `talk`, `choose` — and omitted the newly added
     `market`/`buy` entirely, which would have hidden a brand-new economy from the pilot.
@@ -1639,7 +1638,7 @@ def _noop_warning_block(noop_streaks, repeat_streak=None, threshold=2):
        state change. The SAME counter the contradiction detector uses to auto-flag a bug
        at 3 repeats, surfaced one step earlier so the agent gets a chance to notice and
        change course itself. Gated on material delta, and bypassed entirely for
-       `playtest.display_only_verbs` (repeatable recon like the hacking RPG's `ls` legitimately
+       `playtest.display_only_verbs` (repeatable recon like a terminal RPG's `ls` legitimately
        never shows a delta, so it never reaches this dict at all).
     2. `repeat_streak` — literal back-to-back repetition of the SAME (action_type, value),
        independent of delta or display-only status. This is what `display_only_verbs`
@@ -1659,7 +1658,7 @@ def _noop_warning_block(noop_streaks, repeat_streak=None, threshold=2):
 
     Without this, both counts exist in memory the whole time but were never shown back to
     the agent — the 5-step 'Recent Actions' window alone is too short to reveal a pattern
-    that repeats every 6+ steps (see the hacking RPG's the_breadcrumb 2026-07-21: 'accept' repeated 11
+    that repeats every 6+ steps — in one observed run 'accept' was repeated 11
     times, each one scrolled out of view before the next attempt, with no signal that it
     had ever been tried before)."""
     lines = [
@@ -1690,7 +1689,7 @@ def _fit(text, budget, what, tail=False):
     way to blind a pilot — the guide's rules or the terminal's read layer just stop
     existing partway through, the run still reports PLAYTEST MET, and the resulting
     balance number is measuring a player who was never told the rules. Two trading-card-game
-    batches (L-009, L-011) were lost to exactly this before the budgets were raised
+    batches were lost to exactly this before the budgets were raised
     2000→6000→11000. Warn once per (what, budget) per process so a long run does not
     spam, but never truncate silently.
 
