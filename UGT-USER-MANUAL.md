@@ -912,7 +912,11 @@ ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md
 #   --output path.json   custom output path (default: results/playtest-report.json)
 ```
 
-**Cost note:** Each action is one Anthropic API call (claude-opus-4-8, ~512 tokens output). 100 actions ≈ 50K tokens ≈ $0.75 at current pricing. For a first run, use `--max-actions 30` to verify it's working.
+**Cost note:** Each action is one Anthropic API call with ~512 tokens output. At July 2026 pricing:
+- **claude-haiku-4-5** ($1/$5 per MTok input/output): ~**$0.75 per 100 actions** — recommended for long exploratory runs
+- **claude-opus-4-8** ($5/$25 per MTok input/output): ~**$3–4 per 100 actions** — higher-quality judgment, shorter runs
+
+Both figures include input context growth across the run. Pass `--model claude-haiku-4-5` to use Haiku. For a first run, use `--max-actions 30` to verify it's working before committing to a full run.
 
 ### 9c. Reading the Playtest Report
 
