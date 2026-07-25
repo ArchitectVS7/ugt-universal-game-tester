@@ -326,6 +326,45 @@ Orchestrator/
 
 ---
 
+## What next — testing your build with UGT
+
+`/orchestrate all` has gone dry and your project is built. The rest of this repo is
+**UGT**, the framework for finding out whether what you just built actually holds
+up. It asks three different questions. **Tier 1 — `ugt verify`** drives your game
+against a `feature-map.yaml` and asserts that each declared feature does what you
+said it does (correctness). **Tier 2 — the exploit-hunter** turns random and
+heuristic walks loose on the game while re-checking your invariants after *every*
+step, hunting for the state the scripted tests never reach (robustness). **Tier 3 —
+`ugt playtest`** puts an LLM in the player's seat to judge balance, pacing, and
+strategy — the questions no assertion can answer. [`../UGT-USER-MANUAL.md`](../UGT-USER-MANUAL.md)
+is the onboarding path in depth; [`../examples/harness-game/`](../examples/harness-game/)
+is the fastest thing you can actually run.
+
+There is one wiring step in between. The Orchestrator writes code; UGT drives it;
+neither knows the other exists, so your game needs an **adapter**. Pick one of three
+bridges via `engine.type` in a `ugt.config.yaml`: `simulation` (a JSON-lines
+subprocess harness over stdin/stdout), `browser` (a headless page exposing
+`window.__GET_STATE__` / `window.__SEND_ACTION__`), or `real_server` (a live server
+over HTTP + Socket.IO). The manual's **trial-ladder** section covers the
+methodology; `examples/harness-game/` shows the subprocess harness end-to-end and is
+the fastest orientation available.
+
+Once the config exists, the suggested sequence:
+
+```bash
+ugt smoke-test --config ugt.config.yaml                                   # bridge is alive
+ugt verify --config ugt.config.yaml --feature-map feature-map.yaml       # Tier 1 — correctness
+python verify_round3.py                                                  # Tier 2 — exploit-hunter (a ladder script, not a subcommand)
+ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md # Tier 3 — LLM balance pass
+```
+
+Install is light: `pip install -e .` covers the core, `".[playtest]"` adds the LLM
+tier, and `".[browser]"` plus `playwright install chromium` adds the headless
+browser. To be explicit — UGT and the Orchestrator share a repository and nothing
+else. They are independent tools, and using one never obliges you to use the other.
+
+---
+
 ## Credits
 
 Both skills author their commits with a personal `Co-Authored-By` trailer. If you
