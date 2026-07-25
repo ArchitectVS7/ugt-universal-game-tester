@@ -65,6 +65,32 @@ ugt dashboard --logdir ./logs                                   # TensorBoard
 Full onboarding walkthrough (how to write your `ugt.config.yaml`, pick an `engine.type`, and run the trial
 ladder against your own game): **`UGT-USER-MANUAL.md`**.
 
+## Running it conversationally (how this is actually used, in practice)
+
+UGT ships as a CLI (`ugt verify`, `ugt playtest`, …) and the Orchestrator ships as two Claude Code skills
+(`/tasklist`, `/orchestrate`). Both are built to be *driven*, not typed at length — in practice, almost
+nobody runs the raw commands above by hand. The normal workflow is a Claude Code session (terminal, IDE
+extension, or Claude Code on the web): you describe the outcome, and the agent scaffolds configs, runs the
+CLI commands, reads the output, and reports back. You don't need to memorize a flag to use this.
+
+The examples below span two axes — how much you spell out (simple → complex) and how much work is in
+flight (one run → many) — for both halves of the repo. Type any of these into a Claude Code session opened
+in your game's or integration's directory.
+
+**UGT — testing an existing integration**
+
+| | One run | Several in flight |
+|---|---|---|
+| **Simple** | "Run a smoke test against this game and tell me if the adapter wiring is broken." | "Run the exploit-hunter three times with different seeds and tell me if any found an invariant violation." |
+| **Complex** | "Prepare UGT for this repository — scaffold `ugt.config.yaml` if one doesn't exist, write a `feature-map.yaml` from the game's design doc, then run the trial ladder through R2 and give me the coverage report." | "Playtest this game 5 times with claude-haiku-4-5 and 5 times with claude-opus-4-8, then tell me whether the two models actually disagree on whether the economy is balanced." |
+
+**Orchestrator — building or extending a game/integration**
+
+| | One list | Several lists |
+|---|---|---|
+| **Simple** | "/tasklist Add a settings screen to this app." · "Pick up where TASKS.md left off and keep going until it's dry." | "/orchestrate all" against each of the three example integrations under `examples/`, one after another. |
+| **Complex** | "Based on the current open items in PLAN-FORWARD.md, author a TASKS.md compatible with `/orchestrate`, with milestones grouped by feature area and a human UAT checkpoint at the end of each milestone." | "Author three separate TASKS.md files — one per module: auth, billing, notifications — each independently orchestratable, then run `/orchestrate` on all three back to back and stop at the first BLOCKED gate." |
+
 ## Architecture, in one paragraph
 
 A Gymnasium environment (`ugt/core/env.py`) builds observation/action spaces dynamically from your
