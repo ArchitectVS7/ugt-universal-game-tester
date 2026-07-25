@@ -20,7 +20,7 @@ story of why that rule exists.
    actually good at.
 3. **LLM playtester (`ugt playtest`)** — balance/strategy. An LLM reads live text/terminal state (or a
    structured legal-action list) and plays via `press_key`/`type_text`/legal-action selection, producing
-   `results/playtest-report.json`; costs approximately **$2–4 per 100 actions** (Anthropic API, claude-opus-4-8 at $5/$25 per MTok input/output; actual cost scales with context length). This is the tier that judges "is the game good?", not "does it crash?".
+   `results/playtest-report.json`; costs approximately **$0.75 per 100 actions** with claude-haiku-4-5 ($1/$5 per MTok, as of July 2026), or **$3–4 per 100 actions** with claude-opus-4-8 ($5/$25 per MTok, as of July 2026) — both figures include input context growth across the run. This is the tier that judges "is the game good?", not "does it crash?".
 
 These three tiers are run in a standardized sequence per game integration — the **trial ladder**: spike
 (raw protocol round-trip) → smoke (same path through the framework's adapter contract) → R1 playability →

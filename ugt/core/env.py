@@ -4,7 +4,6 @@ import numpy as np
 from gymnasium import spaces
 from ugt.adapters.playwright import PlaywrightAdapter
 from ugt.adapters.subprocess import SubprocessAdapter
-from ugt.adapters.realclient import RealClientAdapter
 from ugt.utils.formula_evaluator import evaluate_reward_formula
 
 def get_value_by_path(nested_dict, path, aggregator=None):
@@ -80,6 +79,7 @@ class UniversalGameEnv(gym.Env):
         elif self.config.engine_type == "simulation":
             self.adapter = SubprocessAdapter(self.config)
         elif self.config.engine_type == "real_server":
+            from ugt.adapters.realclient import RealClientAdapter
             self.adapter = RealClientAdapter(self.config)
         else:
             raise ValueError(f"Unknown engine type: {self.config.engine_type}")
