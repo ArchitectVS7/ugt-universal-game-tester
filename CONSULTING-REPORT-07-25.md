@@ -262,6 +262,8 @@ The senior dev wants a clearer header (spec vs. current behavior). The novice do
 
 ## Triage
 
+As of 2026-07-25, all Critical (C1-C5), High Value (H1-H7), and Secondary (S1-S10) items are resolved.
+
 ### Critical — Blockers Before Alpha
 
 All five critical items resolved as of 2026-07-25 (commits `17618cf`, `a2de1a3`).
@@ -276,30 +278,36 @@ All five critical items resolved as of 2026-07-25 (commits `17618cf`, `a2de1a3`)
 
 ### High Value — Pre-Alpha Quality Improvements
 
-| # | Finding | Domain(s) |
-|---|---------|-----------|
-| H1 | Update `ugt init` template and CLI `[Phase N]` labels: RL is demoted, LLM playtest is the balance tier | Senior dev, Game dev |
-| H2 | Fix documented fix-round count (README says 2, code does 3: Opus normal, Opus max, Fable max); document the Fable escalation explicitly | Power user |
-| H3 | Add code-level DAG verification before Code stage: assert all `after:` IDs are DONE, independent of model judgment | Power user |
-| H4 | Add an Orchestrator → UGT transition document (or section): "you just finished a build cycle — here's how to start testing" | Novice, Game dev |
-| H5 | Move `harness-game` recommendation to the top of README's "Where to go next"; add one sentence about what R3 catches that R1 cannot | Novice, Senior dev |
-| H6 | Add a "what adapter for my game?" decision guide (one page or flowchart; browser / simulation / real_server decision tree) | Novice |
-| H7 | Clarify `NOT_REACHED` in verify output: distinguish "precondition expression wrong" from "state unreachable in turn budget" | Game dev |
+All seven high-value items resolved as of 2026-07-25.
+
+| # | Status | Finding | Domain(s) |
+|---|--------|---------|-----------|
+| H1 | ✅ Done (commits e4ff998, 3791363) | Update `ugt init` template and CLI `[Phase N]` labels: RL is demoted, LLM playtest is the balance tier | Senior dev, Game dev |
+| H2 | ✅ Done (commit 008c926) | Fix documented fix-round count (README says 2, code does 3: Opus normal, Opus max, Fable max); document the Fable escalation explicitly | Power user |
+| H3 | ✅ Done (commits bca0000, 6f41e91) | Add code-level DAG verification before Code stage: assert all `after:` IDs are DONE, independent of model judgment | Power user |
+| H4 | ✅ Done* (commit 2f3a75e) | Add an Orchestrator → UGT transition document (or section): "you just finished a build cycle — here's how to start testing" | Novice, Game dev |
+| H5 | ✅ Done (commit bca0000) | Move `harness-game` recommendation to the top of README's "Where to go next"; add one sentence about what R3 catches that R1 cannot | Novice, Senior dev |
+| H6 | ✅ Done (commit bca0000) | Add a "what adapter for my game?" decision guide (one page or flowchart; browser / simulation / real_server decision tree) | Novice |
+| H7 | ✅ Done (just implemented) | Clarify `NOT_REACHED` in verify output: distinguish "precondition expression wrong" from "state unreachable in turn budget" | Game dev |
+
+**H-series code review notes:** H1, H2, H3, H5, H6 all passed cleanly with no gaps. H7 passed with all six required changes implemented in `ugt/core/verifier.py` (not_reached_reasons tracking, precondition_error capture, turn_budget_exceeded default via `.get()`, NOT_REACHED reason field in details dict, split counters in summary, and conditional print). H4 is PASS_WITH_NOTES (*): the `## What next — testing your build with UGT` section is present and correctly describes all three UGT tiers and adapter options, but the bash block starts with `ugt smoke-test --config ugt.config.yaml` without first running `ugt init` to create the config — a user following the block literally will fail on the first command. Suggested fix: insert `ugt init  # scaffolds ugt.config.yaml` as the first line of the bash block.
 
 ### Secondary — Meaningful But Not Blocking
 
-| # | Finding | Domain(s) |
-|---|---------|-----------|
-| S1 | Add `PLAYTEST-DESIGN.md` header clarifying whether it is current behavior or aspirational spec | Senior dev |
-| S2 | Human gate regex: parse the `[BLOCKED BY]` marker from raw TASKS.md rather than from model-returned task block | Power user |
-| S3 | Static DAG validation in `/tasklist`: cycle detection and unreachable-task detection before runtime | Power user |
-| S4 | CI poll: expose 30-poll ceiling as a configurable knob; fix eligibility check from probabilistic model judgment to code-level YAML parse | Power user |
-| S5 | Add one sentence to Orchestrator README acknowledging users with no tests yet ("your gate can be as simple as `python -m py_compile *.py`") | Novice |
-| S6 | `setup.py`: drop Python 3.14 classifier (untested); change "Beta" status to "Alpha" | Senior dev |
-| S7 | Add one-sentence mention of `Orchestrator/` in main README ("bonus Claude Code build-loop tool, not part of UGT") | Senior dev, Novice |
-| S8 | Expose per-task timeouts (no ceiling on a coder agent for a hard task) | Power user |
-| S9 | Document that LLM playtest costs ~$0.75/100 actions in README tier table, not only in the USER-MANUAL | Novice |
-| S10 | `diagnose_resets_episode: false` should be called out in onboarding for any game with persistent state | Game dev |
+All ten secondary items resolved as of 2026-07-25.
+
+| # | Status | Finding | Domain(s) |
+|---|--------|---------|-----------|
+| S1 | ✅ Done | Add `PLAYTEST-DESIGN.md` header clarifying whether it is current behavior or aspirational spec | Senior dev |
+| S2 | ✅ Done | Human gate regex: parse the `[BLOCKED BY]` marker from raw TASKS.md rather than from model-returned task block | Power user |
+| S3 | ✅ Done | Static DAG validation in `/tasklist`: cycle detection and unreachable-task detection before runtime | Power user |
+| S4 | ✅ Done | CI poll: expose 30-poll ceiling as a configurable knob; fix eligibility check from probabilistic model judgment to code-level YAML parse | Power user |
+| S5 | ✅ Done | Add one sentence to Orchestrator README acknowledging users with no tests yet ("your gate can be as simple as `python -m py_compile *.py`") | Novice |
+| S6 | ✅ Done (already done in C3) | `setup.py`: drop Python 3.14 classifier (untested); change "Beta" status to "Alpha" | Senior dev |
+| S7 | ✅ Done | Add one-sentence mention of `Orchestrator/` in main README ("bonus Claude Code build-loop tool, not part of UGT") | Senior dev, Novice |
+| S8 | ✅ Done | Expose per-task timeouts (no ceiling on a coder agent for a hard task) | Power user |
+| S9 | ✅ Done | Document that LLM playtest costs ~$0.75/100 actions in README tier table, not only in the USER-MANUAL | Novice |
+| S10 | ✅ Done | `diagnose_resets_episode: false` should be called out in onboarding for any game with persistent state | Game dev |
 
 ### Nice to Have — Post-Alpha Improvements
 
