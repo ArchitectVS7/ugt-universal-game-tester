@@ -61,8 +61,21 @@ const NEXT_TASK = {
       type: 'boolean',
       description: 'true iff the chosen task was ALREADY IN-PROGRESS (a resume of an interrupted run), not a fresh TODO',
     },
+    prereq_statuses: {
+      type: 'array',
+      description: 'for every task ID listed in the chosen task\'s after: field, return {id, status} from TASKS.md; empty array if no after: field',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string' },
+          status: { type: 'string' },
+        },
+        required: ['id', 'status'],
+      },
+    },
   },
-  required: ['id'],
+  required: ['id', 'prereq_statuses'],
 };
 const REVIEW = {
   type: 'object',
@@ -254,7 +267,9 @@ while (guard++ < 200) {
   phase('Select');
   const task = await agent(
     `Read TASKS.md. Pick the task to work next, restricted to ${scopeText}: PREFER the FIRST task whose status is IN-PROGRESS (a resume of an interrupted run); otherwise the FIRST task whose status is TODO and whose every \`after:\` dependency is already DONE. ` +
-      `Return: id, title, the full task block verbatim (block), its acceptance criteria (accept), isUi, and resuming=true iff the chosen task was already IN-PROGRESS. If no such task exists, return id=null. Do not modify anything.`,
+      `Return: id, title, the full task block verbatim (block), its acceptance criteria (accept), isUi, and resuming=true iff the chosen task was already IN-PROGRESS. ` +
+      `Also return prereq_statuses: for every task ID in the chosen task's after: field, return that entry's id and its current status field from TASKS.md (empty array if the task has no after: field). ` +
+      `If no such task exists, return id=null. Do not modify anything.`,
     { phase: 'Select', model: 'sonnet', effort: 'low', schema: NEXT_TASK, agentType: 'general-purpose' },
   );
   if (!task || !task.id) {
@@ -267,6 +282,17 @@ while (guard++ < 200) {
   if (scopeIds && !scopeIds.includes(task.id)) {
     log(`Scope exhausted: next eligible task is ${task.id}, outside scope "${Array.isArray(scope) ? scope.join(', ') : scope}". Stopping.`);
     break;
+  }
+  // CODE-LEVEL: assert all after: prerequisites are DONE before entering Code.
+  // This is independent of Select's judgment — if Select misread a status, the
+  // comparison here catches it and halts before any code changes are made.
+  if (task.prereq_statuses && task.prereq_statuses.length > 0) {
+    const notDone = task.prereq_statuses.filter(p => p.status !== 'DONE');
+    if (notDone.length > 0) {
+      const detail = notDone.map(p => `${p.id} (${p.status})`).join(', ');
+      log(`HALT: DAG violation — ${task.id} selected but prerequisite(s) not DONE: ${detail}. Fix the prerequisite tasks first.`);
+      break;
+    }
   }
   log(`> ${task.id} — ${task.title}${task.resuming ? ' (resuming)' : ''}`);
 

@@ -79,6 +79,7 @@ fabricating behavior.
 
 ## Where to go next
 
+- **`examples/harness-game/`** — the fastest start: a complete, dependency-free worked example of the full trial ladder. Run all five rungs in one command. R3 (the exploit-hunter) is qualitatively different from R1: it runs random and heuristic walks and re-checks invariants after *every* step, catching states no scripted test can enumerate; the same-seed replay then certifies the engine is deterministic. Start here.
 - **`PLAN-FORWARD.md`** — current direction: what's been proven, what's next, links to full history.
 - **`LESSONS.md`** — the canonical cross-game lessons registry: core methodology, the mandatory LLM-playtest
   pre-flight information-integrity audit (read before any balance batch), and operational discipline. Read
