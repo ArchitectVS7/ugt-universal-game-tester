@@ -264,13 +264,15 @@ The senior dev wants a clearer header (spec vs. current behavior). The novice do
 
 ### Critical — Blockers Before Alpha
 
-| # | Finding | Domain(s) |
-|---|---------|-----------|
-| C1 | Game-specific fuel logic in `verifier.py` lines 73–76 (M1 violation; produces incorrect verify results on any non-space-trading game) | Game dev, Senior dev |
-| C2 | `SafeEvaluator` silent-zero on missing state keys (structural path to vacuous green; undermines O2) | Game dev, Senior dev |
-| C3 | `playwright` and `stable-baselines3` in unconditional `install_requires` (multi-hundred-MB first impression, wrong for this audience) | Senior dev |
-| C4 | `playwright install chromium` step missing from README Install section (silent failure on first browser engine attempt) | Senior dev |
-| C5 | `TASKS.md` at repo root references gitignored `integrations/spacerquest/`; will actively mislead alpha testers | All domains |
+All five critical items resolved as of 2026-07-25 (commits `17618cf`, `a2de1a3`).
+
+| # | Status | Finding | Domain(s) |
+|---|--------|---------|-----------|
+| C1 | ✅ Done | Game-specific fuel logic in `verifier.py` lines 73–76 (M1 violation; produces incorrect verify results on any non-space-trading game) — replaced with generic action 0 no-op; M1 cited in comment | Game dev, Senior dev |
+| C2 | ✅ Done | `SafeEvaluator` silent-zero on missing state keys (structural path to vacuous green; undermines O2) — added `strict=True` mode; verifier now passes `strict=True` for all feature-map preconditions and assertions | Game dev, Senior dev |
+| C3 | ✅ Done | `playwright` and `stable-baselines3` in unconditional `install_requires` (multi-hundred-MB first impression) — both moved to optional extras (`[browser]` and `[rl]`); base install is now `numpy`/`gymnasium`/`pyyaml` only | Senior dev |
+| C4 | ✅ Done | `playwright install chromium` step missing from README Install section (silent failure on first browser engine attempt) — step added to README under the `[browser]` install block | Senior dev |
+| C5 | ✅ Done | `TASKS.md` at repo root references gitignored `integrations/spacerquest/`; will actively mislead alpha testers — removed from git tracking (`git rm --cached`), added to `.gitignore`; Orchestrator README updated to note TASKS.md is a per-project working file | All domains |
 
 ### High Value — Pre-Alpha Quality Improvements
 
