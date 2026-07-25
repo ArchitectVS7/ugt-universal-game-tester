@@ -18,9 +18,6 @@ setup(
         # Playwright headless browser engine (engine.type: browser). Requires a
         # post-install step to fetch browser binaries: `playwright install chromium`.
         "browser":    ["playwright"],
-        # Legacy RL path (`ugt train` / `ugt evaluate`); pulls in PyTorch.
-        "rl":         ["stable-baselines3"],
-        "dashboard":  ["tensorboard"],
         "playtest":   ["anthropic>=0.25.0", "python-dotenv>=1.0.0"],
         # Real-server adapter (drives a live game server over HTTP + Socket.IO).
         "realclient": ["requests", "python-socketio[client]>=5", "websocket-client"],

@@ -37,12 +37,3 @@ action_space:
 
 evaluation:
   victory_key: "won"
-
-# reward_profiles feed the LEGACY RL train/evaluate path only (demoted as a
-# balance judge — see PLAN-FORWARD.md). The current ladder judges correctness and
-# robustness with invariants (invariants.py), not a reward formula.
-reward_profiles:
-  arrive:
-    formula: "(state.location * 10) + (state.hp * 1) - (state.day * 0.5)"
-    win_bonus: 200
-    loss_penalty: 100

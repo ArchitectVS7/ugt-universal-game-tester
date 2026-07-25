@@ -31,18 +31,3 @@ action_space:
     0: { name: "wait" }
     1: { name: "invest_credits" }
     2: { name: "end_turn" }
-
-reward_profiles:
-  aggro:
-    formula: "(state.player.credits * 0.1) - (state.turns_elapsed * 1.0)"
-    win_bonus: 500
-    loss_penalty: 100
-  eco:
-    formula: "(state.player.credits * 0.2) - (state.turns_elapsed * 0.5)"
-    win_bonus: 500
-    loss_penalty: 200
-
-training:
-  algorithm: "PPO"
-  total_timesteps: 50000
-  parallel_envs: 1
