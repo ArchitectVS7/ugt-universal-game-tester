@@ -61,7 +61,7 @@ def verify_game(config, feature_map, max_turns=50, output_path=None):
                 break
             if feature.precondition:
                 try:
-                    met = SafeEvaluator(feature.precondition).evaluate(current_state)
+                    met = SafeEvaluator(feature.precondition, strict=True).evaluate(current_state)
                     if not met:
                         continue
                 except Exception:
@@ -69,13 +69,11 @@ def verify_game(config, feature_map, max_turns=50, output_path=None):
             tasks_this_turn.append(feature)
 
         if not tasks_this_turn:
-            # No preconditions met — take a neutral action to advance state.
-            # If fuel is low, buy fuel (action 4) to unblock fuel-gated preconditions;
-            # otherwise use action 0 (wait/no-op) to tick game state forward.
-            _fuel = (current_state.get("ship") or {}).get("fuel", 999)
-            idle_action = 4 if _fuel < 100 else 0
+            # No preconditions met — step with action 0 (the conventional no-op/wait)
+            # to advance game state. Any game-specific advance logic belongs in the
+            # bridge, never here (M1: never reimplement game logic in the framework).
             try:
-                current_state, terminated, truncated, _ = adapter.step(idle_action)
+                current_state, terminated, truncated, _ = adapter.step(0)
                 if terminated or truncated:
                     current_state = adapter.reset()
             except Exception:
@@ -110,7 +108,7 @@ def verify_game(config, feature_map, max_turns=50, output_path=None):
                 failed_assertions = []
                 for assertion_expr in feature.assertions:
                     try:
-                        result = SafeEvaluator(assertion_expr).evaluate(
+                        result = SafeEvaluator(assertion_expr, strict=True).evaluate(
                             after_state, extra_context={"before": before_state}
                         )
                         if not result:
