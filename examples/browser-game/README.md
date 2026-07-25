@@ -27,7 +27,7 @@ pip install playwright && playwright install chromium
 python3 serve.py                 # http://localhost:8080
 
 # Terminal 2 — drive it
-ugt smoke-test --config ugt.config.yaml --profile aggro   # 5 random steps through the browser
+ugt smoke-test --config ugt.config.yaml   # 5 random steps through the browser
 ugt verify --config ugt.config.yaml --feature-map feature-map.yaml
 ```
 
