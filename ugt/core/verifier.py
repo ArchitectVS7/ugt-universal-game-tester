@@ -38,6 +38,7 @@ def verify_game(config, feature_map, max_turns=50, output_path=None):
     features = feature_map.features
     coverage = {f.id: "not_reached" for f in features}
     details = {}
+    not_reached_reasons = {}
 
     print(f"[*] Phase 1 — Verify: {len(features)} features to test")
     print(f"[*] Connecting to game ({config.engine_type})...")
@@ -65,6 +66,7 @@ def verify_game(config, feature_map, max_turns=50, output_path=None):
                     if not met:
                         continue
                 except Exception:
+                    not_reached_reasons[feature.id] = "precondition_error"
                     continue
             tasks_this_turn.append(feature)
 
@@ -164,11 +166,23 @@ def verify_game(config, feature_map, max_turns=50, output_path=None):
     status_map = {"passed": "PASSED", "failed": "FAILED", "not_reached": "NOT_REACHED", "running": "NOT_REACHED"}
     for fid in coverage:
         if coverage[fid] not in details:
-            details[fid] = {"status": status_map.get(coverage[fid], "NOT_REACHED")}
+            mapped_status = status_map.get(coverage[fid], "NOT_REACHED")
+            if mapped_status == "NOT_REACHED":
+                details[fid] = {
+                    "status": "NOT_REACHED",
+                    "not_reached_reason": not_reached_reasons.get(fid, "turn_budget_exceeded"),
+                }
+            else:
+                details[fid] = {"status": mapped_status}
 
     passed = sum(1 for v in coverage.values() if v == "passed")
     failed = sum(1 for v in coverage.values() if v == "failed")
     not_reached = sum(1 for v in coverage.values() if v in ("not_reached", "running"))
+    not_reached_precondition_error = sum(
+        1 for fid, v in coverage.items()
+        if v in ("not_reached", "running") and not_reached_reasons.get(fid) == "precondition_error"
+    )
+    not_reached_turn_budget = not_reached - not_reached_precondition_error
     total = len(features)
     coverage_pct = round((passed / total) * 100, 1) if total > 0 else 0.0
 
@@ -178,6 +192,8 @@ def verify_game(config, feature_map, max_turns=50, output_path=None):
         "passed": passed,
         "failed": failed,
         "not_reached": not_reached,
+        "not_reached_precondition_error": not_reached_precondition_error,
+        "not_reached_turn_budget": not_reached_turn_budget,
         "coverage_pct": coverage_pct,
         "duration_seconds": duration,
         "results": {fid: details[fid] for fid in [f.id for f in features]},
@@ -188,6 +204,8 @@ def verify_game(config, feature_map, max_turns=50, output_path=None):
 
     print(f"\n[+] Verification complete in {duration}s")
     print(f"[+] Coverage: {passed}/{total} PASSED ({coverage_pct}%)  |  {failed} FAILED  |  {not_reached} NOT REACHED")
+    if not_reached_precondition_error > 0:
+        print(f"    ({not_reached_precondition_error} precondition_error, {not_reached_turn_budget} turn_budget_exceeded)")
     if failed > 0:
         print(f"[!] Failed features:")
         for fid, d in details.items():
