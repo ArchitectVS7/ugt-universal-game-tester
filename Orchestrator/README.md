@@ -268,7 +268,10 @@ header names that project's real commands. Still, a few things are worth knowing
 
 - **The gate is the contract.** Whatever you put on `**Gate (every task):**` is run
   verbatim and must all exit 0. Make it your actual test / typecheck / lint / e2e
-  commands. This is the one thing that *must* be right for a given repo.
+  commands. This is the one thing that *must* be right for a given repo. If the
+  project has no test suite yet, start with a minimal gate like `python -m py_compile *.py`
+  or `node --check index.js` — any command that exits 0/non-0 reliably. Make setting
+  up a real test suite the first task.
 - **Formatting is now config-driven.** Earlier versions hardcoded a JS
   `npm run format:check` pre-gate pass; this bundled copy reads it from the
   optional `**Format check:**` header line instead. Name your formatter there
@@ -349,9 +352,10 @@ over HTTP + Socket.IO). The manual's **trial-ladder** section covers the
 methodology; `examples/harness-game/` shows the subprocess harness end-to-end and is
 the fastest orientation available.
 
-Once the config exists, the suggested sequence:
+The suggested sequence:
 
 ```bash
+ugt init                                                                   # scaffolds ugt.config.yaml
 ugt smoke-test --config ugt.config.yaml                                   # bridge is alive
 ugt verify --config ugt.config.yaml --feature-map feature-map.yaml       # Tier 1 — correctness
 python verify_round3.py                                                  # Tier 2 — exploit-hunter (a ladder script, not a subcommand)

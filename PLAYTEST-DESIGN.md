@@ -8,6 +8,8 @@
 > game break?"). This doc keeps only the design content that still applies to that role, ported to how the
 > project actually works today: Python, driving the **real** running game as a client (a live server, a real
 > browser, or the game's own subprocess harness), never a bridge reimplementation.
+>
+> **Status:** This document describes implemented behavior unless a section is explicitly marked as future work; where it diverges from the code, the code is authoritative.
 
 > **Before running this tier against any game, work through `LESSONS.md` §B — the pre-flight
 > information-integrity audit (P1–P11).** It is the accumulated cost of two real balance rounds: a playtest can

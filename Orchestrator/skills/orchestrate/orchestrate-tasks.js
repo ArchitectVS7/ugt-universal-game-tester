@@ -74,6 +74,10 @@ const NEXT_TASK = {
         required: ['id', 'status'],
       },
     },
+    headingLine: {
+      type: 'string',
+      description: 'the verbatim heading line (### T-NNN ...) for the chosen task, copied exactly from TASKS.md',
+    },
   },
   required: ['id'],
 };
@@ -154,6 +158,8 @@ const TREE_IGNORE = [
   '.claude/scheduled_tasks.lock',
   ...(Array.isArray(ARGS.treeIgnore) ? ARGS.treeIgnore : []),
 ];
+// args.codeTimeoutMinutes: soft per-task ceiling (instructional, not a hard kill); default unlimited.
+const codeTimeoutMinutes = ARGS.codeTimeoutMinutes ? Number(ARGS.codeTimeoutMinutes) : null;
 async function treeState(ignore = TREE_IGNORE) {
   // Deterministic filter: dirty paths under an ignored prefix are stripped by an
   // exact grep the probe agent must run verbatim (prefix semantics enforced by
@@ -269,6 +275,7 @@ while (guard++ < 200) {
     `Read TASKS.md. Pick the task to work next, restricted to ${scopeText}: PREFER the FIRST task whose status is IN-PROGRESS (a resume of an interrupted run); otherwise the FIRST task whose status is TODO and whose every \`after:\` dependency is already DONE. ` +
       `Return: id, title, the full task block verbatim (block), its acceptance criteria (accept), isUi, and resuming=true iff the chosen task was already IN-PROGRESS. ` +
       `Also return prereq_statuses: for every task ID in the chosen task's after: field, return that entry's id and its current status field from TASKS.md (empty array if the task has no after: field). ` +
+      `Also return headingLine: copy the chosen task's heading line (### T-NNN ...) VERBATIM from TASKS.md. ` +
       `If no such task exists, return id=null. Do not modify anything.`,
     { phase: 'Select', model: 'sonnet', effort: 'low', schema: NEXT_TASK, agentType: 'general-purpose' },
   );
@@ -305,7 +312,7 @@ while (guard++ < 200) {
   // a milestone boundary and self-approving a review it cannot perform. The
   // detection is a deterministic regex over the verbatim task block so it cannot
   // be softened by a model rationalizing the prose away.
-  const headingLine = typeof task.block === 'string' ? task.block.split('\n', 1)[0] : '';
+  const headingLine = task.headingLine || (typeof task.block === 'string' ? task.block.split('\n', 1)[0] : '');
   const gateTag = headingLine.match(/\[\s*BLOCKED\s+BY\s*[:=]\s*([^\]\n]+?)\s*\]/i);
   // Legacy fallback: a task whose TITLE is a CHECKPOINT (matched on the heading
   // line only, so a normal task merely *discussing* a checkpoint in its body is
@@ -343,7 +350,8 @@ while (guard++ < 200) {
   phase('Code');
   await agent(
     `You are the CODER for ${task.id}. ${briefing}\n\nTask block:\n${task.block}\n\nImplementation plan:\n${plan}\n\n` +
-      `Implement it now by editing the repo. Add the tests the task requires. Never bypass or weaken a check. ${formatStep}Do NOT commit. When done, briefly summarize what you changed.`,
+      `Implement it now by editing the repo. Add the tests the task requires. Never bypass or weaken a check. ${formatStep}Do NOT commit. When done, briefly summarize what you changed.` +
+      (codeTimeoutMinutes ? ` You have ${codeTimeoutMinutes} minutes — if you cannot finish in time, stop cleanly and summarize what remains rather than leaving a broken tree.` : ""),
     { phase: 'Code', model: 'opus', agentType: 'general-purpose' },
   );
 
@@ -375,7 +383,8 @@ while (guard++ < 200) {
       phase('Code');
       await agent(
         `You are the CODER fixing ${task.id} (fix round ${attempt}). ${briefing}\n\nThe review and/or gate failed:\n${report}\n\n` +
-          `Diagnose the ROOT cause and fix it — never bypass a check (no --no-verify, no narrowing scope, no deleting tests). ${formatStep}Do NOT commit.`,
+          `Diagnose the ROOT cause and fix it — never bypass a check (no --no-verify, no narrowing scope, no deleting tests). ${formatStep}Do NOT commit.` +
+          (codeTimeoutMinutes ? ` You have ${codeTimeoutMinutes} minutes — if you cannot finish in time, stop cleanly and summarize what remains rather than leaving a broken tree.` : ""),
         {
           phase: 'Code',
           model: attempt >= 3 ? 'fable' : 'opus',
@@ -528,11 +537,13 @@ while (guard++ < 200) {
   // sees "in_progress", and returns — so the control flow owns the wait instead.
   // Each poll is a fresh, cache-distinct (indexed) agent, so a resumed run
   // re-checks CI live rather than replaying a stale "pending" verdict.
+  // TODO S4: CI eligibility is currently a model judgment over .github/workflows YAML;
+  // a future improvement is a code-level YAML parse for on.push.branches filters.
   const push = await agent(
     `Run \`git push\` and report the result. If the push FAILED, return state="push-failed" with the error in output. ` +
       `If the push succeeded, run \`gh workflow list\`. If NO workflows are configured (empty list / no CI), return state="no-ci". ` +
       `Otherwise run \`git rev-parse HEAD\`, then \`gh run list --commit <that sha> --json name,status,conclusion\`: ` +
-      `if the list is EMPTY, first check whether any configured workflow can actually trigger for THIS branch — read the \`on:\` triggers in .github/workflows/*.yml and compare against \`git branch --show-current\`; if none apply to a push of this branch (e.g. CI fires only on main / pull_request), return state="no-ci" with a note in output; ` +
+      `if the list is EMPTY, first check whether any configured workflow can actually trigger for THIS branch — read the \`on:\` triggers in .github/workflows/*.yml and compare against \`git branch --show-current\`; specifically check the on.push.branches and on.pull_request.branches filter lists in each workflow file — if those filters exist and the current branch name does not match any pattern, that workflow will not trigger for this push; if none apply to a push of this branch (e.g. CI fires only on main / pull_request), return state="no-ci" with a note in output; ` +
       `if a workflow DOES cover this branch but its run has not registered yet, return state="pending" — never treat an empty list as success; ` +
       `if any run is still queued or in_progress return state="pending"; if any run completed with a non-success conclusion return state="failure" with the run names/conclusions in output; if the list is non-empty and every run concluded "success" return state="success". Do not fix anything.`,
     { phase: 'Commit', model: 'sonnet', effort: 'low', schema: CISTATE, agentType: 'general-purpose', label: `push+ci:${task.id}` },
@@ -540,7 +551,8 @@ while (guard++ < 200) {
   let ciState = push ? push.state : null;
   let ciOut = push ? push.output || '' : 'push/ci agent died';
   // ~90s sleep per poll * 30 ≈ 45 min ceiling before we call it a timeout.
-  for (let i = 0; ciState === 'pending' && i < 30; i++) {
+  // Ceiling configurable via args.ciPollLimit; default 30 (~45 min at 90s/poll).
+  for (let i = 0; ciState === 'pending' && i < (ARGS.ciPollLimit || 30); i++) {
     const poll = await agent(
       `CI poll #${i + 1}. First run \`sleep 90\`. Then run \`git rev-parse HEAD\` and \`gh run list --commit <that sha> --json name,status,conclusion\`: ` +
         `if the list is EMPTY, check whether any workflow in .github/workflows/*.yml can trigger for the current branch (\`git branch --show-current\`) — if none apply return state="no-ci" with a note, otherwise return state="pending" (never success); if any run is still queued or in_progress return state="pending"; if any run completed with a non-success conclusion return state="failure" with details in output; if the list is non-empty and every run concluded "success" return state="success". Do not push, commit, or fix anything.`,

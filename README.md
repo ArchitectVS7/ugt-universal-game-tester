@@ -20,7 +20,7 @@ story of why that rule exists.
    actually good at.
 3. **LLM playtester (`ugt playtest`)** — balance/strategy. An LLM reads live text/terminal state (or a
    structured legal-action list) and plays via `press_key`/`type_text`/legal-action selection, producing
-   `results/playtest-report.json`. This is the tier that judges "is the game good?", not "does it crash?".
+   `results/playtest-report.json`; costs approximately **$0.75 per 100 actions** (Anthropic API). This is the tier that judges "is the game good?", not "does it crash?".
 
 These three tiers are run in a standardized sequence per game integration — the **trial ladder**: spike
 (raw protocol round-trip) → smoke (same path through the framework's adapter contract) → R1 playability →
@@ -89,3 +89,5 @@ fabricating behavior.
 This README, and the four docs above it, are deliberately framework-level and game-agnostic. The concrete
 per-game integrations (which specific games have been run and how they scored) live under `integrations/`,
 and the historical/retrospective design docs live under `Dev/` — both are kept internal.
+
+The `Orchestrator/` directory is a bonus Claude Code build-loop tool bundled with the repo — it is not part of the UGT framework (see `Orchestrator/README.md`).

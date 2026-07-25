@@ -890,6 +890,17 @@ See `examples/mock-game/strategy-guide.md` for a working example.
 
 ### 9b. Running `ugt playtest`
 
+> **Persistent-state games:** Set `diagnose_resets_episode: false` in your config before the first LLM
+> playtest run. By default the `diagnose` action resets the episode — in a game with persistent campaign
+> state this will erase progress mid-run. (This knob exists because a real run erased 310 turns of valid
+> play before the option was added.)
+>
+> Add to `ugt.config.yaml`:
+> ```yaml
+> playtest:
+>   diagnose_resets_episode: false
+> ```
+
 ```bash
 # Requires: pip install 'ugt[playtest]' and ANTHROPIC_API_KEY
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -1047,6 +1058,17 @@ training:
   total_timesteps: 200000
   parallel_envs: 1          # >1 requires SubprocVecEnv-compatible bridge
   checkpoint_freq: 20000    # Save checkpoint every N steps (optional)
+
+playtest:
+  # diagnose_resets_episode (default: true)
+  # When the LLM playtester issues a `diagnose` action it signals confusion or a
+  # suspected broken state. By default UGT resets the entire episode at that point,
+  # which is safe for short/stateless games. For games with persistent campaign
+  # state (progress that spans many turns or sessions) set this to false — a reset
+  # will erase all accumulated progress, not just the current confusing moment.
+  # **Set this to false before the first run on any persistent-state game.**
+  # (A real run erased 310 turns of valid campaign play before this knob was added.)
+  diagnose_resets_episode: true   # set false for persistent-campaign games
 ```
 
 ---

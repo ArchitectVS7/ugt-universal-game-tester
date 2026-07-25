@@ -46,6 +46,10 @@ it.
      paragraph to describe, split it (use `T-NNNa` / `T-NNNb`).
    - Set `after:` to the real prerequisites so the DAG is honest — the runner
      uses it for eligibility and ordering. No cycles.
+     Before writing TASKS.md, validate the DAG: (1) **Cycle check** — trace each
+     task's `after:` chain; if any task is reachable from itself the runner will
+     loop forever. (2) **Reachability check** — every task ID in an `after:` field
+     must exist in the list; a missing reference silently blocks that task forever.
    - Choose `coder:` per task: the stronger model for cross-cutting design or
      tricky tasks, the cheaper model for mechanical ones. Default to the
      project's convention if one exists.
@@ -82,3 +86,5 @@ it.
   memory.
 - **If a target `TASKS.md` already exists**, don't clobber it — show what you'd
   add/change and confirm, or append new milestones.
+- **Validate the DAG before writing:** confirm no cycles and no `after:` references
+  to nonexistent task IDs.
