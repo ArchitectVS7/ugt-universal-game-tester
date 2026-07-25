@@ -37,6 +37,23 @@ the wire. That is rule **M1** in `../LESSONS.md`, and the reason the retired
 `sim_bridge`-style example (a bridge that grew its own copy of a game's logic) was
 removed in favor of `harness-game`.
 
+## Planned examples (Orchestrator + UGT, PRD-only for now)
+
+Three more examples, each pairing a `game/` (built by `/orchestrate`) with an
+`integration/` (the UGT side) — showing the Orchestrator building a game from
+a PRD and UGT testing what it built, across three different transports:
+
+| Example | Stack | Transport | Status |
+|---|---|---|---|
+| [`dice`](dice/) | React | `browser` (Playwright) | PRD + TASKS.md only |
+| [`escape-room`](escape-room/) | Node.js | `simulation` (subprocess) | PRD + TASKS.md only |
+| [`sokoban`](sokoban/) | Godot | hand-written TCP adapter (engine-first, like `harness-game`) | PRD + TASKS.md only |
+
+Each `game/` and `integration/` folder has its own `PRD.md` (what to build)
+and `TASKS.md` (in `../Orchestrator`'s canonical format — run `/orchestrate
+all` against it to build). See `../Orchestrator/README.md` for the two-step
+`/tasklist` → `/orchestrate` workflow these were authored for.
+
 ## See also
 
 - `../UGT-USER-MANUAL.md` — full onboarding walkthrough and the trial-ladder methodology
