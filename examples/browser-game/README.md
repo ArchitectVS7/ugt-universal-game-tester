@@ -12,7 +12,7 @@ the same; only the transport differs.
 | File | Role |
 |---|---|
 | `index.html` | The game + the three UGT hooks: `__GET_STATE__`, `__SEND_ACTION__`, `__RESET_GAME__`. Terminal flags (`victory`/`defeat`) are exposed so the tester can see the outcome. |
-| `serve.sh` | Starts a local HTTP server on `http://localhost:8080`. |
+| `serve.py` | Starts a local HTTP server on `http://localhost:8080` (cross-platform). |
 | `ugt.config.yaml` | `engine.type: browser`; same observation/action space as mock-game. |
 | `feature-map.yaml` | The correctness assertions `ugt verify` checks — identical to mock-game's (a feature map is transport-agnostic). |
 | `strategy-guide.md` | The tier-3 LLM playtest briefing. |
@@ -24,7 +24,7 @@ the same; only the transport differs.
 pip install playwright && playwright install chromium
 
 # Terminal 1 — serve the game
-./serve.sh                       # http://localhost:8080
+python3 serve.py                 # http://localhost:8080
 
 # Terminal 2 — drive it
 ugt smoke-test --config ugt.config.yaml --profile aggro   # 5 random steps through the browser

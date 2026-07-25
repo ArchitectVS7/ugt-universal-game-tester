@@ -6,7 +6,7 @@
 # therefore the same — this shows that a feature map is transport-agnostic: it
 # asserts on state deltas, not on how the state was produced.
 #
-# Prereq: start the game server first (./serve.sh) so http://localhost:8080 is up.
+# Prereq: start the game server first (python3 serve.py) so http://localhost:8080 is up.
 # Run order is by priority: critical → major → minor. Features whose precondition
 # is never met are reported NOT_REACHED (not a failure).
 
