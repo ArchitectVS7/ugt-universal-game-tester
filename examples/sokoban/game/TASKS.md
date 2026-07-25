@@ -7,12 +7,14 @@ Build the Godot game per `PRD.md` in this folder.
 1. Check out the first `status: TODO` task whose `after:` are all DONE; set IN-PROGRESS.
 2. Plan → 3. Code → 4. Review vs **Accept** → 5. Gate, commit `<ID>: <title>`, set DONE, update this file in the same commit.
 
-**Gate (every task):** GUT (Godot Unit Test) run headless — e.g. `godot4
+**Gate (every task):** first regenerate Godot's import cache — `godot4
+--headless --editor --path . --quit` (idempotent; required on a fresh clone
+since `.godot/` is not committed) — then run GUT headless, e.g. `godot4
 --headless --path . -s addons/gut/gut_cmdln.gd -gdir=res://tests -gexit` —
-exits 0. T-001 below is responsible for getting this command working; keep
-the gate minimal until then. T-006 additionally requires `python
-tools/tcp_smoke_check.py` (committed alongside the bridge, not a throwaway)
-to exit 0.
+both exit 0. T-001 below is responsible for getting this two-step command
+working; keep the gate minimal until then. T-006 additionally requires
+`python tools/tcp_smoke_check.py` (committed alongside the bridge, not a
+throwaway) to exit 0.
 
 **Format check (optional):** none — omitted (gdformat is optional tooling,
 not assumed here).
@@ -40,12 +42,12 @@ Statuses: `TODO` | `IN-PROGRESS` | `DONE` | `BLOCKED(reason)`
 Create the Godot 4 project. Vendor the GUT addon by committing
 `addons/gut/` directly into the repo (not via the editor's Asset Library,
 which needs GUI/network and won't run headless); enable the plugin in
-`project.godot`. Run `godot4 --headless --editor --path . --quit` once to
-generate the `.godot/` import cache the headless test runner needs. Add an
-empty `res://tests/` with one trivial passing test.
-**Accept:** on a completely fresh clone, the Gate command exits 0 (1 test, 0
-failures) — i.e. the import-cache-generation step is itself verified, not
-assumed.
+`project.godot`. Do not commit `.godot/` (the machine-specific import
+cache) — the Gate's own cache-regeneration step handles it on every run,
+including a fresh clone. Add an empty `res://tests/` with one trivial
+passing test.
+**Accept:** on a completely fresh clone, the two-step Gate command exits 0
+(1 test, 0 failures).
 
 ### T-002 · Level file format + loader — `status: TODO` · `coder: opus` · `after: T-001`
 Parse the ASCII grid legend into a 2D tile grid (walls/floor/targets), player

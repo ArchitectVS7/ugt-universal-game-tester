@@ -89,8 +89,9 @@ diagonal movement, or any scoring beyond `moves_taken`.
 
 ## Acceptance criteria
 
-- Runs in the Godot editor and as an exported headless binary (`godot4
-  --headless --path . -- --ugt-bridge`).
+- Runs in the Godot editor, and headless by running the project directly
+  (`godot4 --headless --path . -- --ugt-bridge`) — no exported binary is
+  required for this example.
 - All 3 levels are solvable (a documented solution move sequence exists for
   each).
 - Same level + same action sequence from `reset` reproduces identical state

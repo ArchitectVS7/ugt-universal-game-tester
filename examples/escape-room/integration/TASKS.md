@@ -7,8 +7,11 @@ Build the UGT-side integration per `PRD.md` in this folder, against `../game`.
 1. Check out the first `status: TODO` task whose `after:` are all DONE; set IN-PROGRESS.
 2. Plan → 3. Code → 4. Review vs **Accept** → 5. Gate, commit `<ID>: <title>`, set DONE, update this file in the same commit.
 
-**Gate (every task):** `ugt verify --config ugt.config.yaml --feature-map
-feature-map.yaml` exits 0 with 0 FAILED features.
+**Gate (every task):** `python -c "from ugt.utils.config_parser import
+UgtConfig; UgtConfig('ugt.config.yaml')"` exits 0. Starting at T-003 (once
+`feature-map.yaml` exists), also require `ugt verify --config
+ugt.config.yaml --feature-map feature-map.yaml` to exit 0 with 0 FAILED
+features.
 
 **Standing constraints:**
 - No game logic added here — every rule lives in `../game/src/engine.js`.

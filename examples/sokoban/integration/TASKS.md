@@ -20,8 +20,9 @@ introduced so far all exit 0.
 - `GodotTcpAdapter` is constructed directly by each ladder script, per
   `examples/harness-game`'s precedent — it is not wired into
   `ugt/core/env.py`'s `engine.type` dispatch.
-- `../game` must export/run headless with `--ugt-bridge` before any ladder
-  script beyond the spike can pass.
+- `../game` must be running headless with `--ugt-bridge` before ANY ladder
+  script — including the spike — can pass; there is no scripted way to bring
+  the bridge up automatically yet, so start it manually first.
 
 Statuses: `TODO` | `IN-PROGRESS` | `DONE` | `BLOCKED(reason)`
 

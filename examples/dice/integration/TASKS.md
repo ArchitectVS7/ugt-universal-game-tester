@@ -8,10 +8,11 @@ game in `../game`.
 1. Check out the first `status: TODO` task whose `after:` are all DONE; set IN-PROGRESS.
 2. Plan → 3. Code → 4. Review vs **Accept** → 5. Gate, commit `<ID>: <title>`, set DONE, update this file in the same commit.
 
-**Gate (every task):** `python -m py_compile *.py` (any adapter/harness
-scripts added here) exits 0. Starting at T-004 (once `feature-map.yaml`
-exists), also require `ugt verify --config ugt.config.yaml --feature-map
-feature-map.yaml` to exit 0 with 0 FAILED features.
+**Gate (every task):** `python -c "import glob, py_compile; [py_compile.compile(f, doraise=True) for f in glob.glob('*.py')]"`
+(compiles any `.py` files present; passes vacuously before any exist) exits
+0. Starting at T-004 (once `feature-map.yaml` exists), also require `ugt
+verify --config ugt.config.yaml --feature-map feature-map.yaml` to exit 0
+with 0 FAILED features.
 
 **Standing constraints:**
 - No game logic in any file under this folder — every rule lives in

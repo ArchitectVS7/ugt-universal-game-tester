@@ -51,7 +51,7 @@ exactly.
 | F1 | All-attack preset (action 0) can reduce `enemy.force_strength` | none |
 | F2 | All-defense preset (action 6) reduces net damage taken vs. an all-attack round | none |
 | F3 | `player.bonus_dice` reflects Morale surge when `player.force_strength > enemy.force_strength`, isolated from the other two bonus rules | `player.force_strength > enemy.force_strength AND player.force_strength > 10 AND round_number != 2` |
-| F4 | Reinforcements bonus applies exactly at `round_number == 2` (pre-round-3) and not before/after | `round_number == 2` |
+| F4 | Reinforcements bonus applies exactly at `round_number == 2` (pre-round-3) and not before/after, isolated from the other two bonus rules | `round_number == 2 AND player.force_strength <= enemy.force_strength AND player.force_strength > 10` |
 | F5 | `battle_over` becomes `true` and `winner` is set when either side's FS reaches 0 | drive to a decisive round |
 | F6 | Round-12 cap yields `battle_over: true`, `winner: "draw"` if neither side is at 0 | run 12 rounds with balanced allocations |
 

@@ -48,7 +48,10 @@ each throws a descriptive error.
 ### T-003 · Author the 10-room adventure — `status: TODO` · `coder: opus` · `after: T-002`
 Write the real `content/rooms.csv` (10 rooms) and `content/objects.csv`
 (≤ 12 objects) per PRD's scope: a linear-with-branches flag chain ending at
-`R10`.
+`R10`. Also produce `content/walkthrough.json`: a flat array of
+`{"verb": <string>, "object": <object_id or direction>}` steps from the
+start room to `R10`, e.g.
+`[{"verb":"take","object":"key_brass"},{"verb":"go","object":"north"}, ...]`.
 **Accept:** loader (T-002) accepts the content with 0 validation errors; a
 walkthrough move sequence (room-by-room verb+object list) is committed as a
 fixture (`content/walkthrough.json`) and hand-traced against the CSVs to

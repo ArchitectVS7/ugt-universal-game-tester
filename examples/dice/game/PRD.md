@@ -34,7 +34,8 @@ shows, applied to a fresh game instead of a documentation stub.
 
 ## Mechanics
 
-- **Force Strength:** both sides start at 20.
+- **Force Strength:** both sides start at 20, floored at 0 (a hit that would
+  take FS negative clamps it to exactly 0, not below).
 - **Die pool:** 6 dice per round, allocated across Attack/Defense via one of 7
   fixed presets: `(6,0) (5,1) (4,2) (3,3) (2,4) (1,5) (0,6)`.
 - **Bonus dice** (flavor: reinforcements/terrain/morale), all deterministic
