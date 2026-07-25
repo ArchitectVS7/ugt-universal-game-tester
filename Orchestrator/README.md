@@ -33,7 +33,8 @@ The Orchestrator takes that control flow away from the model and puts it in code
 - **The model only fills in stage content.** Plan the task, write the code, review
   the diff, run the gate, write the commit. It never decides *whether* to advance.
 - **Checks are sacred.** Review **and** gate must both pass. Failures escalate
-  (normal fix → max-effort fix) and then **halt** — no `--no-verify`, no deleting
+  (normal Opus fix → max-effort Opus fix → max-effort Fable fix) and then
+  **halt** — no `--no-verify`, no deleting
   tests, no narrowing scope to dodge a red.
 - **Every task commits before the next starts.** So an interruption (usage limit,
   a halt, you closing the laptop) is always safe and resumable — just run
@@ -133,7 +134,7 @@ a pinned model:
 |------------|---------------|-----|
 | **Select** | Sonnet (low)  | Read `TASKS.md`, return the next eligible task. The *only* model touchpoint in control flow — it only extracts; the `while` loop decides continuation. |
 | **Plan**   | Opus\*        | Produce a concrete implementation plan from the task block + the header's source-of-truth pointers. |
-| **Code**   | Opus          | Edit the repo per the plan; add the tests the task requires. |
+| **Code**   | Opus (Fable on the final fix round) | Edit the repo per the plan; add the tests the task requires. |
 | **Review** | Sonnet        | Check the working diff against the task's **Accept** criteria and the Standing constraints. |
 | **Gate**   | Sonnet (low)  | Run the project gate commands verbatim; pass only if every command exits 0. |
 | **Commit** | Sonnet        | Commit `T-NNN: <title>` and flip the task's status to DONE **in the same commit**. |
@@ -159,7 +160,8 @@ immediately and does **not** bypass the check:
 
 1. One **normal** Opus fix round → re-check.
 2. One **max-effort** Opus fix round → re-check.
-3. Still failing → **HALT.** The repo is left at the last green commit, with the
+3. One **max-effort** Fable fix round → re-check.
+4. Still failing → **HALT.** The repo is left at the last green commit, with the
    failing task's changes **uncommitted** for your review, and the run reports
    `stoppedAt` + the reason.
 

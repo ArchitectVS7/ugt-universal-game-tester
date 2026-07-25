@@ -7,9 +7,9 @@ description: Deterministically build out TASKS.md via the plan→code→review�
 
 This is a **user-global, repo-agnostic** runner. It executes the task loop as a **Workflow**, not as a model-driven skill loop. The determinism is the entire point: the order, the plan→code→review→gate→commit sequence, the per-stage model pinning, and the "keep going until the list is dry" decision all live in JavaScript (`orchestrate-tasks.js`, next to this file). The model only fills in the content of each stage — it never decides whether to continue, so it cannot drift over many tasks or misread "do all of them" and stop early. Nothing is hard-coded to a project: the **gate command, source-of-truth pointers, and standing constraints are read from the target repo's `TASKS.md` header** at launch.
 
-**Roles / models (pinned in the script):** Planner = Opus (overridable per-run via `args.planModel`, e.g. `"fable"`) · Coder = Opus · Reviewer + Gate + Commit = Sonnet. The Select stage (parsing TASKS.md for the next eligible task) is a small Sonnet extraction — the only model touchpoint in the control flow; the `while` loop, not the model, decides continuation.
+**Roles / models (pinned in the script):** Planner = Opus (overridable per-run via `args.planModel`, e.g. `"fable"`) · Coder = Opus (Fable on the final fix round) · Reviewer + Gate + Commit = Sonnet. The Select stage (parsing TASKS.md for the next eligible task) is a small Sonnet extraction — the only model touchpoint in the control flow; the `while` loop, not the model, decides continuation.
 
-**Failure policy:** review + gate must both pass. On failure: one normal Opus fix round, then one MAX-effort Opus fix round, then **halt** and report — the repo is left at the last green commit with the failing task's changes uncommitted for review. Never bypasses a check.
+**Failure policy:** review + gate must both pass. On failure: one normal Opus fix round, then one MAX-effort Opus fix round, then one MAX-effort **Fable** fix round, then **halt** and report — the repo is left at the last green commit with the failing task's changes uncommitted for review. Never bypasses a check.
 
 ## What to do when invoked
 
