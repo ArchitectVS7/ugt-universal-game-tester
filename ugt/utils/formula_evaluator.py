@@ -22,8 +22,16 @@ COMPARATORS = {
 }
 
 class SafeEvaluator:
-    def __init__(self, formula_string):
+    def __init__(self, formula_string, strict=False):
+        """
+        strict=False (default): missing state keys evaluate to 0. Used by reward
+        formulas, where partial state is tolerable.
+        strict=True: missing state keys raise KeyError. Used by feature-map
+        preconditions and assertions, so a bad state path fails loudly instead of
+        passing vacuously (O2: no vacuous passes).
+        """
         self.formula_string = formula_string
+        self.strict = strict
         try:
             self.node = ast.parse(formula_string, mode='eval').body
         except SyntaxError as e:
@@ -88,6 +96,12 @@ class SafeEvaluator:
             if isinstance(value, dict):
                 if node.attr in value:
                     return value[node.attr]
+                if self.strict:
+                    raise KeyError(
+                        f"State key '{node.attr}' not found in state dict "
+                        f"(available: {list(value.keys())}). "
+                        f"Check your bridge returns this field."
+                    )
                 # Default to 0 if a nested state key is missing
                 return 0
             raise TypeError(f"Cannot lookup attribute '{node.attr}' on non-dictionary: {type(value)}")
@@ -96,7 +110,15 @@ class SafeEvaluator:
             value = self._eval(node.value, context)
             index = self._eval(node.slice, context)
             if isinstance(value, dict):
-                return value.get(index, 0)
+                if index in value:
+                    return value[index]
+                if self.strict:
+                    raise KeyError(
+                        f"State key '{index}' not found in state dict "
+                        f"(available: {list(value.keys())}). "
+                        f"Check your bridge returns this field."
+                    )
+                return 0
             raise TypeError(f"Cannot index non-dictionary: {type(value)}")
         elif isinstance(node, ast.Call):
             # Support safe built-in functions: min, max, abs

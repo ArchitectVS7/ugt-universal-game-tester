@@ -12,13 +12,13 @@ from ugt.core.evaluator import evaluate_agent
 
 DEFAULT_CONFIG_TEMPLATE = """# UGT Configuration File
 #
-# Three-Phase Testing Model — run these in order:
-#   Phase 1:  ugt verify    -- is the game correct? (requires feature-map.yaml)
-#   Phase 2:  ugt train     -- is it balanced?       (RL training)
-#             ugt evaluate  -- statistical eval with collapse detection
-#   Phase 3:  ugt playtest  -- does it feel right?  (LLM player, requires ANTHROPIC_API_KEY)
+# Three-Tier Testing Model — run these in order:
+#   Tier 1:  ugt verify    -- is the game correct?     (requires feature-map.yaml)
+#   Tier 2:  exploit-hunter -- does it break?           (run via verify_round3.py in your integration)
+#   Tier 3:  ugt playtest  -- does it feel right?      (LLM balance/strategy judge, requires ANTHROPIC_API_KEY)
 #
 # Start with: ugt smoke-test   to verify bridge connectivity, then ugt verify.
+# Optional: ugt train / ugt evaluate for RL analysis (legacy path — see PLAN-FORWARD.md).
 
 project:
   name: "MyGame"
@@ -29,7 +29,7 @@ engine:
   entry: "./sim_game.py" # Shell command to start game simulator
   reset_command: "" # optional reset override command
 
-# Numerical input mapping for RL Brain
+# Game state fields UGT reads (used by all three tiers)
 observation_space:
   type: "box"
   shape: 4
@@ -47,7 +47,7 @@ observation_space:
       min: 0
       max: 1000
 
-# Translating output commands from RL Brain
+# Actions UGT can send to your game (used by all three tiers)
 action_space:
   type: "discrete"
   size: 3
@@ -56,7 +56,7 @@ action_space:
     1: { name: "invest_credits" }
     2: { name: "end_turn" }
 
-# Dynamic reward formulas (Safe AST evaluated)
+# Reward profiles — used by the optional RL training path (ugt train / ugt evaluate)
 reward_profiles:
   aggro:
     formula: "(state.player.credits * 0.01) - (state.turns_elapsed * 0.1)"
@@ -74,11 +74,13 @@ training:
   parallel_envs: 4  # Number of parallel simulation instances
   checkpoint_freq: 50000  # Save checkpoints every N timesteps
 
-# After training, models are saved to ./models/ relative to this config file.
-# Use the trained model with:
-#   ugt evaluate --model ./models/ppo_aggro_final --episodes 100
+# Recommended next steps after setup:
+#   ugt verify --config ugt.config.yaml --feature-map feature-map.yaml   # Tier 1
+#   ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md  # Tier 3
 #
-# View training metrics:
+# Optional RL path (legacy):
+#   ugt train --config ugt.config.yaml --profile aggro
+#   ugt evaluate --config ugt.config.yaml --model ./models/ppo_aggro_final --episodes 100
 #   ugt dashboard --logdir ./logs
 """
 
@@ -239,10 +241,10 @@ def main():
     # init
     subparsers.add_parser("init", help="Initialize a template ugt.config.yaml in the current directory")
 
-    # verify (Phase 1)
+    # verify (Tier 1)
     verify_parser = subparsers.add_parser(
         "verify",
-        help="[Phase 1] Test game correctness against a feature map — run this first",
+        help="[Tier 1] Test game correctness against a feature map — run this first",
     )
     verify_parser.add_argument("--config", default="ugt.config.yaml", help="Path to ugt.config.yaml")
     verify_parser.add_argument(
@@ -259,13 +261,13 @@ def main():
     smoke_parser.add_argument("--config", default="ugt.config.yaml", help="Path to ugt.config.yaml")
     smoke_parser.add_argument("--profile", default="aggro", help="Reward profile to test")
 
-    # train (Phase 2a)
-    train_parser = subparsers.add_parser("train", help="[Phase 2] Train a reinforcement learning policy agent")
+    # train (legacy RL path)
+    train_parser = subparsers.add_parser("train", help="Train an RL agent (legacy optional path — use 'ugt playtest' for balance/strategy judgment)")
     train_parser.add_argument("--config", default="ugt.config.yaml", help="Path to ugt.config.yaml")
     train_parser.add_argument("--profile", default="aggro", help="Reward profile to train with")
 
-    # evaluate (Phase 2b)
-    eval_parser = subparsers.add_parser("evaluate", help="[Phase 2] Run statistical evaluations on game balance")
+    # evaluate (legacy RL path)
+    eval_parser = subparsers.add_parser("evaluate", help="Evaluate a trained RL agent (legacy optional path — use 'ugt playtest' for balance/strategy judgment)")
     eval_parser.add_argument("--config", default="ugt.config.yaml", help="Path to ugt.config.yaml")
     eval_parser.add_argument("--profile", default="aggro", help="Reward profile to evaluate with")
     eval_parser.add_argument("--model", required=True, help="Path to trained model file (e.g. ./models/ppo_aggro_final)")
@@ -278,10 +280,10 @@ def main():
         help="Run evaluate N times over seeds [base, base+1, ..., base+N-1] for stability testing. Default=1 (single run).",
     )
 
-    # playtest (Phase 3)
+    # playtest (Tier 3)
     playtest_parser = subparsers.add_parser(
         "playtest",
-        help="[Phase 3] LLM-powered UI playtest — requires ANTHROPIC_API_KEY",
+        help="[Tier 3] LLM-powered balance/strategy playtest — requires ANTHROPIC_API_KEY",
     )
     playtest_parser.add_argument("--config", default="ugt.config.yaml", help="Path to ugt.config.yaml")
     playtest_parser.add_argument(

@@ -224,12 +224,15 @@ pip install tensorboard
 
 ## 4. Connecting Your Game — The Bridge
 
-The bridge is the only piece of code you write. It wraps your game engine in a standard protocol that UGT understands. Choose one of two bridge types based on how your game runs:
+The bridge is the only piece of code you write. It wraps your game engine in a standard protocol that UGT understands. Pick the engine type that matches how your game runs:
 
-| Bridge type | Use when |
-|-------------|----------|
-| **Subprocess** | Game is a Python sim, TypeScript sim, or any headless process you can spawn |
-| **Browser** | Game runs in a browser (React, Phaser, Vue, vanilla JS) |
+| Your game... | engine.type | Bridge pattern |
+|---|---|---|
+| ...is a headless subprocess (Python sim, TypeScript harness, Godot/Unity CLI build) | `simulation` | JSON-lines over stdin/stdout (`SubprocessAdapter`) |
+| ...runs in a browser (React, Phaser, Vue, vanilla JS, any web frontend) | `browser` | Headless Chromium via Playwright; your game exposes `window.__GET_STATE__` / `window.__SEND_ACTION__` hooks (`PlaywrightAdapter`) |
+| ...is a live server already running (HTTP + Socket.IO, multiplayer backend) | `real_server` | HTTP + Socket.IO client (`RealClientAdapter`) — see `README.md` architecture section |
+
+Not sure? **Subprocess is the most portable starting point** — `examples/harness-game/` shows it end-to-end with zero dependencies. If your game has a frontend you want to drive through UI interactions, use Browser. If your game already has a live running server and you want UGT to talk to it directly, use real_server.
 
 ### 4a. Subprocess Bridge (headless / simulation games)
 

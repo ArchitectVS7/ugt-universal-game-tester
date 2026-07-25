@@ -25,14 +25,15 @@ each stage; the `while` loop, not the model, decides whether to continue.
 |-------|-------|-----|
 | Select | Sonnet (low) | read `TASKS.md`, return the next eligible TODO — the only model touchpoint in control flow; it only *extracts* |
 | Plan | Opus | produce the implementation plan from the task block + pointers |
-| Code | Opus | edit the repo per the plan |
+| Code | Opus (Fable on the final fix round) | edit the repo per the plan |
 | Review | Sonnet | check the diff against the task's **Accept** criteria |
 | Gate | Sonnet (low) | run the gate commands; pass only if all exit 0 |
 | Commit | Sonnet | commit `T-NNN: <title>` + flip status to DONE in the same commit |
 
 ## Failure policy — escalate then halt
 Review **and** gate must both pass. On failure: one normal Opus fix round → one
-MAX-effort Opus fix round → **halt**. On halt the repo is left at the last green
+MAX-effort Opus fix round → one MAX-effort Fable fix round → **halt**. On halt
+the repo is left at the last green
 commit with the failing task's changes uncommitted for review, and the run
 reports `stoppedAt` + the reason. Checks are never bypassed.
 

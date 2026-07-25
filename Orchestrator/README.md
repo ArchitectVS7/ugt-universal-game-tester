@@ -33,7 +33,8 @@ The Orchestrator takes that control flow away from the model and puts it in code
 - **The model only fills in stage content.** Plan the task, write the code, review
   the diff, run the gate, write the commit. It never decides *whether* to advance.
 - **Checks are sacred.** Review **and** gate must both pass. Failures escalate
-  (normal fix → max-effort fix) and then **halt** — no `--no-verify`, no deleting
+  (normal Opus fix → max-effort Opus fix → max-effort Fable fix) and then
+  **halt** — no `--no-verify`, no deleting
   tests, no narrowing scope to dodge a red.
 - **Every task commits before the next starts.** So an interruption (usage limit,
   a halt, you closing the laptop) is always safe and resumable — just run
@@ -133,7 +134,7 @@ a pinned model:
 |------------|---------------|-----|
 | **Select** | Sonnet (low)  | Read `TASKS.md`, return the next eligible task. The *only* model touchpoint in control flow — it only extracts; the `while` loop decides continuation. |
 | **Plan**   | Opus\*        | Produce a concrete implementation plan from the task block + the header's source-of-truth pointers. |
-| **Code**   | Opus          | Edit the repo per the plan; add the tests the task requires. |
+| **Code**   | Opus (Fable on the final fix round) | Edit the repo per the plan; add the tests the task requires. |
 | **Review** | Sonnet        | Check the working diff against the task's **Accept** criteria and the Standing constraints. |
 | **Gate**   | Sonnet (low)  | Run the project gate commands verbatim; pass only if every command exits 0. |
 | **Commit** | Sonnet        | Commit `T-NNN: <title>` and flip the task's status to DONE **in the same commit**. |
@@ -159,7 +160,8 @@ immediately and does **not** bypass the check:
 
 1. One **normal** Opus fix round → re-check.
 2. One **max-effort** Opus fix round → re-check.
-3. Still failing → **HALT.** The repo is left at the last green commit, with the
+3. One **max-effort** Fable fix round → re-check.
+4. Still failing → **HALT.** The repo is left at the last green commit, with the
    failing task's changes **uncommitted** for your review, and the run reports
    `stoppedAt` + the reason.
 
@@ -196,7 +198,9 @@ run to stop there for review instead of rolling into the next milestone.
 
 ## The `TASKS.md` format (in brief)
 
-`TASKS.md` lives at the repo root and has two parts. The full spec is in
+`TASKS.md` lives at the repo root and has two parts. It is a per-project working file —
+if you are using the Orchestrator within a shared framework repo, add `TASKS.md` to that
+repo's `.gitignore` so it stays on disk but out of the shared surface. The full spec is in
 [`skills/tasklist/task-format.md`](skills/tasklist/task-format.md); the short version:
 
 **Header** (written once) — an Orchestrator protocol blurb, then the two lines the
@@ -319,6 +323,45 @@ Orchestrator/
         ├── README.md                   the runner's own reference notes
         └── orchestrate-tasks.js        the Workflow engine — the deterministic loop
 ```
+
+---
+
+## What next — testing your build with UGT
+
+`/orchestrate all` has gone dry and your project is built. The rest of this repo is
+**UGT**, the framework for finding out whether what you just built actually holds
+up. It asks three different questions. **Tier 1 — `ugt verify`** drives your game
+against a `feature-map.yaml` and asserts that each declared feature does what you
+said it does (correctness). **Tier 2 — the exploit-hunter** turns random and
+heuristic walks loose on the game while re-checking your invariants after *every*
+step, hunting for the state the scripted tests never reach (robustness). **Tier 3 —
+`ugt playtest`** puts an LLM in the player's seat to judge balance, pacing, and
+strategy — the questions no assertion can answer. [`../UGT-USER-MANUAL.md`](../UGT-USER-MANUAL.md)
+is the onboarding path in depth; [`../examples/harness-game/`](../examples/harness-game/)
+is the fastest thing you can actually run.
+
+There is one wiring step in between. The Orchestrator writes code; UGT drives it;
+neither knows the other exists, so your game needs an **adapter**. Pick one of three
+bridges via `engine.type` in a `ugt.config.yaml`: `simulation` (a JSON-lines
+subprocess harness over stdin/stdout), `browser` (a headless page exposing
+`window.__GET_STATE__` / `window.__SEND_ACTION__`), or `real_server` (a live server
+over HTTP + Socket.IO). The manual's **trial-ladder** section covers the
+methodology; `examples/harness-game/` shows the subprocess harness end-to-end and is
+the fastest orientation available.
+
+Once the config exists, the suggested sequence:
+
+```bash
+ugt smoke-test --config ugt.config.yaml                                   # bridge is alive
+ugt verify --config ugt.config.yaml --feature-map feature-map.yaml       # Tier 1 — correctness
+python verify_round3.py                                                  # Tier 2 — exploit-hunter (a ladder script, not a subcommand)
+ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md # Tier 3 — LLM balance pass
+```
+
+Install is light: `pip install -e .` covers the core, `".[playtest]"` adds the LLM
+tier, and `".[browser]"` plus `playwright install chromium` adds the headless
+browser. To be explicit — UGT and the Orchestrator share a repository and nothing
+else. They are independent tools, and using one never obliges you to use the other.
 
 ---
 
