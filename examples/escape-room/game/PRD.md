@@ -97,10 +97,16 @@ State shape:
 **Fixed discrete action space** (built once at startup from the CSVs, so it's
 stable across the whole run): 4 movement actions + `look` + `inventory` +
 `take`/`drop`/`examine`/`use` for every object that supports each verb.
-Target ≤ 60 total actions for this content scope. An action invalid in the
-current context (e.g. `use` on an object not held, `take` on something not in
-the room) is a no-op that still returns state (mirrors the CLI's in-fiction
-refusal, just without the flavor text).
+Target ≤ 60 total actions for this content scope. **Assignment is
+deterministic:** `0=north, 1=south, 2=east, 3=west, 4=look, 5=inventory`,
+then for each row of `objects.csv` in file order, append `take` (if
+`takeable`), `drop` (if `takeable`), `examine`, `use` (if `use_verb` set) —
+in that per-object order. Same CSV content always produces the same
+`action_id` assignment, so the integration side's `ugt.config.yaml`
+action_space mapping stays valid without hand-tuning after a content edit.
+An action invalid in the current context (e.g. `use` on an object not held,
+`take` on something not in the room) is a no-op that still returns state
+(mirrors the CLI's in-fiction refusal, just without the flavor text).
 
 ## Non-goals
 

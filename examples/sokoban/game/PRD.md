@@ -23,7 +23,10 @@ function, two front ends (mirrors the discipline in the other two examples):
   with `--ugt-bridge` (or `UGT_BRIDGE=1`), that opens a local `TCPServer`,
   accepts one connection, and maps a numeric `action_id` from a socket
   message to a `try_move(direction)` call. **Never re-implements
-  push/collision logic.**
+  push/collision logic.** `StreamPeerTCP` delivers raw bytes with no
+  built-in line framing, so the bridge must buffer incoming bytes across
+  `_process()` polls and split on `\n` itself — a message can legitimately
+  arrive split across two or more frames.
 
 ## Core mechanics
 
@@ -37,6 +40,8 @@ function, two front ends (mirrors the discipline in the other two examples):
   (classic Sokoban rule).
 - Level solved when every box is on a target (`boxes_on_target ==
   boxes_total`).
+- `moves_taken` increments only on a move that actually changes player or box
+  position; a wall-blocked or box-blocked no-op does not increment it.
 - No lose state — a player can always retry; add a `reset_level` action (or
   the bridge's `reset` command) for a stuck position. No move limit, no
   timer.

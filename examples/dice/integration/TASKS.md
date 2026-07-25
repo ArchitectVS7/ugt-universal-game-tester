@@ -9,8 +9,9 @@ game in `../game`.
 2. Plan → 3. Code → 4. Review vs **Accept** → 5. Gate, commit `<ID>: <title>`, set DONE, update this file in the same commit.
 
 **Gate (every task):** `python -m py_compile *.py` (any adapter/harness
-scripts added here) and `ugt verify --config ugt.config.yaml --feature-map
-feature-map.yaml` exits 0 with 0 FAILED features.
+scripts added here) exits 0. Starting at T-004 (once `feature-map.yaml`
+exists), also require `ugt verify --config ugt.config.yaml --feature-map
+feature-map.yaml` to exit 0 with 0 FAILED features.
 
 **Standing constraints:**
 - No game logic in any file under this folder — every rule lives in

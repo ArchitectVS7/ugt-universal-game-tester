@@ -12,6 +12,9 @@ against `../game`.
 introduced so far all exit 0.
 
 **Standing constraints:**
+- This example requires a local `godot4` CLI binary (Godot 4.x) on `PATH`,
+  same as `../game` — confirm `godot4 --version` works before starting
+  T-001.
 - No push/collision/win logic here — every rule lives in
   `../game/scripts/board.gd`. This folder only transports state and actions.
 - `GodotTcpAdapter` is constructed directly by each ladder script, per
@@ -70,6 +73,9 @@ footer reports `ROUND 3 MET`.
 
 ---
 
-**Deliberately deferred:** Tier 3 (`ugt playtest`) — Sokoban has no
-balance/strategy dimension worth an LLM judgment call; noted here rather than
-silently skipped.
+**Deliberately deferred:** Tier 3 (`ugt playtest`). An LLM playtester could
+reasonably judge puzzle discoverability, move-efficiency vs. optimal, or
+whether the push mechanic reads as intuitive — this is not a claim that
+Sokoban has nothing to judge. It's cut here to keep this specific example's
+scope to Tiers 1/2 only, since `dice` and `escape-room` already demonstrate
+the Tier 3 pattern end-to-end.

@@ -39,6 +39,11 @@ instead of stdio:
 - `{"command": "step", "action_id": N}` → `{"state": {...}, "terminated": bool, "truncated": bool, "info": {}}`
 - `{"command": "close"}` → Godot process exits cleanly
 
+Python's `socket.makefile()` gives a natural blocking `readline()` here, so
+the framing complexity is one-sided — it's the Godot bridge
+(`../game/PRD.md`'s `ugt_bridge.gd`), not this adapter, that has to hand-roll
+message buffering.
+
 ## State contract (must match `../game/PRD.md` exactly)
 
 ```
@@ -63,9 +68,9 @@ all_levels_solved   bool
 
 | ID | Assertion | Precondition |
 |---|---|---|
-| F1 | Moving into a wall leaves `player_x`/`player_y` unchanged | adjacent wall exists |
+| F1 | Moving into a wall leaves `player_x`/`player_y` and `moves_taken` unchanged | adjacent wall exists |
 | F2 | Pushing a box into open floor moves both box and player one cell | box with open cell behind it |
-| F3 | Pushing a box into a wall or another box is a no-op (neither moves) | box blocked behind |
+| F3 | Pushing a box into a wall or another box is a no-op (neither position nor `moves_taken` changes) | box blocked behind |
 | F4 | `boxes_on_target` increments when a pushed box lands on a target | box adjacent to a target, floor push direction |
 | F5 | `level_solved` becomes true exactly when `boxes_on_target == boxes_total` | drive a level to completion |
 | F6 | Solving level 3 sets `all_levels_solved: true` and `terminated: true` | complete all 3 levels in sequence |
@@ -86,6 +91,12 @@ all_levels_solved   bool
   Same-seed replay — trivial here since Sokoban has no RNG, but still
   asserted (proves the *adapter/bridge* introduces no nondeterminism, e.g.
   socket message reordering).
+- **Tier 3 (`ugt playtest`) is deliberately out of scope for this specific
+  example** — not because Sokoban has nothing to judge (an LLM playtester
+  could reasonably assess puzzle discoverability, solution efficiency vs.
+  optimal, or whether the push mechanic reads as intuitive), but to keep
+  this example's scope to Tiers 1/2 only; `dice` and `escape-room` already
+  cover the Tier 3 pattern end-to-end.
 
 ## Acceptance criteria
 

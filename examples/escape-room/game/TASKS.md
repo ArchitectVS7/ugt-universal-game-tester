@@ -50,8 +50,12 @@ Write the real `content/rooms.csv` (10 rooms) and `content/objects.csv`
 (≤ 12 objects) per PRD's scope: a linear-with-branches flag chain ending at
 `R10`.
 **Accept:** loader (T-002) accepts the content with 0 validation errors; a
-hand-written walkthrough (documented in a comment or fixture) reaches
-`escaped: true` in ≤ 40 moves.
+walkthrough move sequence (room-by-room verb+object list) is committed as a
+fixture (`content/walkthrough.json`) and hand-traced against the CSVs to
+confirm it reaches `R10` while satisfying every `entry_requires_flag` and
+`use_requires_flag` it crosses. This task's Accept is a structural/traced
+check, not an executed one — the engine to actually *run* the sequence
+doesn't exist until T-004, which re-verifies the same fixture by running it.
 
 ## M2 — Engine
 
@@ -59,8 +63,9 @@ hand-written walkthrough (documented in a comment or fixture) reaches
 Implement movement, `take`/`drop`/`examine`/`use`/`look`/`inventory` against
 loaded content, flag state, and the `escaped` transition on entering `R10`.
 **Accept:** unit tests cover: locked-room entry refusal, `use` prerequisite
-enforcement, `use_consumes` removing an item, and the full T-003 walkthrough
-reaching `escaped: true`.
+enforcement, `use_consumes` removing an item, and running T-003's
+`content/walkthrough.json` fixture through `executeCommand()` end-to-end
+reaches `escaped: true`.
 
 ## M3 — Front ends
 

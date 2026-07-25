@@ -43,8 +43,9 @@ shows, applied to a fresh game instead of a documentation stub.
     this round ("advancing with confidence").
   - **Dug in:** if your FS ≤ 10 (half), +1 Defense die this round ("soldiers
     dig in").
-  - **Reinforcements:** exactly once, at the start of round 3, +2 dice to
-    whichever pool the player allocated the most to that round.
+  - **Reinforcements:** exactly once, at the start of round 3, each side
+    independently gains +2 dice added to whichever pool *that side*
+    allocated the most to that round (a tie splits toward Attack).
 - **RNG discipline (required for UGT R3 determinism):** dice rolls must be a
   pure function of `(seed, roll_counter)`, with `roll_counter` stored in game
   state and incremented once per die rolled — never call the platform RNG

@@ -10,12 +10,18 @@ Build the Godot game per `PRD.md` in this folder.
 **Gate (every task):** GUT (Godot Unit Test) run headless — e.g. `godot4
 --headless --path . -s addons/gut/gut_cmdln.gd -gdir=res://tests -gexit` —
 exits 0. T-001 below is responsible for getting this command working; keep
-the gate minimal until then.
+the gate minimal until then. T-006 additionally requires `python
+tools/tcp_smoke_check.py` (committed alongside the bridge, not a throwaway)
+to exit 0.
 
 **Format check (optional):** none — omitted (gdformat is optional tooling,
 not assumed here).
 
 **Standing constraints:**
+- This example requires a local `godot4` CLI binary (Godot 4.x) on `PATH` —
+  every task's Gate depends on it. Unlike `dice`/`escape-room`, there is no
+  zero-dependency fallback; confirm `godot4 --version` works before starting
+  T-001.
 - All push/collision/win rules live in `res://scripts/board.gd`'s
   `try_move()`. Neither human input handling nor `ugt_bridge.gd` may contain
   a rule — both only call `try_move()`.
@@ -31,9 +37,15 @@ Statuses: `TODO` | `IN-PROGRESS` | `DONE` | `BLOCKED(reason)`
 ## M0 — Scaffold
 
 ### T-001 · Godot project scaffold + GUT — `status: TODO` · `coder: sonnet` · `after: —`
-Create the Godot 4 project, add the GUT addon, add an empty `res://tests/`
-with one trivial passing test.
-**Accept:** the Gate command exits 0 (1 test, 0 failures).
+Create the Godot 4 project. Vendor the GUT addon by committing
+`addons/gut/` directly into the repo (not via the editor's Asset Library,
+which needs GUI/network and won't run headless); enable the plugin in
+`project.godot`. Run `godot4 --headless --editor --path . --quit` once to
+generate the `.godot/` import cache the headless test runner needs. Add an
+empty `res://tests/` with one trivial passing test.
+**Accept:** on a completely fresh clone, the Gate command exits 0 (1 test, 0
+failures) — i.e. the import-cache-generation step is itself verified, not
+assumed.
 
 ### T-002 · Level file format + loader — `status: TODO` · `coder: opus` · `after: T-001`
 Parse the ASCII grid legend into a 2D tile grid (walls/floor/targets), player
@@ -65,17 +77,25 @@ solving level 3 sets `all_levels_solved: true`.
 
 ### T-005 · Human input — `status: TODO` · `coder: sonnet` · `after: T-004`
 Wire arrow keys / WASD to `try_move()`; snap sprite positions on move.
-**Accept:** manual playthrough of all 3 documented solutions completes in the
-editor.
+**Accept:** a GUT test simulates each of the 4 key bindings (via a synthetic
+`InputEventKey` fed to the input handler, or `Input.action_press` + one
+`_process` tick) and asserts the resulting player/box position matches
+calling `try_move()` directly with the corresponding direction; running all
+3 documented solutions as simulated key sequences reaches `level_solved:
+true` for each level.
 
 ### T-006 · UGT TCP bridge — `status: TODO` · `coder: opus` · `after: T-004`
 `ugt_bridge.gd` autoload: `--ugt-bridge` / `UGT_BRIDGE=1` gate, `TCPServer` on
 `127.0.0.1:8910` (or `--ugt-port`), newline-delimited JSON per PRD's exact
-protocol, one connection at a time.
-**Accept:** a throwaway Python test script connects, sends the T-003
-solutions for all 3 levels as `step` commands, and receives
-`all_levels_solved: true`; an invalid direction mid-solution is a no-op
-(state unchanged) not an error.
+protocol, one connection at a time. Buffer incoming bytes across
+`_process()` polls and split on `\n` — do not assume one socket read equals
+one message. Commit `tools/tcp_smoke_check.py` (a real, repo-tracked Python
+script, not a throwaway) that connects, sends the T-003 solutions for all 3
+levels as `step` commands, and asserts `all_levels_solved: true`.
+**Accept:** `tools/tcp_smoke_check.py` (per the Gate's T-006 addendum) exits
+0; an invalid direction mid-solution is a no-op (state unchanged) not an
+error; a test that writes a single JSON message to the socket split across
+two separate writes still parses correctly on the Godot side.
 
 ---
 

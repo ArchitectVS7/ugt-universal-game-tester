@@ -46,7 +46,7 @@ examples — `ugt verify` / `ugt playtest` work immediately.
 | F2 | Taking a flagged item sets the corresponding flag | item in starting room |
 | F3 | `use` fails (state unchanged, flag not set) when its prerequisite flag is unset | prerequisite flag unset |
 | F4 | `use` succeeds and sets its flag once the prerequisite is met | prerequisite flag set |
-| F5 | A `use_consumes: true` object leaves inventory after a successful use | object held, prerequisite met |
+| F5 | A `use_consumes: true` object decrements `inventory_count` by 1 after a successful use (checked as `after.inventory_count == before.inventory_count - 1` — list membership can't be asserted directly since SafeEvaluator has no `in` operator) | object held, prerequisite met |
 | F6 | Reaching `R10` sets `escaped: true` | full flag chain satisfied |
 
 ## Trial ladder plan

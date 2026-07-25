@@ -48,8 +48,9 @@ bonus rules, and full round resolution (both sides act, damage applies, FS
 updates, round increments) per PRD.
 **Accept:** unit tests cover: all-attack vs all-defense damage math; Morale
 surge triggers only when FS is strictly greater; Dug in triggers at FS ≤ 10;
-Reinforcements fires exactly once, at round 3, added to the larger-allocated
-pool.
+Reinforcements fires exactly once, at round 3, for each side independently,
+added to whichever pool that side allocated the most to that round (ties →
+Attack).
 
 ### T-004 · Battle end conditions — `status: TODO` · `coder: sonnet` · `after: T-003`
 Implement `battle_over` / `winner` per PRD (FS ≤ 0 decisive win/loss; round 12
@@ -70,7 +71,8 @@ Build the React UI: FS bars for both sides, a scrolling round log with flavor
 text ("Your soldiers charge forward!", "Enemy reinforcements arrive!"), and 7
 allocation buttons.
 **Accept:** manual allocation click resolves a round and updates the log and
-bars; build has no console errors.
+bars; a Vitest component test spies on `console.error`/`console.warn` during
+a scripted multi-round battle and asserts zero calls.
 
 ### T-007 · Window hooks for UGT — `status: TODO` · `coder: opus` · `after: T-006`
 Expose `window.__GET_STATE__`, `window.__SEND_ACTION__(actionId)`,

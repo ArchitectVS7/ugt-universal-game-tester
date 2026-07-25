@@ -5,6 +5,10 @@ A 4-direction push-crate puzzle, built in Godot, driven through a
 `../harness-game` uses — Godot has no built-in UGT engine type). **Status:
 PRD + TASKS.md only — not yet built.**
 
+**Prerequisite:** a local `godot4` CLI binary (Godot 4.x) on `PATH`. Unlike
+`dice`/`escape-room`, there's no zero-dependency fallback here — every task
+in both `game/TASKS.md` and `integration/TASKS.md` gates on it.
+
 - [`game/PRD.md`](game/PRD.md) + [`game/TASKS.md`](game/TASKS.md) — the
   Godot game, including the level format and the `--ugt-bridge` TCP protocol.
 - [`integration/PRD.md`](integration/PRD.md) + [`integration/TASKS.md`](integration/TASKS.md) —
