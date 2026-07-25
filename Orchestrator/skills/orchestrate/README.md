@@ -26,7 +26,7 @@ each stage; the `while` loop, not the model, decides whether to continue.
 | Select | Sonnet (low) | read `TASKS.md`, return the next eligible TODO — the only model touchpoint in control flow; it only *extracts* |
 | Plan | Opus | produce the implementation plan from the task block + pointers |
 | Code | Opus (Fable on the final fix round) | edit the repo per the plan |
-| Review | Sonnet | check the diff against the task's **Accept** criteria |
+| Review | Sonnet | check the diff against the task's **Accept** criteria — **static inspection only** (runs concurrently with Gate, so it never executes suites, starts servers, or kills processes) |
 | Gate | Sonnet (low) | run the gate commands; pass only if all exit 0 |
 | Commit | Sonnet | commit `T-NNN: <title>` + flip status to DONE in the same commit |
 

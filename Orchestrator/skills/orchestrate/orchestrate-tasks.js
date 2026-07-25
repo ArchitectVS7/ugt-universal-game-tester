@@ -360,7 +360,9 @@ while (guard++ < 200) {
     `Return pass=true ONLY if every command exits 0. Run every command in the FOREGROUND and wait for it to exit — never launch background runs and never report while a command is still executing; give long commands (full test suites, e2e) up to 10 minutes each. If a command genuinely exceeds that, return pass=false with output naming exactly which command timed out — never guess a verdict from partial output. On any failure return pass=false with the failing output (tail). Do not fix anything.`;
   const reviewPrompt =
     `You are the REVIEWER for ${task.id}. ${briefing}\n\nAcceptance criteria:\n${task.accept}\n\n` +
-    `Inspect the working diff (\`git status\`, \`git diff\`). Check each acceptance criterion mechanically and verify the Standing constraints. Return pass=true only if EVERY criterion is met; otherwise pass=false with specific findings.`;
+    `Inspect the working diff (\`git status\`, \`git diff\`). Check each acceptance criterion mechanically and verify the Standing constraints. ` +
+    `STATIC INSPECTION ONLY — the GATE agent is running the full test suites CONCURRENTLY with you. Therefore: do NOT run any test suite (unit, integration, e2e, or the gate commands), do NOT start dev servers or any long-running process, and NEVER kill a process or free a port. A test port "already in use" is EXPECTED here — it is the gate's live server, not a stale leftover; killing it destroys the gate's run and fails the attempt for both of you. Treat any "tests pass" acceptance criterion as the gate's job to prove; you assess it only by reading the test code in the diff. ` +
+    `Return pass=true only if EVERY criterion is met; otherwise pass=false with specific findings.`;
 
   let ok = false;
   let report = '';
@@ -382,8 +384,16 @@ while (guard++ < 200) {
         },
       );
     }
-    // Review and gate are independent read-only checks over the same tree —
-    // run them concurrently; each attempt's wall time is max() not sum().
+    // Review and gate run concurrently — each attempt's wall time is max() not
+    // sum(). That is ONLY safe because the review is strictly static (enforced
+    // in reviewPrompt above). Incident 2026-07-25 (nexus-world-builder T-203,
+    // 3/3 post-fix attempts): reviewers re-ran the e2e suite themselves, hit
+    // Playwright's "port already used" (the gate's own live dev server),
+    // concluded it was a stale leftover, and kill -9'd it mid-suite — the gate
+    // then recorded inexplicable partial failures (67/78, 73/78, 23/78) while
+    // the reviewer's retry went green, and the fix ladder burned to exhaustion
+    // chasing infra ghosts. If the review ever needs to execute anything, it
+    // must be serialized after the gate, not run beside it.
     phase('Review');
     // A HUMAN GATE has no automatable acceptance Review — its acceptance is the
     // human's, and its criteria ("user explicitly approved") are unsatisfiable in
