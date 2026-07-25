@@ -241,7 +241,7 @@ def main():
     # init
     subparsers.add_parser("init", help="Initialize a template ugt.config.yaml in the current directory")
 
-    # verify (Phase 1)
+    # verify (Tier 1)
     verify_parser = subparsers.add_parser(
         "verify",
         help="[Tier 1] Test game correctness against a feature map — run this first",
@@ -261,12 +261,12 @@ def main():
     smoke_parser.add_argument("--config", default="ugt.config.yaml", help="Path to ugt.config.yaml")
     smoke_parser.add_argument("--profile", default="aggro", help="Reward profile to test")
 
-    # train (Phase 2a)
+    # train (legacy RL path)
     train_parser = subparsers.add_parser("train", help="Train an RL agent (legacy optional path — use 'ugt playtest' for balance/strategy judgment)")
     train_parser.add_argument("--config", default="ugt.config.yaml", help="Path to ugt.config.yaml")
     train_parser.add_argument("--profile", default="aggro", help="Reward profile to train with")
 
-    # evaluate (Phase 2b)
+    # evaluate (legacy RL path)
     eval_parser = subparsers.add_parser("evaluate", help="Evaluate a trained RL agent (legacy optional path — use 'ugt playtest' for balance/strategy judgment)")
     eval_parser.add_argument("--config", default="ugt.config.yaml", help="Path to ugt.config.yaml")
     eval_parser.add_argument("--profile", default="aggro", help="Reward profile to evaluate with")
@@ -280,7 +280,7 @@ def main():
         help="Run evaluate N times over seeds [base, base+1, ..., base+N-1] for stability testing. Default=1 (single run).",
     )
 
-    # playtest (Phase 3)
+    # playtest (Tier 3)
     playtest_parser = subparsers.add_parser(
         "playtest",
         help="[Tier 3] LLM-powered balance/strategy playtest — requires ANTHROPIC_API_KEY",
