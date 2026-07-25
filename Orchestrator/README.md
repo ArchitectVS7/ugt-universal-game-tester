@@ -352,9 +352,10 @@ over HTTP + Socket.IO). The manual's **trial-ladder** section covers the
 methodology; `examples/harness-game/` shows the subprocess harness end-to-end and is
 the fastest orientation available.
 
-Once the config exists, the suggested sequence:
+The suggested sequence:
 
 ```bash
+ugt init                                                                   # scaffolds ugt.config.yaml
 ugt smoke-test --config ugt.config.yaml                                   # bridge is alive
 ugt verify --config ugt.config.yaml --feature-map feature-map.yaml       # Tier 1 — correctness
 python verify_round3.py                                                  # Tier 2 — exploit-hunter (a ladder script, not a subcommand)
