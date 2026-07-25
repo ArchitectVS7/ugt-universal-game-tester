@@ -75,7 +75,7 @@ const NEXT_TASK = {
       },
     },
   },
-  required: ['id', 'prereq_statuses'],
+  required: ['id'],
 };
 const REVIEW = {
   type: 'object',
