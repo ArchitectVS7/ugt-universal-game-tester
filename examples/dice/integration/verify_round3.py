@@ -7,11 +7,12 @@ Uniform-random allocations with `invariants.py` asserted after every round — t
 SAME predicates R1/R2 use, via `InvariantSuite.to_hunter_invariants()`, so the
 scripted and random tiers cannot drift on what "correct" means.
 
-One quirk worth knowing (see the smoke rung's finding): the adapter never
-observes termination for this game, so a hunter episode does not stop when the
-battle ends — it keeps issuing allocations into a concluded, inert battle. That
-is measured here rather than ignored, because it caps how much a random walk of
-a given length can actually explore.
+Episode shape matters here. A battle is over in at most MAX_ROUNDS rounds, so a
+long single episode would spend most of its steps on a concluded, inert battle.
+Since the D14 envelope fix the adapter DOES see termination, and the hunter
+breaks the episode on it — so this rung runs MANY SHORT EPISODES instead of one
+long one, and every step lands on a live battle. The rung measures that rather
+than assuming it; before the fix the same nominal budget was ~9% live.
 """
 from __future__ import annotations
 
@@ -32,7 +33,11 @@ from ugt.core.trial import GateRunner, first_divergence  # noqa: E402
 
 PRESETS = {0: "a6_d0", 1: "a5_d1", 2: "a4_d2", 3: "a3_d3",
            4: "a2_d4", 5: "a1_d5", 6: "a0_d6"}
-STEPS = 120
+# Many short episodes, not one long one: the hunter resets on `terminated`, and a
+# battle cannot last more than MAX_ROUNDS. EPISODES x STEPS is the nominal budget;
+# what matters is how much of it is LIVE, which the rung measures below.
+EPISODES = 10
+STEPS = 20
 SEEDS = (0, 1)
 MAX_ROUNDS = 12
 
@@ -52,46 +57,46 @@ def main() -> int:
             ad = adapter_for(port)
             hunter = ExploitHunter(ad, hunter_invariants, list(PRESETS),
                                    action_names=PRESETS, seed=seed)
-            rep = hunter.run(episodes=1, steps_per_episode=STEPS, log=lambda m: None)
+            rep = hunter.run(episodes=EPISODES, steps_per_episode=STEPS, log=lambda m: None)
             try:
                 ad.close()
             except Exception:
                 pass
-            total += STEPS
+            total += EPISODES * STEPS
             n = len(rep.findings)
-            gate.ck(f"seed {seed}: {STEPS} uniform-random allocations, 0 findings", n == 0,
+            gate.ck(f"seed {seed}: {EPISODES} episodes x up to {STEPS} allocations, 0 findings",
+                    n == 0,
                     "" if n == 0 else "; ".join(f"{f.name}: {f.detail}" for f in rep.findings[:3]))
 
-        # ---- how much of that walk was actually live? -----------------------
-        # A battle is over by round 12 at the latest, and the adapter never
-        # reports termination, so most of a 120-step episode lands on a dead
-        # battle. Measure it instead of pretending the whole walk explored.
-        print("\n  -- how much of a random episode is live --")
+        # ---- how much of the budget is actually live? -----------------------
+        # This is the number the D14 envelope fix was made for. Before it, the
+        # adapter never saw `terminated`, the episode never reset, and a 120-step
+        # walk spent ~109 steps hammering a battle that had already ended.
+        print("\n  -- live coverage --")
         ad = adapter_for(port)
         ad.connect()
         try:
             import random
             rng = random.Random(0)
-            ad.reset()
-            live = 0
-            for _ in range(STEPS):
-                st, _t, _tr, _i = ad.step(rng.choice(list(PRESETS)))
-                if not st["battle_over"]:
+            live = dead = battles = 0
+            for _ in range(EPISODES):
+                st = ad.reset()
+                for _ in range(STEPS):
+                    st, terminated, _tr, _i = ad.step(rng.choice(list(PRESETS)))
+                    if st["battle_over"]:
+                        dead += 0 if terminated else 1
+                        if terminated:
+                            battles += 1
+                        break
                     live += 1
-            pct = round(100 * live / STEPS)
-            gate.ck("a random episode does reach a terminal battle",
-                    st["battle_over"], f"winner={st['winner']!r}")
-            gate.finding(
-                f"Only {live} of {STEPS} steps in a random episode ({pct}%) land on a live "
-                f"battle — the rest hammer a concluded one, because the adapter never sees "
-                f"termination (smoke rung's finding) and the battle is capped at "
-                f"{MAX_ROUNDS} rounds. The invariants still cover those steps (a concluded "
-                f"battle must stay inert, which is itself worth asserting), but the effective "
-                f"exploration budget is ~{pct}% of the nominal step count. Sending "
-                f"`terminated` from the hooks would let episodes reset and multiply the "
-                f"useful coverage."
-            )
-
+            budget = EPISODES * STEPS
+            pct = round(100 * (live + battles) / budget)
+            gate.ck("every episode reached a real terminal battle",
+                    battles == EPISODES, f"{battles}/{EPISODES} battles concluded")
+            gate.ck("no step was wasted on an already-concluded battle",
+                    dead == 0,
+                    f"{live + battles} live steps across {battles} full battles "
+                    f"({pct}% of the {budget}-step budget; it was ~9% before the D14 fix)")
             # ---- illegal input, through the adapter --------------------------
             print("\n  -- illegal input --")
             ad.reset()
@@ -124,7 +129,8 @@ def main() -> int:
                 a.page.evaluate(f"window.__RESET__({json.dumps(seed_label)})")
                 out = [a.page.evaluate("window.__GET_STATE__()")]
                 for act in actions:
-                    out.append(a.page.evaluate(f"window.__SEND_ACTION__({act})"))
+                    # __SEND_ACTION__ returns the envelope; compare STATES.
+                    out.append(a.page.evaluate(f"window.__SEND_ACTION__({act})")["state"])
                 return out
             finally:
                 a.close()

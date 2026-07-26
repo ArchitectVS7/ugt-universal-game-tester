@@ -76,7 +76,13 @@ Exposed on `window` for the Playwright adapter, matching
 - `window.__SEND_ACTION__(actionId)` — `actionId` 0-6 maps to the 7 allocation
   presets above (0 = all-attack `(6,0)` … 6 = all-defense `(0,6)`); resolves
   one full round (both sides act, dice roll, damage applies) and returns the
-  new state.
+  structured envelope `{state, terminated, truncated, info}`, where `state` is
+  the projection above and `terminated` mirrors `state.battle_over`.
+  **Revised 2026-07-26.** It originally returned the bare state; that put UGT's
+  browser adapter on a legacy branch which reads `terminated` off the state
+  dict, a key this game never sent, so a black-box driver never observed a
+  battle ending. `__GET_STATE__` and `__RESET__` still return the bare
+  projection — only the action hook is wrapped.
 - `window.__RESET__(seed)` — new battle, FS reset to 20/20, `roll_counter`
   reset, RNG reseeded.
 - A visible round log in the UI (for human readability) is expected but not

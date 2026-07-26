@@ -151,10 +151,41 @@ describe('UGT hooks — mounting', () => {
     expect(typeof window.__GET_STATE__).toBe('function')
     // Not merely present — actually wired to the live battle.
     expect(window.__GET_STATE__().round_number).toBe(0)
-    const returned = await hook(() => window.__SEND_ACTION__(0))
+    const returned = (await hook(() => window.__SEND_ACTION__(0))).state
     expect(returned).toEqual(expectedProjection(applyAction(createInitialState(DEFAULT_SEED), 0)))
     expect(window.__GET_STATE__()).toEqual(returned)
     expect(byId('round-number').textContent).toBe('1')
+  })
+
+  it('returns the structured envelope, with terminated tracking battle_over (D14)', async () => {
+    // The regression this guards: __SEND_ACTION__ used to return the bare state,
+    // which put ugt/adapters/playwright.py on its legacy branch. That branch reads
+    // lifecycle via state.pop('terminated') — a key this game never sent — so a
+    // black-box driver never saw a battle end and kept driving finished matches.
+    await hook(() => window.__RESET__('seed-a'))
+
+    const first = await hook(() => window.__SEND_ACTION__(0))
+    expect(Object.keys(first).sort()).toEqual(['info', 'state', 'terminated', 'truncated'])
+    expect(first.truncated).toBe(false)
+    expect(first.info).toEqual({})
+    expect(first.state).toEqual(window.__GET_STATE__())
+    expect(first.terminated).toBe(false)
+    expect(first.terminated).toBe(first.state.battle_over)
+
+    // Drive to the end and confirm terminated flips with it, rather than being
+    // hardcoded false — the whole point of the change.
+    let last = first
+    for (let i = 0; i < MAX_ROUNDS && !last.state.battle_over; i += 1) {
+      last = await hook(() => window.__SEND_ACTION__(0))
+      expect(last.terminated, `round ${last.state.round_number}`).toBe(last.state.battle_over)
+    }
+    expect(last.state.battle_over).toBe(true)
+    expect(last.terminated).toBe(true)
+
+    // __GET_STATE__ and __RESET__ are untouched: still the bare projection.
+    expect(Object.keys(window.__GET_STATE__())).not.toContain('terminated')
+    const fresh = await hook(() => window.__RESET__('seed-a'))
+    expect(Object.keys(fresh)).not.toContain('terminated')
   })
 
   it('removes the hooks when the app unmounts', async () => {
@@ -180,7 +211,7 @@ describe('UGT hooks — a full battle by hook only', () => {
 
     for (let i = 0; i < SCRIPT.length; i += 1) {
       oracle = applyAction(oracle, SCRIPT[i])
-      const returned = await hook(() => window.__SEND_ACTION__(SCRIPT[i]))
+      const returned = (await hook(() => window.__SEND_ACTION__(SCRIPT[i]))).state
 
       // (a) what the hook returned is what a subsequent read reports…
       expect(returned, `round ${i + 1} return vs read`).toEqual(window.__GET_STATE__())
@@ -213,7 +244,7 @@ describe('UGT hooks — a full battle by hook only', () => {
 
     await act(async () => {
       for (const actionId of [0, 1, 2]) {
-        const returned = window.__SEND_ACTION__(actionId)
+        const returned = window.__SEND_ACTION__(actionId).state
         // Read back immediately, in the same tick, before React flushes.
         seen.push({ returned, read: window.__GET_STATE__() })
       }
@@ -253,7 +284,7 @@ describe('UGT hooks — decisive outcomes', () => {
 
     let decided = null
     for (let i = 0; i < SCRIPT.length; i += 1) {
-      const returned = await hook(() => window.__SEND_ACTION__(SCRIPT[i]))
+      const returned = (await hook(() => window.__SEND_ACTION__(SCRIPT[i]))).state
       if (returned.battle_over) {
         decided = returned
         break
@@ -268,7 +299,7 @@ describe('UGT hooks — decisive outcomes', () => {
     // A black-box driver keeps sending: the state must not budge, and nothing
     // may reach the console (PRD acceptance).
     for (const actionId of [0, 3, 6]) {
-      const after = await hook(() => window.__SEND_ACTION__(actionId))
+      const after = (await hook(() => window.__SEND_ACTION__(actionId))).state
       expect(after).toEqual(decided)
     }
     expect(window.__GET_STATE__()).toEqual(decided)
@@ -281,7 +312,7 @@ describe('UGT hooks — decisive outcomes', () => {
 
     let decided = null
     for (let i = 0; i < MAX_ROUNDS; i += 1) {
-      const returned = await hook(() => window.__SEND_ACTION__(0))
+      const returned = (await hook(() => window.__SEND_ACTION__(0))).state
       if (returned.battle_over) {
         decided = returned
         break
@@ -301,7 +332,7 @@ describe('UGT hooks — determinism (PRD acceptance)', () => {
     await hook(() => window.__RESET__(seed))
     const trace = []
     for (const actionId of SCRIPT) {
-      const returned = await hook(() => window.__SEND_ACTION__(actionId))
+      const returned = (await hook(() => window.__SEND_ACTION__(actionId))).state
       trace.push(JSON.stringify(returned))
     }
     return trace
@@ -339,7 +370,7 @@ describe('UGT hooks — determinism (PRD acceptance)', () => {
 
     const again = []
     for (const actionId of SCRIPT) {
-      again.push(JSON.stringify(await hook(() => window.__SEND_ACTION__(actionId))))
+      again.push(JSON.stringify((await hook(() => window.__SEND_ACTION__(actionId))).state))
     }
     expect(again).toEqual(baseline)
   })

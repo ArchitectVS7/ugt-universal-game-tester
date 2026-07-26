@@ -13,15 +13,23 @@
  *
  * Decisions pinned here so a reviewer need not re-litigate them:
  *
- * D14 — `__SEND_ACTION__` RETURNS THE BARE PROJECTED STATE, not the
- *   `{state, terminated, truncated, info}` envelope some UGT adapters emit.
- *   PRD.md says it "resolves one full round … and returns the new state", and
- *   TASKS.md's standing constraint says the hooks must match the PRD contract
- *   exactly because the integration side is written against it.
- *   `ugt/adapters/playwright.py` handles a bare state dict on its legacy branch
- *   (it re-reads `__GET_STATE__()` and defaults `terminated`/`truncated` to
- *   `False`); the outcome is read from `winner`, per the integration PRD's
- *   `evaluation.victory_key`.
+ * D14 (REVISED 2026-07-26) — `__SEND_ACTION__` RETURNS THE STRUCTURED ENVELOPE
+ *   `{state, terminated, truncated, info}`.
+ *
+ *   It originally returned the bare projected state, because PRD.md said it
+ *   "resolves one full round … and returns the new state". That was honest to
+ *   the PRD and it cost real coverage: `ugt/adapters/playwright.py` falls back
+ *   to a legacy branch for a bare state and reads lifecycle off the state dict
+ *   via `state.pop("terminated")`. This game reports `battle_over`, never
+ *   `terminated`, so UGT never saw a battle end and kept driving concluded
+ *   matches. UGT's R3 measured the damage: only ~9% of a 120-step random
+ *   episode landed on a live battle; the other 91% hammered a finished one.
+ *
+ *   Returning the envelope puts the adapter on its preferred branch. Note this
+ *   is NOT the same as adding `terminated` to `toContractState`: the adapter
+ *   pops lifecycle keys in `step()` but not in `reset()`, so that route would
+ *   make the two return different shapes. `__GET_STATE__` and `__RESET__` still
+ *   return exactly the PRD's projection, unchanged.
  *
  * D15 — THE PROJECTION IS EXACTLY THE PRD'S SEVEN FIELDS, built as a fresh
  *   literal on every call, with fresh nested objects. Engine bookkeeping
@@ -105,7 +113,13 @@ export function toContractState(state) {
 export function installUgtHooks(target, { getState, sendAction, reset }) {
   const hooks = {
     __GET_STATE__: () => toContractState(getState()),
-    __SEND_ACTION__: (actionId) => toContractState(sendAction(actionId)),
+    // D14 (revised): the STRUCTURED envelope, so a black-box driver can see the
+    // battle end. `terminated` mirrors the engine's own `battle_over`; nothing
+    // is computed here, so this stays a projection and not a rule.
+    __SEND_ACTION__: (actionId) => {
+      const state = toContractState(sendAction(actionId))
+      return { state, terminated: state.battle_over, truncated: false, info: {} }
+    },
     __RESET__: (seed) => toContractState(reset(seed)),
   }
   // D18: the adapter's optional soft-reset name, same function object.

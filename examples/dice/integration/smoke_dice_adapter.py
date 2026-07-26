@@ -71,17 +71,16 @@ def main() -> int:
                     break
             gate.ck("the battle really did conclude", bool(last["battle_over"]),
                     f"round {last['round_number']}, winner={last['winner']!r}")
-            gate.ck("...but the adapter reported terminated=False throughout (known gap)",
-                    term_seen is False,
-                    "state.battle_over is the real signal; `terminated` is never sent")
-            gate.finding(
-                "PlaywrightAdapter never observes termination for this game. It reads "
-                "state.pop('terminated'), and the hooks expose `battle_over` instead, so "
-                "every step reports terminated=False even after the battle ends. Harmless "
-                "here because a concluded battle is inert (asserted in R1/R2), but any "
-                "episode-driven tier will run full-length episodes into a dead battle. "
-                "Adding `terminated` to the hook payload would be a one-line game fix."
-            )
+            # This assertion used to be inverted: it PINNED the bug, checking that
+            # terminated stayed False for the whole battle. That was honest at the
+            # time and it is why the fix showed up here first as a red rung.
+            gate.ck("the adapter DOES observe termination (D14 envelope fix)",
+                    term_seen is True,
+                    "__SEND_ACTION__ now returns {state, terminated, ...}, so the adapter "
+                    "takes its structured branch instead of the legacy one")
+            gate.ck("terminated agrees with the state's own battle_over",
+                    ad.step(0)[1] is True and ad._get_game_state()["battle_over"] is True,
+                    "both report the battle is finished")
 
             gate.ck("a concluded battle is inert through the adapter too",
                     ad.step(0)[0] == last and ad.step(6)[0] == last,

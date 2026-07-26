@@ -98,21 +98,24 @@ features:
       - "state.enemy.force_strength > 0"
     priority: critical
 
-  # ---- A finished battle stays finished ---------------------------------
-  # Not in the PRD's table, added because the adapter cannot see termination:
-  # the browser hook returns a bare state with no `terminated` key, so UGT reads
-  # terminated=False forever and KEEPS SENDING ACTIONS into a finished battle.
-  # That makes "a concluded battle is inert" a property the harness genuinely
-  # relies on, so it is asserted rather than assumed.
-  - id: battle.concluded_battle_is_inert
-    description: "Once battle_over is set, further actions change nothing at all"
-    action: ["a6_d0", "a0_d6"]
-    assertion:
-      - "before.battle_over == True"
-      - "state.round_number == before.round_number"
-      - "state.player.force_strength == before.player.force_strength"
-      - "state.enemy.force_strength == before.enemy.force_strength"
-      - "state.player.bonus_dice == before.player.bonus_dice"
-      - "state.enemy.bonus_dice == before.enemy.bonus_dice"
-      - "state.winner == before.winner"
-    priority: critical
+  # ---- REMOVED 2026-07-26: battle.concluded_battle_is_inert ---------------
+  # There used to be a fifth feature here asserting that a finished battle
+  # ignores further actions. It is gone, and the reason is worth keeping.
+  #
+  # It only ever worked BECAUSE OF A BUG. `verifier.py` resets the game after
+  # any feature whose last action reports `terminated` — correct behaviour, so
+  # the next feature starts from a clean game. But this game never reported
+  # termination (the hooks returned a bare state, so the adapter took its legacy
+  # branch and read a `terminated` key that was never sent), so the reset never
+  # fired and the next feature inherited the concluded battle. That is what let
+  # this entry see `before.battle_over == True`.
+  #
+  # Fixing the game (D14: __SEND_ACTION__ now returns the structured envelope)
+  # made the verifier reset properly, and this entry started failing — correctly.
+  # A feature map structurally cannot assert "what happens AFTER a battle ends"
+  # any more, because it never gets to look at that state.
+  #
+  # The property is not lost, it moved somewhere better: R1 asserts it, R2
+  # asserts it for ALL SEVEN allocations, and `invariants.py`'s
+  # `concluded_battle_is_inert` checks it after every single command in every
+  # rung. Strictly more coverage than the one entry that used to live here.

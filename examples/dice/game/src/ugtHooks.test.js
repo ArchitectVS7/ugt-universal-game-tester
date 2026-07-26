@@ -182,7 +182,13 @@ describe('installUgtHooks', () => {
     const sent = target.__SEND_ACTION__(3)
     expect(seam.sendAction).toHaveBeenCalledTimes(1)
     expect(seam.sendAction).toHaveBeenCalledWith(3)
-    expect(sent).toEqual(toContractState(state))
+    // D14 (revised): the structured envelope, so a driver can see the battle end.
+    expect(sent).toEqual({
+      state: toContractState(state),
+      terminated: toContractState(state).battle_over,
+      truncated: false,
+      info: {},
+    })
 
     target.__RESET__('other-seed')
     expect(seam.reset).toHaveBeenCalledTimes(1)
@@ -208,7 +214,7 @@ describe('installUgtHooks', () => {
     expect(() => target.__SEND_ACTION__('0')).toThrow(RangeError)
     // …but every legal id goes through.
     for (let id = 0; id < 7; id += 1) {
-      expect(target.__SEND_ACTION__(id).round_number).toBe(1)
+      expect(target.__SEND_ACTION__(id).state.round_number).toBe(1)
     }
   })
 })

@@ -70,10 +70,17 @@ def main() -> int:
                     page.evaluate("window.__GET_STATE__()") == s0)
 
             print("\n  -- __SEND_ACTION__ --")
-            r = page.evaluate("window.__SEND_ACTION__(0)")
-            gate.ck("returns the projected state directly, not a {state:...} envelope",
-                    isinstance(r, dict) and set(r) == STATE_KEYS,
-                    f"keys={sorted(r)}")
+            env = page.evaluate("window.__SEND_ACTION__(0)")
+            gate.ck("returns the structured {state, terminated, truncated, info} envelope",
+                    isinstance(env, dict)
+                    and set(env) == {"state", "terminated", "truncated", "info"},
+                    f"keys={sorted(env)}")
+            r = env["state"]
+            gate.ck("the enveloped state is the same 5-key projection",
+                    set(r) == STATE_KEYS, f"keys={sorted(r)}")
+            gate.ck("terminated mirrors battle_over (so a driver can see the end)",
+                    env["terminated"] == r["battle_over"],
+                    f"terminated={env['terminated']} battle_over={r['battle_over']}")
             gate.ck("one action resolves exactly one round",
                     r["round_number"] == s0["round_number"] + 1,
                     f"round {s0['round_number']} -> {r['round_number']}")
@@ -88,8 +95,9 @@ def main() -> int:
             # validates the preset index and throws instead of coercing. Worth
             # knowing, because the repo's other two examples answer this question
             # the opposite way (escape-room and sokoban both treat an unknown
-            # action id as an inert no-op that still returns state), and dice's
-            # PRD does not specify hook-level behaviour either way.
+            # action id as an inert no-op that still returns state). It is a
+            # deliberate call (ugtHooks.js D16, "loud, not coerced") that never
+            # made it into PRD.md.
             #
             # What actually matters for a tester is not which of the two it does,
             # but that it does it CLEANLY — a throw part-way through resolving a
@@ -108,17 +116,19 @@ def main() -> int:
             gate.ck("a rejected action mutates NOTHING (no half-resolved round)",
                     not mutated,
                     "state identical after all 7" if not mutated else f"mutated by: {mutated}")
-            healthy = page.evaluate("window.__SEND_ACTION__(0)")
+            healthy = page.evaluate("window.__SEND_ACTION__(0)")["state"]
             gate.ck("the game is still usable after being fed garbage",
                     healthy["round_number"] == before["round_number"] + 1,
                     f"round advanced {before['round_number']} -> {healthy['round_number']}")
             gate.finding(
                 "__SEND_ACTION__ THROWS on an out-of-range or ill-typed action id, where "
                 "escape-room and sokoban both return current state unchanged. State is not "
-                "corrupted either way, so this is a contract divergence rather than a bug — "
-                "but dice's PRD does not say which behaviour is intended, and a black-box "
-                "client has to wrap calls in try/except for this game and not the others. "
-                "Worth settling one way across all three."
+                "corrupted either way, so this is a contract divergence rather than a bug, and "
+                "it IS deliberate — ugtHooks.js D16 says a contract violation should be loud, "
+                "not coerced. The gap is that the decision lives in a code comment and never "
+                "reached PRD.md, so a black-box client has to discover by experiment that it "
+                "must try/except this game and not the other two. Worth settling one way "
+                "across all three examples and writing it down where clients will look."
             )
 
             print("\n  -- __RESET__ --")
@@ -140,7 +150,7 @@ def main() -> int:
                 page.evaluate(f"window.__RESET__({json.dumps(seed)})")
                 last = page.evaluate("window.__GET_STATE__()")
                 for _ in range(rounds):
-                    last = page.evaluate(f"window.__SEND_ACTION__({action})")
+                    last = page.evaluate(f"window.__SEND_ACTION__({action})")["state"]
                     if last["battle_over"]:
                         break
                 return last
