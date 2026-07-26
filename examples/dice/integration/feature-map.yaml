@@ -1,0 +1,118 @@
+# Feature Map — Dice Duel
+# Used by: ugt verify --config ugt.config.yaml --feature-map feature-map.yaml
+# Requires: ../game built (npm run build) and serve.py running on :8080.
+#
+# STRUCTURE — read before editing.
+#
+# `ugt verify` resets ONCE and never resets again, and state carries between
+# features. So this map is a single battle on the game's default seed
+# ('dice-duel'), split into five assertions whose action lists run back to back.
+# Two runner behaviours it depends on, both checked in ugt/:
+#   - features run sorted by (priority, definition order), so all five are
+#     `critical` to preserve file order;
+#   - MAX_TASKS_PER_TURN = 3, so these run 3 then 2 over two turns.
+# No feature declares a precondition: ordering alone sequences them, and a
+# precondition satisfied only by an earlier feature in the SAME turn would be
+# evaluated too early and skipped.
+#
+# WHY ONLY FIVE, AND WHERE THE PRD's F2/F5 WENT — both are covered, but not here,
+# because neither is expressible in this model. See README.md "Findings".
+#   - PRD F2 (all-defense takes less damage than an all-attack round) is a
+#     COMPARISON BETWEEN TWO ROUNDS. A feature only sees before/after of its own
+#     action list, so it cannot hold one round's damage and compare it to
+#     another's. It is measured properly in exploit_hunt.py as a controlled A/B
+#     on one seed.
+#   - PRD F5 (a side reaching 0 FS sets battle_over + winner) is UNREACHABLE on
+#     the default seed: 205 sequences (5 fixed policies + 200 aggressive random)
+#     could not get the enemy below 1 FS inside the 12-round cap, and the feature
+#     map has no way to choose a seed. exploit_hunt.py drives it on seed 0, where
+#     a knockout does occur.
+#
+# Every assertion below states a RULE from ../game/PRD.md, with the `before.`
+# clauses spelling out the conditions that isolate that rule — so a failure says
+# which rule broke, not merely that a number changed.
+
+game: "DiceDuel"
+version: "1.0"
+
+features:
+  # ---- Attack does damage -----------------------------------------------
+  # Two all-attack rounds from a fresh battle (round 0, 20/20).
+  - id: combat.attack_reduces_enemy_force
+    description: "An all-attack allocation reduces the enemy's force_strength"
+    action: ["a6_d0", "a6_d0"]
+    assertion:
+      - "before.round_number == 0"
+      - "state.enemy.force_strength < before.enemy.force_strength"
+      - "state.round_number == before.round_number + 2"
+      - "state.battle_over == False"
+    priority: critical
+
+  # ---- Reinforcements, isolated -----------------------------------------
+  # Resolving round 3 grants each side +2 dice, exactly once. The enemy is the
+  # clean probe here: entering round 3 it is BEHIND on force (so no Morale
+  # surge) and still above 10 (so not Dug in), leaving +2 as the only bonus it
+  # can have. The player, ahead and above 10, must show 2 + 1 = 3 — which is
+  # also the proof that Reinforcements STACKS with Morale rather than replacing it.
+  - id: bonus.reinforcements_fire_once_at_round_three
+    description: "Round 3 grants +2 bonus dice to each side, stacking with Morale"
+    action: ["a6_d0"]
+    assertion:
+      - "before.round_number == 2"
+      # Conditions that isolate the enemy's bonus to Reinforcements alone:
+      - "before.enemy.force_strength < before.player.force_strength"
+      - "before.enemy.force_strength > 10"
+      - "state.round_number == 3"
+      - "state.enemy.bonus_dice == 2"
+      # Player is ahead and above 10: Reinforcements (+2) + Morale (+1).
+      - "state.player.bonus_dice == 3"
+    priority: critical
+
+  # ---- Morale surge, isolated -------------------------------------------
+  # Round 4: no Reinforcements (that was round 3 only) and the player is above
+  # half strength (no Dug in), so Morale is the only bonus available to it.
+  - id: bonus.morale_surge_when_ahead
+    description: "Leading on force_strength grants exactly +1 bonus die, and only that"
+    action: ["a6_d0"]
+    assertion:
+      - "before.round_number == 3"
+      - "before.player.force_strength > before.enemy.force_strength"
+      - "before.player.force_strength > 10"
+      - "state.round_number == 4"
+      # +1 Morale and nothing else: Reinforcements is spent, Dug in needs FS <= 10.
+      - "state.player.bonus_dice == 1"
+    priority: critical
+
+  # ---- The round cap ends the battle ------------------------------------
+  # Eight more rounds carries this battle from round 4 to the round-12 cap.
+  - id: battle.round_twelve_cap_forces_draw
+    description: "Reaching round 12 with both sides alive ends the battle as a draw"
+    action: ["a6_d0", "a6_d0", "a6_d0", "a6_d0", "a6_d0", "a6_d0", "a6_d0", "a6_d0"]
+    assertion:
+      - "before.battle_over == False"
+      - "state.round_number == 12"
+      - "state.battle_over == True"
+      - 'state.winner == "draw"'
+      # It really was the cap and not a knockout — both sides are still standing.
+      - "state.player.force_strength > 0"
+      - "state.enemy.force_strength > 0"
+    priority: critical
+
+  # ---- A finished battle stays finished ---------------------------------
+  # Not in the PRD's table, added because the adapter cannot see termination:
+  # the browser hook returns a bare state with no `terminated` key, so UGT reads
+  # terminated=False forever and KEEPS SENDING ACTIONS into a finished battle.
+  # That makes "a concluded battle is inert" a property the harness genuinely
+  # relies on, so it is asserted rather than assumed.
+  - id: battle.concluded_battle_is_inert
+    description: "Once battle_over is set, further actions change nothing at all"
+    action: ["a6_d0", "a0_d6"]
+    assertion:
+      - "before.battle_over == True"
+      - "state.round_number == before.round_number"
+      - "state.player.force_strength == before.player.force_strength"
+      - "state.enemy.force_strength == before.enemy.force_strength"
+      - "state.player.bonus_dice == before.player.bonus_dice"
+      - "state.enemy.bonus_dice == before.enemy.bonus_dice"
+      - "state.winner == before.winner"
+    priority: critical

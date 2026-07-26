@@ -1,0 +1,54 @@
+# UGT integration config — Dice Duel (browser / Playwright)
+#
+# Prerequisites, in order:
+#   cd ../game && npm install && npm run build     # dist/ is gitignored
+#   python3 serve.py                               # http://localhost:8080
+#
+# Tier 0: ugt smoke-test --config ugt.config.yaml
+# Tier 1: ugt verify --config ugt.config.yaml --feature-map feature-map.yaml
+# Tier 2: python3 exploit_hunt.py                  # spawns/reaps serve.py itself
+# Tier 3: ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md
+
+project:
+  name: "DiceDuel"
+  version: "1.0.0"
+
+engine:
+  type: "browser"
+  entry: "http://localhost:8080/index.html"
+  # The game resolves a round synchronously inside __SEND_ACTION__ and sets no
+  # __STEP_COMPLETE__ flag, so this delay is the adapter's whole settle budget
+  # per step. 50ms is what examples/browser-game uses and is ample for a
+  # synchronous React state commit.
+  step_delay_ms: 50
+
+# Numeric projection for the Gym Box space used by `ugt smoke-test`. Tiers 1-3
+# assert on the raw contract state (which also carries `battle_over` and the
+# nullable `winner`), not on this vector.
+observation_space:
+  type: "box"
+  shape: 5
+  mappings:
+    - { path: "player.force_strength", min: 0, max: 20 }
+    - { path: "player.bonus_dice",     min: 0, max: 4 }
+    - { path: "enemy.force_strength",  min: 0, max: 20 }
+    - { path: "enemy.bonus_dice",      min: 0, max: 4 }
+    - { path: "round_number",          min: 0, max: 12 }
+
+# One action per allocation preset: 6 dice split between Attack and Defense.
+# 0 = all attack ... 6 = all defense, matching ../game/PRD.md's __SEND_ACTION__
+# mapping exactly. Each action resolves ONE FULL ROUND (both sides act).
+action_space:
+  type: "discrete"
+  size: 7
+  actions:
+    0: { name: "a6_d0" }
+    1: { name: "a5_d1" }
+    2: { name: "a4_d2" }
+    3: { name: "a3_d3" }
+    4: { name: "a2_d4" }
+    5: { name: "a1_d5" }
+    6: { name: "a0_d6" }
+
+evaluation:
+  victory_key: "winner"

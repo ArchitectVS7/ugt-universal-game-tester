@@ -1,0 +1,83 @@
+# UGT integration config — Tiny Escape Room
+#
+# Generated against the REAL action table: `node ../game/src/bridge.js --actions`
+# emits it straight from the CSVs, so these 41 ids cannot drift from the game.
+# Regenerate with that command if the content files change.
+#
+# Tier 1: ugt verify --config ugt.config.yaml --feature-map feature-map.yaml
+# Tier 2: python3 exploit_hunt.py
+# Tier 3: ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md
+
+project:
+  name: "TinyEscapeRoom"
+  version: "1.0.0"
+
+engine:
+  type: "simulation"
+  entry: "../game/src/bridge.js"
+
+# Numeric-only projection of the raw state, required by UgtConfig and used by
+# `ugt smoke-test`'s Gym Box space. The raw state (current_room, inventory list,
+# flags dict, escaped) is what Tiers 1-3 actually assert on — see README.
+#
+# NOTE: the integration PRD suggested a `flags_set_count` mapping. That is not
+# expressible: the obs aggregators (sum/mean/min/max/count) apply to LISTS only,
+# and `flags` is a dict, so it silently reads 0. Mapping `escaped` instead keeps
+# every mapped field real. Recorded in README.md under "Findings".
+observation_space:
+  type: "box"
+  shape: 4
+  mappings:
+    - { path: "moves_taken",   min: 0, max: 200 }
+    - { path: "rooms_visited", min: 0, max: 10 }
+    - { path: "inventory",     min: 0, max: 12, aggregator: "count" }
+    - { path: "escaped",       min: 0, max: 1 }
+
+action_space:
+  type: "discrete"
+  size: 41
+  actions:
+    0: { name: "go_north" }
+    1: { name: "go_south" }
+    2: { name: "go_east" }
+    3: { name: "go_west" }
+    4: { name: "look" }
+    5: { name: "inventory" }
+    6: { name: "take_map_scrap" }
+    7: { name: "drop_map_scrap" }
+    8: { name: "examine_map_scrap" }
+    9: { name: "examine_bunk_iron" }
+    10: { name: "take_key_iron" }
+    11: { name: "drop_key_iron" }
+    12: { name: "examine_key_iron" }
+    13: { name: "use_key_iron" }
+    14: { name: "take_lantern" }
+    15: { name: "drop_lantern" }
+    16: { name: "examine_lantern" }
+    17: { name: "use_lantern" }
+    18: { name: "take_helmet_rusted" }
+    19: { name: "drop_helmet_rusted" }
+    20: { name: "examine_helmet_rusted" }
+    21: { name: "take_flask_oil" }
+    22: { name: "drop_flask_oil" }
+    23: { name: "examine_flask_oil" }
+    24: { name: "take_valve_wheel" }
+    25: { name: "drop_valve_wheel" }
+    26: { name: "examine_valve_wheel" }
+    27: { name: "use_valve_wheel" }
+    28: { name: "take_cog_bronze" }
+    29: { name: "drop_cog_bronze" }
+    30: { name: "examine_cog_bronze" }
+    31: { name: "use_cog_bronze" }
+    32: { name: "take_ledger" }
+    33: { name: "drop_ledger" }
+    34: { name: "examine_ledger" }
+    35: { name: "use_ledger" }
+    36: { name: "take_key_skeleton" }
+    37: { name: "drop_key_skeleton" }
+    38: { name: "examine_key_skeleton" }
+    39: { name: "use_key_skeleton" }
+    40: { name: "examine_mural_stone" }
+
+evaluation:
+  victory_key: "escaped"
