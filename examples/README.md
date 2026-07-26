@@ -1,61 +1,22 @@
-# UGT examples
+# Example: `dice` — Dice Duel (D6 dice pool war game)
 
-Three self-contained, dependency-light examples, each demonstrating a different
-part of UGT's methodology against a tiny throwaway game. None is tied to any real
-product — they exist to be read and run.
+The purpose of these simple games is to demonstrate both the orchestrate skill and the UGT process. I asked Opus to brainstorm a few game types that could be built using the orchestrator, tested with UGT, and had different tech stacks and game types. From it's list I picked three, modified to my liking, and prompted Opus to create each example game's [`game/PRD.md`](game/PRD.md) 
 
-| Example | Transport | Demonstrates | Runnable with |
-|---|---|---|---|
-| [`harness-game`](harness-game/) | subprocess **JSON-lines harness** (engine-first) | The **full trial ladder** — spike → smoke → R1 → R2 → R3, exploit-hunter, same-seed determinism — driven through a transport-only adapter. | Python only (zero deps) |
-| [`mock-game`](mock-game/) | built-in **`simulation`** engine | The simplest CLI-wired integration: `ugt verify` / `ugt playtest`, config + feature map + strategy guide, seeded reproducibility. | `pip install -e .` |
-| [`browser-game`](browser-game/) | built-in **`browser`** engine (Playwright) | The same game as a real web page, driven through `window` hooks — a feature map is transport-agnostic. | `+ playwright` |
+If you were to make a PRD for a game yourself, I would suggest multiple iterations, such as performing simulated focus groups, identifying target audience, doing soft market research, and finding the just right tech stack based on your intended platform. I would clear context and do an adverserial review of the document, even changing models such as copying over to Gemini and ChatGPT. Watch out for bloat, triage features that are 'must have' for the game, and 'nice to have' that can be pushed off until after beta testing, or even after release as an expansion, as you may find yourself running away with too many features all at once. You want something cohesive, playable, engaging. 
 
-## Where to start
+[`game/TASKS.md`](game/TASKS.md) In the Orchestrator skills folder is a second folder called 'tasklist' which is used to create a task lost that is compatible with the 'orchestrate' skill. While you can absolute type **/tasklist** followed by a prompt or use the slash command **/tasklist create** to open an interface to create a task list, over the course of many projects I simply prompted Claude to do this. Something like "Create a TASKS.md based on PRD.md that is compatible with the 'orchestrate' skill with tiered milestones" is surprisingly adequate.
 
-1. **`harness-game`** — read its `README.md`, then run the five rungs in one line:
-   ```bash
-   for s in spike_foraging smoke_foraging_adapter verify_round1 verify_round2 verify_round3; do
-     python3 examples/harness-game/$s.py || break
-   done
-   ```
-   This is the fastest way to see the current methodology end to end: an engine
-   that owns all the rules, an adapter that owns none of them, and a fail-closed
-   ladder that asserts invariants after every step and proves determinism.
+For each example game I started a new session in the 'game' folder and simply syped **/orchestrate all**. The system climbed through the list as written, updating as it went. The state you see the TASKS.md files in now is after completion, which includes Claude's comments as it went. Each task also has it's own commit. 
 
-2. **`mock-game`** — the minimal `ugt.config.yaml` + `feature-map.yaml` +
-   `strategy-guide.md`, wired to the CLI. Copy this shape to onboard a real game.
+The 'integration' folder in each game is where the UGT harness lives. Typically the game is going to be it's own repository. You do **not** want to continue to bundle your games inside of your local UGT folder! The game gets its own repo. For example my setup looks something like this:
 
-3. **`browser-game`** — the same game through a headless browser, showing the
-   transport swap.
+dev/                            # parent directory of all my projects
+├── games/                      # All my game repos
+│   ├── _UGT                    # Underscore in front of UGT keeps this folder on top
+│   │   ├──  examples           # Shipped with repo, where you are now
+│   │   └── integrations        # Where my live UGT harnesses go per game
+│   │        └── SpacerQuest    # UGT test harness and lesson learned files for my local game    
+│   ├── SpacerQuest             # Example local game repo
 
-## The one rule every example is built to teach
+I used .gitignore to exclude my local 'integrations' folder from being committed to the repository.
 
-**The adapter drives the real game; it never re-implements it.** In each example
-the game's rules live in exactly one place (`engine.py`, `sim_game.py`, or the
-page's `__SEND_ACTION__`), and the UGT adapter only moves state and actions across
-the wire. That is rule **M1** in `../LESSONS.md`, and the reason the retired
-`sim_bridge`-style example (a bridge that grew its own copy of a game's logic) was
-removed in favor of `harness-game`.
-
-## Planned examples (Orchestrator + UGT, PRD-only for now)
-
-Three more examples, each pairing a `game/` (built by `/orchestrate`) with an
-`integration/` (the UGT side) — showing the Orchestrator building a game from
-a PRD and UGT testing what it built, across three different transports:
-
-| Example | Stack | Transport | Status |
-|---|---|---|---|
-| [`dice`](dice/) | React | `browser` (Playwright) | PRD + TASKS.md only |
-| [`escape-room`](escape-room/) | Node.js | `simulation` (subprocess) | PRD + TASKS.md only |
-| [`sokoban`](sokoban/) | Godot | hand-written TCP adapter (engine-first, like `harness-game`) | PRD + TASKS.md only |
-
-Each `game/` and `integration/` folder has its own `PRD.md` (what to build)
-and `TASKS.md` (in `../Orchestrator`'s canonical format — run `/orchestrate
-all` against it to build). See `../Orchestrator/README.md` for the two-step
-`/tasklist` → `/orchestrate` workflow these were authored for.
-
-## See also
-
-- `../UGT-USER-MANUAL.md` — full onboarding walkthrough and the trial-ladder methodology
-- `../LESSONS.md` — the cross-game lessons registry (read before any test run)
-- `../PLAYTEST-DESIGN.md` — the LLM balance-playtester tier spec
