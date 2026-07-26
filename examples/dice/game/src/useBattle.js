@@ -13,7 +13,12 @@
  * A `useState` updater cannot do either — `state` is stale until React
  * re-renders — so the ref is the authoritative "current state" and `setState`
  * exists to trigger the render. Both are written in the same statement, so they
- * can never disagree.
+ * can never disagree. `getState` reads the REF for the same reason: a reader
+ * closing over the render `state` returns a stale value between two synchronous
+ * `__SEND_ACTION__` calls in one tick, which is exactly how a driver behaves.
+ *
+ * The `window.__GET_STATE__` / `__SEND_ACTION__` / `__RESET__` hooks are mounted
+ * on this seam by `src/ugtHooks.js`, from an effect in `App.jsx`.
  *
  * Lives in a `.js` file rather than inside `App.jsx` because the repo's eslint
  * config enables `react-refresh/only-export-components`, which flags a `.jsx`
@@ -33,15 +38,22 @@ import { applyAction, createInitialState } from './engine.js'
 export const DEFAULT_SEED = 'dice-duel'
 
 /**
- * Battle state plus the two dispatchers the UI (and later the UGT hooks) use.
+ * Battle state plus the reader and two dispatchers the UI and the UGT hooks use.
  *
  * @param {string|number} [initialSeed]
- * @returns {{state: object, sendAction: (actionId: number) => object, reset: (seed?: string|number) => object}}
+ * @returns {{state: object, getState: () => object, sendAction: (actionId: number) => object, reset: (seed?: string|number) => object}}
  */
 export function useBattle(initialSeed = DEFAULT_SEED) {
   // `useState(fn)` so the initial battle is built once, not on every render.
   const [state, setState] = useState(() => createInitialState(initialSeed))
   const stateRef = useRef(state)
+
+  /**
+   * The authoritative current state, read from the ref rather than the render
+   * `state` — see the module comment: between two synchronous `sendAction`
+   * calls in one tick, the render `state` is a whole round behind.
+   */
+  const getState = useCallback(() => stateRef.current, [])
 
   /**
    * Dispatch one player allocation and return the resulting state.
@@ -65,5 +77,5 @@ export function useBattle(initialSeed = DEFAULT_SEED) {
     return fresh
   }, [])
 
-  return { state, sendAction, reset }
+  return { state, getState, sendAction, reset }
 }

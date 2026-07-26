@@ -6,12 +6,16 @@
  * never picks the enemy's allocation, and never re-derives why a bonus die was
  * granted. Everything it shows is a field the engine already wrote.
  *
- * The `window.__GET_STATE__` / `__SEND_ACTION__` / `__RESET__` hooks are NOT
- * here — they are T-007, and they will mount on the same `useBattle` seam.
+ * The `window.__GET_STATE__` / `__SEND_ACTION__` / `__RESET__` hooks (T-007) are
+ * mounted from here, but they are not implemented here: the effect below hands
+ * `src/ugtHooks.js` the same `useBattle` seam this tree renders from, so the
+ * screen and a black-box UGT driver can never see different battles.
  */
 
+import { useEffect } from 'react'
 import { ALLOCATIONS, MAX_ROUNDS, STARTING_FS } from './engine.js'
 import { flavorLines } from './flavor.js'
+import { installUgtHooks } from './ugtHooks.js'
 import { useBattle } from './useBattle.js'
 import './App.css'
 
@@ -100,7 +104,16 @@ function RoundLog({ log }) {
 }
 
 function App() {
-  const { state, sendAction, reset } = useBattle()
+  const { state, getState, sendAction, reset } = useBattle()
+
+  // T-007: expose the UGT contract hooks for the Playwright adapter. The arrow
+  // returns `installUgtHooks`'s uninstall closure, which React runs as the
+  // effect cleanup. All three deps are `useCallback([])`-stable, so this runs
+  // once per mount rather than on every render.
+  useEffect(
+    () => installUgtHooks(window, { getState, sendAction, reset }),
+    [getState, sendAction, reset],
+  )
 
   return (
     <main className="app">
