@@ -28,12 +28,24 @@ Statuses: `TODO` | `IN-PROGRESS` | `DONE` | `BLOCKED(reason)`
 
 ## M0 — Scaffold + content loading
 
-### T-001 · Project scaffold — `status: TODO` · `coder: sonnet` · `after: —`
+### T-001 · Project scaffold — `status: DONE` · `coder: sonnet` · `after: —`
 `package.json`, `node --test` wired up, empty `src/engine.js` /
 `src/cli.js` / `src/bridge.js`, empty `content/rooms.csv` /
 `content/objects.csv` with header rows only.
 **Accept:** `npm test` runs (0 tests ok); `node src/cli.js` starts and exits
 cleanly on `Ctrl+D`.
+
+**Delivered (2026-07-25):** Added `package.json` (ESM, `node --test` as the
+`test` script, `start`/`bridge` convenience scripts, `node >=20` engine pin);
+header-only `content/rooms.csv` and `content/objects.csv`; and scaffold
+`src/engine.js` / `src/cli.js` / `src/bridge.js`. The engine's three exports
+(`loadContent`/`createGame`/`executeCommand`) are signatures only, each
+throwing a "not implemented yet (T-00N)" error, so `cli.js`'s REPL and
+`bridge.js`'s documented JSON-lines protocol comment wire cleanly against the
+real entry points without pulling any rule logic ahead of T-002/T-004/T-006 —
+the deliberate scope boundary for this task. No CSV content, no engine
+behavior, and no bridge protocol implementation are in this commit.
+Orchestration: graphify=none — no graphify-out/graph.json in this repo; task is a self-contained project scaffold · attempts=1/4.
 
 ### T-002 · CSV loader + validation — `status: TODO` · `coder: opus` · `after: T-001`
 Parse both CSVs into in-memory room/object maps. Validate at load time: every
