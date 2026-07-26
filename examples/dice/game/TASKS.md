@@ -45,13 +45,29 @@ task with no existing source to m · attempts=1/4.
 
 ## M1 — Engine
 
-### T-002 · Seeded RNG + dice resolution — `status: TODO` · `coder: opus` · `after: T-001`
+### T-002 · Seeded RNG + dice resolution — `status: DONE` · `coder: opus` · `after: T-001`
 Implement `src/engine.js`: a seeded RNG keyed by `(seed, roll_counter)`, and a
 `rollPool(n)` helper that rolls `n` d6 and counts 5-6 hits, advancing
 `roll_counter` once per die.
 **Accept:** unit tests assert the same `(seed, roll_counter)` always returns
 the same roll; two different `roll_counter` values for the same seed differ
 at least once across 20 samples.
+
+**Delivered (2026-07-25):** Implemented `src/engine.js` with `rollDie(seed,
+rollCounter)` (FNV-1a string hash over `${seed}:${rollCounter}` plus a
+splitmix32 finalizer for bit avalanche, reduced mod 6 for the face), `isHit`
+for the 5-6 threshold, and `rollPool(n, seed, rollCounter)` which rolls `n`
+dice at consecutive counter values, counts hits, and returns the advanced
+counter without mutating any input — no `Math.random()` anywhere and no
+module-level state, so calls are pure and reproducible. `src/engine.test.js`
+covers same-`(seed, roll_counter)` reproducibility, divergence across 20
+distinct roll_counter samples, the `n === 0` empty-pool case, and
+counter-advancement bookkeeping. Scope was held to the RNG/roll-resolution
+layer only — round resolution, allocation presets, bonus-dice rules, battle
+end conditions, the AI opponent, and all UI/hooks work are deliberately left
+for T-003 onward per this file's task boundaries.
+Orchestration: graphify=none — no `graphify-out/graph.json` exists at the
+repo root or in `examples/dice/`, so there is no graph to query. · attempts=1/4.
 
 ### T-003 · Round resolution + bonus-dice rules — `status: TODO` · `coder: opus` · `after: T-002`
 Implement the 7 allocation presets, the Morale surge / Dug in / Reinforcements
