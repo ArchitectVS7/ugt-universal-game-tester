@@ -61,6 +61,10 @@ python3 examples/sokoban/integration/playtest_sokoban.py --provider ollama --max
 # stage 2 — paid, the only stage allowed to produce a quotable figure. NOT RUN.
 python3 examples/sokoban/integration/playtest_sokoban.py --provider anthropic \
     --model claude-haiku-4-5-20251001 --max-actions 150
+
+# scoring only — no bridge, no model, no spend
+python3 examples/sokoban/integration/playtest_sokoban.py --score results/<report>.json
+python3 examples/sokoban/integration/playtest_sokoban.py --prove-scoring
 ```
 
 `ugt playtest` cannot drive this game — `engine.type: custom` means `env.py` has
@@ -73,9 +77,25 @@ caught — one invariant definition, now three tiers.
 
 **This tier measures COMPETENCE here, never a rate.** No RNG exists anywhere in
 the game, so N episodes are N replays of one puzzle set and a percentage over them
-has a denominator of N and a sample size of 1 (§B P9/P13). The scoreline is: how
-many levels were solved, and how many moves against the committed 73-move optimum
-in `levels/solutions.json`. The report says so itself in `sample_note`.
+has a denominator of N and a sample size of 1 (§B P9/P13). The report says so
+itself in `sample_note`.
+
+The scoreline's primary output is `levels_solved: N/3` and `crates_moved: N`, both
+derived from the action log rather than from a scalar the game happens to keep:
+a crate counts as moved when the set of `$`/`*` cells in the rendered board changes
+between two consecutive states, so **a push that never crosses a target still
+counts** — `boxes_on_target` alone cannot see one. Level advances and reloads
+change the board without being pushes, so both are excluded, and the count of what
+was excluded is printed next to the total.
+
+The moves-against-the-committed-73 ratio is **withheld unless `all_levels_solved`
+is true** (see Finding 11). Its denominator is the cost of FINISHING, so on a
+partial run it is not a worse score — it is not a score, and the block prints an
+explicit line saying so instead of a number. `--prove-scoring` is that logic's own
+negative and positive control: synthetic reports for a walk that solves nothing, a
+push along open floor with `boxes_on_target` untouched, a reload, a level advance,
+a solve visible only in the log, an episode reset that replays level 1, and a
+finished run that *does* print the ratio. It needs no game and no model.
 
 ### The §B pre-flight (2026-07-26)
 
@@ -89,8 +109,8 @@ Run before spending anything, per P12. Everything below was free.
 | P4 | Action channel sends what the LLM thinks | **PASS.** `action_id` mode maps name → id 1:1; an unknown name is dropped, never coerced to a neighbouring id. The truncation salvage added in Finding 7 keeps that property — it refuses to salvage a name the config does not declare |
 | P5 | Prompt must not leak what the client hides | **WAS LEAKING — CLOSED, and the audit ran the other way too.** There is no HUD at all here, so every field had to be justified rather than passed through. Six of eight are derivable by looking at the board. Two are redacted: `moves_taken` (a score the game keeps and shows nobody — Finding 6 — and the exact number this tier scores against) and `grid` (not hidden, *moved* to the Terminal panel where it renders aligned instead of JSON-quoted). Verified against a **rendered prompt**, not against the config |
 | P6 | Guide teaches the RULES that create skill | **PASS.** Push-not-pull and its consequences: why a wall-flush crate can only slide, why a corner is permanent, why finishing a crate early can wall you off, and that reload is the correct move rather than a failure. No solution sequences — teaching the moves would measure recall |
-| P7 | Competence from the reasoning, not the exit code | **RUN — the channel is proven and the local model is below the floor.** Quantified rather than sensed: across 160 actions over three runs the pilot moved a crate **0 times** on a first level solvable in 6 moves, and of the crate positions it stated out loud only ~40% matched the board (9/17, 9/21, 41/59 right/wrong). It is engaged with the right concepts (`crate` 67×, `push` 30×, `target` 33× in 30 actions) and cannot reliably localise a glyph in a 7×5 grid. This is NOT P12's ambiguous-silence case: a specific wrong belief, stated out loud, is diagnosable — see Finding 8 |
-| P8 | Never pool across an information fix | **Boundaries declared** — see the run table. Row 1 → 2 crosses the Finding 7 fix and is a before/after pair, never a trend. Finding 9 is a *reporting* fix that never touched a prompt, so it creates no behavioural boundary |
+| P7 | Competence from the reasoning, not the exit code | **RUN — the channel is proven and the local model is below the floor.** Quantified rather than sensed: across 160 actions over three runs the pilot moved a crate **0 times** on a first level solvable in 6 moves (instrument-derived from the boards since Finding 11, not counted by hand), and of the crate positions it stated out loud only ~40% matched the board (9/17, 9/21, 41/59 right/wrong). It is engaged with the right concepts (`crate` 67×, `push` 30×, `target` 33× in 30 actions) and cannot reliably localise a glyph in a 7×5 grid. This is NOT P12's ambiguous-silence case: a specific wrong belief, stated out loud, is diagnosable — see Finding 8 |
+| P8 | Never pool across an information fix | **Boundaries declared** — see the run table. Row 1 → 2 crosses the Finding 7 fix and is a before/after pair, never a trend. Findings 9 and 11 are *reporting* fixes that never touched a prompt, so neither creates a behavioural boundary — the three rows stay comparable across both |
 | P9/P13 | Episodes: samples or replays? | **Declared `deterministic` and probed live** before every run: two resets replay identically over 4 steps, and the probe (`left`, level 1's first committed move) really moved the state, so "identical" is not vacuous |
 | P10 | Pilot needs memory, not just state | **Configured** — `history_window: 12`, roughly one crate's worth of work including the walking. The default 5 forgets the plan halfway through executing it |
 | P11 | A prompt guard is part of the game | **WOULD HAVE MADE THE GAME UNPLAYABLE — FIXED.** The repeat guard blocks the 3rd identical proposal at its default. Pushing a crate five cells along a row *is* five consecutive `left`s, and the committed solutions contain runs of 5 and 6. Raised to 8, and `assert_repeat_guard_allows_real_play` derives the bound from `solutions.json` so authoring a longer push run re-checks it automatically |
@@ -109,6 +129,11 @@ python3 examples/sokoban/integration/playtest_sokoban.py --provider ollama \
 | pre-Finding-7 | 30 | **26** | 0 | 0/3 | 0 | 9 / 17 |
 | post-Finding-7 | 30 | **30** | 0 | 0/3 | 0 | 9 / 21 |
 | post-Finding-7, fair budget | 100 | **100** | 0 | 0/3 | 0 | 41 / 59 |
+
+The `Crates moved` and `Levels solved` columns were hand-computed when this table
+was written. Finding 11 turned both into instrument output, so they were
+**re-derived rather than carried forward** — `--score` against all three reports
+agrees with every cell (0 crates, 0/3 levels, on 26/30/100 grid-changing steps).
 
 **Row 1 → 2 is the Finding 7 fix, and it is worth more than it looks: 4 of 30
 actions — 13% of the pilot's budget — were destroyed by truncated replies, and the
@@ -147,7 +172,7 @@ Stage 2 (Haiku) is un-run and is a credit decision, not a blocked one.
 | `verify_round1.py` | Rung 3 — level 1 solved, F1–F6. |
 | `verify_round2.py` | Rung 4 — all 3 levels to `all_levels_solved`, no-op probes. |
 | `verify_round3.py` | Rung 5 — invariant fuzzer, illegal ids, replay determinism. |
-| `playtest_sokoban.py` | Tier 3 — the LLM runner. Owns the §B pre-flight, then hands the adapter to `playtest_game_with_adapter()`. |
+| `playtest_sokoban.py` | Tier 3 — the LLM runner. Owns the §B pre-flight, then hands the adapter to `playtest_game_with_adapter()`. Also owns the competence scoreline, re-runnable model-free via `--score` and self-proving via `--prove-scoring`. |
 | `strategy-guide.md` | Tier 3 — the briefing the pilot reads. Teaches push geometry, corner deaths and when to reload; no solutions. |
 | `ugt.config.yaml` | `engine.type: custom` — env.py dispatches nothing, so the rungs and the tier-3 runner construct the adapter. 5 actions: four directions plus `4 = reload`. Also carries the `playtest.*` block, where every setting is justified inline. |
 
@@ -299,6 +324,52 @@ pilot to waste a whole budget. UGT already knows how to detect the shape —
 generic checks run in the invariant-fuzzer tier and not in the LLM loop. Filed as
 a framework item rather than patched here, because it belongs to `ugt/core/` and
 wants its own negative control.
+
+**11. The scorer printed `1.37x optimum` for a run that solved nothing. FIXED.**
+`report_competence` printed the moves/optimum ratio unconditionally, so the real
+100-action stage-1 report — **0 of 3 levels solved, 0 crates moved** — was scored
+`100 moves (1.37x optimum)`. That reads as "37% off the pace", i.e. as a pilot
+that played competently and finished a bit slowly. The true reading is that the
+game was never played.
+
+The ratio is not a lenient measure of a partial run; it is undefined for one. Its
+denominator is the cost of FINISHING all three levels, and a run that finished
+none has no numerator to compare against it. Worse than being wrong, it was
+*quotable-looking* — a bare multiple of a committed optimum, produced by the one
+function whose entire stated job is to say what a run is worth, in exactly the
+tier where §B P12 forbids quoting stage-1 numbers at all.
+
+Three changes, all in `playtest_sokoban.py`:
+
+* the primary output is now `levels_solved: N/3` and `crates_moved: N`, printed
+  first, so the headline is what the run *achieved* rather than a derived score;
+* `crates_moved` is read off the rendered board — the `$`/`*` cell set changing
+  between two consecutive states — because `boxes_on_target` only moves when a
+  push *crosses* a target and so cannot see an ordinary push along open floor.
+  Level advances (detected by the wall set, which fingerprints the level) and
+  reloads change the board without being pushes, and are excluded and counted;
+* the ratio prints **only** when `all_levels_solved` is true. Otherwise the block
+  states that it is undefined, and why.
+
+Proven able to fail, and the proof is permanent: `--prove-scoring` builds
+synthetic reports in memory (`results/` is generated, so the real ones cannot be
+the regression) and carries a control for every rule, including the two that only
+a fixture can distinguish — a solve visible *only* in the log across the lazy
+advance, and an episode reset after which re-solving level 1 must still read 1/3
+rather than 2/3. Each guard was additionally mutation-tested red by hand and the
+file restored byte-identically (sha256 compared, never `git checkout`); the
+ratio-gate mutation reproduces the original `1.37x` exactly.
+
+One defensive branch was **deleted rather than left in**, because no fixture and no
+real report could ever take it the other way: a `baseline_state.level_index` read,
+since a run always starts on level 1 — the same fact the reset branch already
+relies on. A check that cannot go red is decoration, and decoration in a scorer is
+how the `1.37x` survived in the first place.
+
+Like Finding 9, this changed only what is **REPORTED**, never what the pilot
+receives — no prompt, no redaction and no guard moved — so it creates **no §B P8
+boundary**, and the three stage-1 rows remain comparable to each other on exactly
+the terms they already were.
 
 ## Corrections to this harness
 
