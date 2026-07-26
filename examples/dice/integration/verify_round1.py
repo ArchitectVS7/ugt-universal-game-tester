@@ -26,7 +26,20 @@ from serve_process import adapter_for, served_bundle  # noqa: E402
 from ugt.core.trial import GateRunner  # noqa: E402
 
 ALL_ATTACK, ALL_DEFENSE = 0, 6
-DEFAULT_SEED = "dice-duel"
+
+# Seed changed 'dice-duel' -> 'anvil' for the D18 depth fix (2026-07-26).
+#
+# This rung isolates each bonus-dice rule by finding a round where only that
+# rule can be firing, which requires a side that is BEHIND but still above the
+# Dug-in threshold. STARTING_FS 12 -> 8 moved that threshold to 4 and made
+# battles shorter, so on 'dice-duel' the trailing side is already dug in by
+# round 3 and "+2 means Reinforcements alone" stopped being true — it read 3.
+#
+# That is the rung's premise expiring, not a game bug: the checks correctly
+# refused to certify an isolation that no longer isolated. 'anvil' was found by
+# sweeping for a seed where the round-3 and round-4 entry states still separate
+# the rules on the same all-attack line.
+DEFAULT_SEED = "anvil"
 
 gate = GateRunner()
 

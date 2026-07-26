@@ -6,27 +6,36 @@
 #
 # `ugt verify` resets ONCE and never resets again, and state carries between
 # features. So this map is a single battle on the game's default seed
-# ('dice-duel'), split into five assertions whose action lists run back to back.
+# ('dice-duel'), split into four assertions whose action lists run back to back.
 # Two runner behaviours it depends on, both checked in ugt/:
-#   - features run sorted by (priority, definition order), so all five are
+#   - features run sorted by (priority, definition order), so all four are
 #     `critical` to preserve file order;
-#   - MAX_TASKS_PER_TURN = 3, so these run 3 then 2 over two turns.
+#   - MAX_TASKS_PER_TURN = 3, so these run 3 then 1 over two turns.
 # No feature declares a precondition: ordering alone sequences them, and a
 # precondition satisfied only by an earlier feature in the SAME turn would be
 # evaluated too early and skipped.
 #
-# WHY ONLY FIVE, AND WHERE THE PRD's F2/F5 WENT — both are covered, but not here,
-# because neither is expressible in this model. See README.md "Findings".
+# THE ACTION LINE IS CHOSEN, NOT ARBITRARY. Round 2 plays a5_d1 rather than
+# a6_d0, and the whole map depends on that. Each bonus-dice rule can only be
+# asserted where the OTHER two provably cannot be firing, and after the D18
+# depth fix (STARTING_FS 8, Dug-in at 4) a pure all-attack line drops both sides
+# under the Dug-in threshold by round 3 — at which point no bonus is isolated
+# any more and every such assertion has to be weakened into meaninglessness.
+# One defensive die in round 2 keeps both sides above the threshold through
+# round 4, which is exactly the window these rules need. If you change the
+# actions, re-derive the windows; do not relax the assertions.
+#
+# WHY ONLY FOUR, AND WHERE THE PRD's F2 WENT — covered, but not here, because it
+# is not expressible in this model. See README.md "Findings".
 #   - PRD F2 (all-defense takes less damage than an all-attack round) is a
 #     COMPARISON BETWEEN TWO ROUNDS. A feature only sees before/after of its own
 #     action list, so it cannot hold one round's damage and compare it to
-#     another's. It is measured properly in exploit_hunt.py as a controlled A/B
-#     on one seed.
-#   - PRD F5 (a side reaching 0 FS sets battle_over + winner) is UNREACHABLE on
-#     the default seed: 205 sequences (5 fixed policies + 200 aggressive random)
-#     could not get the enemy below 1 FS inside the 12-round cap, and the feature
-#     map has no way to choose a seed. exploit_hunt.py drives it on seed 0, where
-#     a knockout does occur.
+#     another's. verify_round2.py measures it properly as a controlled A/B on
+#     one seed.
+#   - The two terminal arms this map cannot reach — the D18 points decision and
+#     the exact-tie draw — both need a chosen seed, and a feature map has no way
+#     to choose one (`engine.reset_command` is ignored for any game exposing
+#     __RESET_GAME__). verify_round2.py drives all three arms on picked seeds.
 #
 # Every assertion below states a RULE from ../game/PRD.md, with the `before.`
 # clauses spelling out the conditions that isolate that rule — so a failure says
@@ -37,10 +46,11 @@ version: "1.0"
 
 features:
   # ---- Attack does damage -----------------------------------------------
-  # Two all-attack rounds from a fresh battle (round 0, 20/20).
+  # Two rounds from a fresh battle (round 0, 8 v 8). The second is a5_d1, for
+  # the reason in the header — the enemy still takes damage across the pair.
   - id: combat.attack_reduces_enemy_force
-    description: "An all-attack allocation reduces the enemy's force_strength"
-    action: ["a6_d0", "a6_d0"]
+    description: "An attack-weighted allocation reduces the enemy's force_strength"
+    action: ["a6_d0", "a5_d1"]
     assertion:
       - "before.round_number == 0"
       - "state.enemy.force_strength < before.enemy.force_strength"
@@ -51,8 +61,8 @@ features:
   # ---- Reinforcements, isolated -----------------------------------------
   # Resolving round 3 grants each side +2 dice, exactly once. The enemy is the
   # clean probe here: entering round 3 it is BEHIND on force (so no Morale
-  # surge) and still above 10 (so not Dug in), leaving +2 as the only bonus it
-  # can have. The player, ahead and above 10, must show 2 + 1 = 3 — which is
+  # surge) and still above 4 (so not Dug in), leaving +2 as the only bonus it
+  # can have. The player, ahead and above 4, must show 2 + 1 = 3 — which is
   # also the proof that Reinforcements STACKS with Morale rather than replacing it.
   - id: bonus.reinforcements_fire_once_at_round_three
     description: "Round 3 grants +2 bonus dice to each side, stacking with Morale"
@@ -61,10 +71,10 @@ features:
       - "before.round_number == 2"
       # Conditions that isolate the enemy's bonus to Reinforcements alone:
       - "before.enemy.force_strength < before.player.force_strength"
-      - "before.enemy.force_strength > 6"
+      - "before.enemy.force_strength > 4"
       - "state.round_number == 3"
       - "state.enemy.bonus_dice == 2"
-      # Player is ahead and above 10: Reinforcements (+2) + Morale (+1).
+      # Player is ahead and above 4: Reinforcements (+2) + Morale (+1).
       - "state.player.bonus_dice == 3"
     priority: critical
 
@@ -77,35 +87,38 @@ features:
     assertion:
       - "before.round_number == 3"
       - "before.player.force_strength > before.enemy.force_strength"
-      - "before.player.force_strength > 6"
+      - "before.player.force_strength > 4"
       - "state.round_number == 4"
-      # +1 Morale and nothing else: Reinforcements is spent, Dug in needs FS <= 10.
+      # +1 Morale and nothing else: Reinforcements is spent, Dug in needs FS <= 4.
       - "state.player.bonus_dice == 1"
     priority: critical
 
   # ---- A knockout ends the battle ---------------------------------------
-  # RETUNED 2026-07-26 (STARTING_FS 20 -> 12). This slot used to hold
-  # `battle.round_twelve_cap_forces_draw`, and the swap is a neat inversion:
-  # BEFORE the retune the default seed always drew, so the round cap was the only
-  # terminal arm a feature map could reach and the knockout had to live in R2 on
-  # a hand-picked seed. AFTER it, the default seed resolves decisively on round 8,
-  # so the knockout is the reachable one and the DRAW now needs a chosen seed —
-  # which a feature map cannot do (`engine.reset_command` is ignored for any game
-  # exposing __RESET_GAME__). R2 covers the draw arm on seed "stalemate".
+  # This slot has now been re-derived twice, and the history is the useful part:
+  #   * originally `battle.round_twelve_cap_forces_draw` — pre-retune the default
+  #     seed ALWAYS drew, so the cap was the only terminal arm a feature map
+  #     could reach and the knockout had to live in R2 on a hand-picked seed;
+  #   * then `battle.knockout_sets_decisive_winner` (STARTING_FS 20 -> 12), when
+  #     the default seed started resolving decisively on round 8;
+  #   * now the same id, but the PLAYER loses and the tail is a5_d1 rather than
+  #     a6_d0 — post-D18 the all-attack tail runs to an exact 2 v 2 tie at the
+  #     cap instead of knocking anyone out.
+  # Which side wins is not the point; reaching a real knockout before the cap is.
   #
-  # Four more all-attack rounds from round 4 finish it.
+  # Six a5_d1 rounds from round 4 finish it on round 10.
   - id: battle.knockout_sets_decisive_winner
     description: "Reducing a side to 0 force strength ends the battle with a decisive winner"
-    action: ["a6_d0", "a6_d0", "a6_d0", "a6_d0"]
+    action: ["a5_d1", "a5_d1", "a5_d1", "a5_d1", "a5_d1", "a5_d1"]
     assertion:
       - "before.battle_over == False"
       - "state.battle_over == True"
-      - 'state.winner == "player"'
-      - "state.enemy.force_strength == 0"
-      # A real decision, not the cap relabelled: it landed before round 12 and
-      # the winner is still standing.
+      - 'state.winner == "enemy"'
+      - "state.player.force_strength == 0"
+      # A real knockout, not the cap relabelled: it landed before round 12 and
+      # the winner is still standing. Both clauses matter post-D18, because the
+      # cap now produces decisive winners too.
       - "state.round_number < 12"
-      - "state.player.force_strength > 0"
+      - "state.enemy.force_strength > 0"
     priority: critical
 
   # ---- REMOVED 2026-07-26: battle.concluded_battle_is_inert ---------------

@@ -13,8 +13,8 @@
  * shipped build behaves the same way; this is for choosing the numbers.
  */
 import {
-  MAX_ROUNDS, STARTING_FS, HIT_THRESHOLD, POOL_SIZE, DUG_IN_THRESHOLD,
-  applyAction, createInitialState,
+  ALLOCATIONS, MAX_ROUNDS, STARTING_FS, HIT_THRESHOLD, POOL_SIZE, DUG_IN_THRESHOLD,
+  DEFENSE_BLOCK, applyAction, createInitialState, resolveRound,
 } from '../src/engine.js'
 
 const SEEDS = Number(process.argv[2] ?? 40)
@@ -49,7 +49,8 @@ function summarise(name, results) {
 
 console.log(
   `constants: STARTING_FS=${STARTING_FS} HIT_THRESHOLD=${HIT_THRESHOLD} ` +
-  `POOL_SIZE=${POOL_SIZE} DUG_IN=${DUG_IN_THRESHOLD} MAX_ROUNDS=${MAX_ROUNDS}\n`,
+  `POOL_SIZE=${POOL_SIZE} DUG_IN=${DUG_IN_THRESHOLD} MAX_ROUNDS=${MAX_ROUNDS} ` +
+  `DEFENSE_BLOCK=${DEFENSE_BLOCK}\n`,
 )
 console.log(
   'strategy      n   decisive   W    L    D   avg_round  avg_margin  closest_call',
@@ -71,3 +72,51 @@ const overall = Math.round(
   (100 * rows.reduce((a, r) => a + r.decisive, 0)) / rows.reduce((a, r) => a + r.n, 0),
 )
 console.log(`\noverall decisive rate: ${overall}%   (draws: ${100 - overall}%)`)
+
+/* ---------------------------------------------------------------------------
+ * DEPTH. Everything above is win rate, and win rate CANNOT tell a balanced game
+ * from a flat one — both read ~50%. A candidate rule change once passed the
+ * table above with every strategy at 42-50% while its full strategy grid was a
+ * wall of 0.50: it had removed the dominant strategy by removing the decision.
+ *
+ * So this section takes the AI out of the loop entirely and plays all 7x7 fixed
+ * allocations against each other. What it reports:
+ *
+ *   best response per column  if it reads 0,0,0,0,0,0,0 the game has ONE answer
+ *   regret of all-attack      what the naive line costs vs a best response;
+ *                             ~0 means there is no decision worth making
+ *   dead allocations          choices that beat nothing, at any opponent, ever
+ *
+ * See LESSONS.md §D6. Sample size matters more here than above — at 200 seeds
+ * these numbers reverse (§D7), so the grid gets its own larger count.
+ * ------------------------------------------------------------------------- */
+const GRID_SEEDS = Number(process.argv[3] ?? Math.max(2000, SEEDS))
+const P = [0, 1, 2, 3, 4, 5, 6]
+
+function duel(i, j, seeds) {
+  let w = 0, d = 0
+  for (let seed = 0; seed < seeds; seed += 1) {
+    let s = createInitialState(String(seed))
+    while (!s.battle_over) s = resolveRound(s, i, j)
+    if (s.winner === 'player') w += 1
+    else if (s.winner === 'draw') d += 1
+  }
+  return (w + 0.5 * d) / seeds // draws worth half
+}
+
+console.log(`\nDEPTH — 7x7 fixed-allocation grid, ${GRID_SEEDS} seeds/cell (AI not involved)\n`)
+const M = P.map((i) => P.map((j) => duel(i, j, GRID_SEEDS)))
+console.log('        ' + P.map((j) => `${ALLOCATIONS[j].attack}a${ALLOCATIONS[j].defense}d`.padStart(7)).join(''))
+M.forEach((row, i) => {
+  console.log(
+    `  ${ALLOCATIONS[i].attack}a${ALLOCATIONS[i].defense}d ` +
+    row.map((v) => v.toFixed(2).padStart(7)).join(''),
+  )
+})
+const br = P.map((j) => P.reduce((b, i) => (M[i][j] > M[b][j] ? i : b), 0))
+const regret0 = P.reduce((a, j) => a + (M[br[j]][j] - M[0][j]), 0) / P.length
+const dead = P.filter((i) => P.every((j) => M[i][j] <= 0.5))
+console.log(`\n  best response per enemy column : [${br.join(', ')}]`)
+console.log(`  regret of all-attack           : ${regret0.toFixed(4)}` +
+            `${regret0 < 0.02 ? '   <-- WARNING: no real decision' : ''}`)
+console.log(`  dead allocations (beat nobody) : ${dead.length ? dead.join(', ') : 'none'}`)

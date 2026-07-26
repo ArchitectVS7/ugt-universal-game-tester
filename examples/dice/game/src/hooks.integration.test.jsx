@@ -219,25 +219,28 @@ describe('UGT hooks — a full battle by hook only', () => {
       expect(returned, `round ${i + 1} vs engine`).toEqual(expectedProjection(oracle))
       // The round counter advances exactly one per action.
       expect(returned.round_number).toBe(i + 1)
-      // RETUNE 2026-07-26: this seed used to survive all 12 scripted actions.
-      // At STARTING_FS = 12 it is decided on round 10, so the loop stops at the
-      // real end instead of asserting a round count that balance now owns.
+      // RETUNE 2026-07-26: this seed used to survive all 12 scripted actions,
+      // then was decided on round 10 at STARTING_FS = 12, and now reaches the
+      // cap again under D18. The loop stops at the real end rather than
+      // asserting a round count that balance owns.
       if (returned.battle_over) break
     }
 
-    // Verified fixture for DEFAULT_SEED + SCRIPT, RETUNED 2026-07-26: this used
-    // to run the full 12 rounds to a draw with both sides alive. At
-    // STARTING_FS = 12 the same script decides on round 10 for the player.
-    // What this test is actually for is the round-by-round agreement between
-    // the hook return, a fresh read, and an engine oracle computed outside the
-    // UI — all of which is asserted in the loop above and is unaffected by
-    // balance. The end-state assertions are restated rather than dropped.
+    // Verified fixture for DEFAULT_SEED + SCRIPT, RETUNED 2026-07-26 (twice):
+    // originally 12 rounds to a draw with both sides alive; then decided on
+    // round 10 at STARTING_FS = 12; now back to the full 12 rounds, but ending
+    // as a POINTS decision for the enemy at 1 v 2 rather than a draw — which is
+    // exactly D18. What this test is actually for is the round-by-round
+    // agreement between the hook return, a fresh read, and an engine oracle
+    // computed outside the UI — all asserted in the loop above and unaffected
+    // by balance. The end-state assertions are restated rather than dropped.
     const final = window.__GET_STATE__()
-    expect(final.round_number).toBe(10)
+    expect(final.round_number).toBe(MAX_ROUNDS)
     expect(final.battle_over).toBe(true)
-    expect(final.winner).toBe('player')
-    expect(final.enemy.force_strength).toBe(0)
-    expect(final.player.force_strength).toBeGreaterThan(0)
+    expect(final.winner).toBe('enemy')
+    // Decided on points, NOT a knockout — both sides finished the cap alive.
+    expect(final.player.force_strength).toBe(1)
+    expect(final.enemy.force_strength).toBe(2)
 
     expectQuietConsole()
   })

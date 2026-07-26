@@ -114,13 +114,15 @@ describe('Accept 1 — decisive win (enemy FS reaches 0)', () => {
     expect(final.round_number).toBeLessThan(MAX_ROUNDS)
   })
 
-  // Golden values RECOMPUTED for the 2026-07-26 retune (STARTING_FS 20 -> 12).
-  // A golden test is supposed to break when balance changes — that is what makes
-  // it a golden test — so these are restated, not loosened.
-  it('golden: seed "vanguard", all-attack mirror → player wins round 6 at FS 3', () => {
-    expect(final.round_number).toBe(6)
-    expect(final.player.force_strength).toBe(3)
-    expect(final.log).toHaveLength(6)
+  // Golden values RECOMPUTED for the 2026-07-26 retune (STARTING_FS 20 -> 12),
+  // then again for the D18 depth fix (DEFENSE_BLOCK 1 -> 2, STARTING_FS -> 8,
+  // round cap decides on FS). A golden test is supposed to break when balance
+  // changes — that is what makes it a golden test — so these are restated, not
+  // loosened. 'vanguard' still produces a player win, so the seed stands.
+  it('golden: seed "vanguard", all-attack mirror → player wins round 3 at FS 5', () => {
+    expect(final.round_number).toBe(3)
+    expect(final.player.force_strength).toBe(5)
+    expect(final.log).toHaveLength(3)
     // The knockout is recorded in the round that dealt it.
     expect(final.last_round.enemy.force_strength_after).toBe(0)
   })
@@ -150,10 +152,10 @@ describe('Accept 2 — decisive loss (player FS reaches 0)', () => {
     expect(final.round_number).toBeLessThan(MAX_ROUNDS)
   })
 
-  it('golden: seed "bastion", all-attack mirror → enemy wins round 4 at FS 6', () => {
-    expect(final.round_number).toBe(4)
-    expect(final.enemy.force_strength).toBe(6)
-    expect(final.log).toHaveLength(4)
+  it('golden: seed "bastion", all-attack mirror → enemy wins round 3 at FS 4', () => {
+    expect(final.round_number).toBe(3)
+    expect(final.enemy.force_strength).toBe(4)
+    expect(final.log).toHaveLength(3)
     expect(final.last_round.player.force_strength_after).toBe(0)
   })
 
@@ -243,12 +245,15 @@ describe('Accept 4 — winner is null exactly while battle_over is false', () =>
 })
 
 describe('D9 — mutual destruction end to end', () => {
-  // Seed changed 'assault' -> 'breach' for the retune. 'assault' no longer
-  // produces mutual destruction at STARTING_FS = 12, so keeping it would have
-  // meant this case silently stopped testing what its name says. 'breach' was
-  // found by sweeping seeds for one that still ends with BOTH sides at 0.
-  it('seed "breach", all-attack mirror: both sides hit 0 in the same round → draw', () => {
-    const { final } = playUntilOver(createInitialState('breach'), ALL_ATTACK, ALL_ATTACK)
+  // Seed changed TWICE now: 'assault' -> 'breach' (STARTING_FS 20 -> 12) ->
+  // 'obliterate' (the D18 depth fix). Each time the old seed stopped producing
+  // mutual destruction, and each time keeping it would have left a test that
+  // still PASSES while silently checking something other than what its name
+  // says — the most dangerous failure mode in this file, because nothing goes
+  // red. Every replacement is found by sweeping for a seed that genuinely still
+  // ends with BOTH sides at 0; the assertions below are what enforce that.
+  it('seed "obliterate", all-attack mirror: both sides hit 0 in the same round → draw', () => {
+    const { final } = playUntilOver(createInitialState('obliterate'), ALL_ATTACK, ALL_ATTACK)
     expect(final.player.force_strength).toBe(0)
     expect(final.enemy.force_strength).toBe(0)
     expect(final.battle_over).toBe(true)
@@ -257,11 +262,15 @@ describe('D9 — mutual destruction end to end', () => {
     // simultaneous damage, not two sequential deaths.
     expect(final.last_round.player.force_strength_after).toBe(0)
     expect(final.last_round.enemy.force_strength_after).toBe(0)
-    expect(final.round_number).toBe(6)
+    expect(final.round_number).toBe(3)
   })
 
   it('also fires from a forced 1-vs-1 state', () => {
-    const s = resolveRound(withFS('mutual', 1, 1), ALL_ATTACK, ALL_ATTACK)
+    // Seed changed 'mutual' -> 'annihilation' for the same reason as above: at
+    // 1 v 1 both sides are under DUG_IN_THRESHOLD, so both roll a defense die,
+    // and with DEFENSE_BLOCK = 2 that one die now cancels two hits. Most seeds
+    // therefore deal no damage at all here — 'mutual' became one of them.
+    const s = resolveRound(withFS('annihilation', 1, 1), ALL_ATTACK, ALL_ATTACK)
     expect(s.last_round.player.damage_taken).toBeGreaterThan(0)
     expect(s.last_round.enemy.damage_taken).toBeGreaterThan(0)
     expect([s.player.force_strength, s.enemy.force_strength]).toEqual([0, 0])

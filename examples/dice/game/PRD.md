@@ -7,8 +7,9 @@ deterministic ruleset — built to be tested, not to be deep.
 
 **Why this example exists:** Demonstrate `/tasklist` + `/orchestrate` building a
 small React game from a PRD, then UGT driving it through a **browser** adapter
-(Playwright + `window` hooks) — the same transport swap `examples/browser-game`
-shows, applied to a fresh game instead of a documentation stub.
+(Playwright + `window` hooks). Its sibling `examples/sokoban` drives a Godot
+game over TCP and `examples/escape-room` a Node subprocess, so the three
+together cover all three transports UGT supports.
 
 ## Stack
 
@@ -26,15 +27,17 @@ shows, applied to a fresh game instead of a documentation stub.
    randomness in the *choice*, only in the dice).
 2. Both pools roll simultaneously: each allocated d6 that shows 5 or 6 is a
    **hit**.
-3. Net damage to each side = (opponent's attack hits) − (own defense hits),
-   floored at 0.
+3. Net damage to each side = (opponent's attack hits) − `DEFENSE_BLOCK` × (own
+   defense hits), floored at 0. `DEFENSE_BLOCK` is 2: one defense hit cancels
+   two attack hits.
 4. Force Strength (FS) drops by net damage. Round counter increments.
-5. Battle ends when either side's FS ≤ 0 (decisive win/loss) or after round 12
-   (draw).
+5. Battle ends when either side's FS ≤ 0 (decisive win/loss), or at the round 12
+   cap — where the side with the **higher FS wins on points**, and only an exact
+   tie is a draw.
 
 ## Mechanics
 
-- **Force Strength:** both sides start at 20, floored at 0 (a hit that would
+- **Force Strength:** both sides start at `STARTING_FS` (8), floored at 0 (a hit that would
   take FS negative clamps it to exactly 0, not below).
 - **Die pool:** 6 dice per round, allocated across Attack/Defense via one of 7
   fixed presets: `(6,0) (5,1) (4,2) (3,3) (2,4) (1,5) (0,6)`.
@@ -42,7 +45,7 @@ shows, applied to a fresh game instead of a documentation stub.
   given state — no hidden RNG on *whether* they trigger:
   - **Morale surge:** if your FS > opponent's FS at round start, +1 Attack die
     this round ("advancing with confidence").
-  - **Dug in:** if your FS ≤ 10 (half), +1 Defense die this round ("soldiers
+  - **Dug in:** if your FS ≤ `DUG_IN_THRESHOLD` (4, half), +1 Defense die this round ("soldiers
     dig in").
   - **Reinforcements:** exactly once, at the start of round 3, each side
     independently gains +2 dice added to whichever pool *that side*
@@ -53,19 +56,18 @@ shows, applied to a fresh game instead of a documentation stub.
   (`Math.random`) directly. This RNG-in-state pattern is what makes a same-seed
   replay byte-identical, which R3 asserts.
 - **AI opponent:** deterministic heuristic — allocate defense dice
-  proportional to `1 - own_FS/20` (rounded to nearest preset), rest to attack.
+  proportional to `1 - own_FS/STARTING_FS` (rounded to nearest preset), rest to attack.
   No hidden state, no RNG in the decision.
 
 ## UGT hooks required (the game/integration contract)
 
-Exposed on `window` for the Playwright adapter, matching
-`examples/browser-game`'s pattern:
+Exposed on `window` for the Playwright adapter:
 
 - `window.__GET_STATE__()` →
   ```json
   {
-    "player": {"force_strength": 20, "bonus_dice": 0},
-    "enemy":  {"force_strength": 20, "bonus_dice": 0},
+    "player": {"force_strength": 8, "bonus_dice": 0},
+    "enemy":  {"force_strength": 8, "bonus_dice": 0},
     "round_number": 0,
     "battle_over": false,
     "winner": null
@@ -83,7 +85,7 @@ Exposed on `window` for the Playwright adapter, matching
   dict, a key this game never sent, so a black-box driver never observed a
   battle ending. `__GET_STATE__` and `__RESET__` still return the bare
   projection — only the action hook is wrapped.
-- `window.__RESET__(seed)` — new battle, FS reset to 20/20, `roll_counter`
+- `window.__RESET__(seed)` — new battle, FS reset to `STARTING_FS` both sides, `roll_counter`
   reset, RNG reseeded.
 - A visible round log in the UI (for human readability) is expected but not
   part of the UGT contract.
@@ -97,7 +99,8 @@ accessibility pass, no mobile layout.
 ## Acceptance criteria
 
 - `npm run build` produces a static bundle servable by any static file server
-  (matches `examples/browser-game/serve.py`'s expectation).
+  (`integration/serve.py` serves it; the ladder refuses to run against a `dist/`
+  older than `src/`).
 - A full battle (12 rounds or a decisive FS ≤ 0) completes without console
   errors.
 - Same seed + same action sequence (via `__SEND_ACTION__`) reproduces

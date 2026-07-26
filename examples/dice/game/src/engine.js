@@ -151,10 +151,24 @@ export const ALLOCATIONS = Object.freeze([
 export const POOL_SIZE = 6
 
 /** Both sides open the battle at this Force Strength. */
-export const STARTING_FS = 12
+export const STARTING_FS = 8
 
 /** FS at or below this ("half") grants the Dug in defense die. */
-export const DUG_IN_THRESHOLD = 6
+export const DUG_IN_THRESHOLD = 4
+
+/**
+ * How many attack hits a single defense hit cancels.
+ *
+ * At 1 (the original rule) a defense die could only ever *reduce* damage taken
+ * and never contribute to damage dealt, which made attack dice strictly better
+ * than defense dice at every allocation — provably, and independently of every
+ * other constant in this file: the marginal gap works out to
+ * `p(1-p) * P(attack hits == defense hits) > 0`, in which no constant below
+ * appears. Allocation was therefore not a decision; all-attack was simply the
+ * answer, and no retune could change that. See LESSONS.md §D and
+ * `examples/dice/README.md` for the bake-off that established this.
+ */
+export const DEFENSE_BLOCK = 2
 
 /** Reinforcements are worth this many dice, all to one pool. */
 export const REINFORCEMENT_DICE = 2
@@ -199,7 +213,7 @@ export function createInitialState(seed) {
     seed: String(seed),
     roll_counter: 0,
     round_number: 0,
-    // A fresh battle is by definition unresolved: 20 vs 20 at round 0 is
+    // A fresh battle is by definition unresolved: an even start at round 0 is
     // exactly `evaluateOutcome(STARTING_FS, STARTING_FS, 0)`, asserted in the
     // tests so these literals cannot drift away from the rule.
     battle_over: false,
@@ -331,9 +345,10 @@ export function resolveRound(state, playerPresetIndex, enemyPresetIndex) {
   const enemyDefense = rollPool(enemyPools.defense_dice, seed, counter)
   counter = enemyDefense.rollCounter
 
-  // Net damage = opponent's attack hits − own defense hits, floored at 0.
-  const damageToPlayer = Math.max(0, enemyAttack.hits - playerDefense.hits)
-  const damageToEnemy = Math.max(0, playerAttack.hits - enemyDefense.hits)
+  // Net damage = opponent's attack hits − DEFENSE_BLOCK per own defense hit,
+  // floored at 0. See DEFENSE_BLOCK for why a defense hit is worth two.
+  const damageToPlayer = Math.max(0, enemyAttack.hits - DEFENSE_BLOCK * playerDefense.hits)
+  const damageToEnemy = Math.max(0, playerAttack.hits - DEFENSE_BLOCK * enemyDefense.hits)
 
   // FS floors at exactly 0, never below (PRD Mechanics).
   const playerFSAfter = Math.max(0, playerFS - damageToPlayer)
@@ -408,7 +423,7 @@ export function resolveRound(state, playerPresetIndex, enemyPresetIndex) {
  * Decide whether the battle has ended, and who won.
  *
  * PRD: "Battle ends when either side's FS ≤ 0 (decisive win/loss) or after
- * round 12 (draw)." Precedence, in this exact order — it is the rule, not an
+ * round 12." Precedence, in this exact order — it is the rule, not an
  * implementation detail:
  *
  *   1. D9 — MUTUAL DESTRUCTION FIRST. Damage is applied simultaneously, so a
@@ -418,7 +433,11 @@ export function resolveRound(state, playerPresetIndex, enemyPresetIndex) {
  *      side survived. Pinned here so T-005/T-006/T-007 need not re-litigate it.
  *   2. enemy FS ≤ 0 → the player wins.
  *   3. player FS ≤ 0 → the enemy wins.
- *   4. `MAX_ROUNDS` completed rounds with both sides alive → draw.
+ *   4. D18 — `MAX_ROUNDS` completed rounds with both sides alive → the side
+ *      with the higher FS wins on points; only an exact tie is a `"draw"`.
+ *      The cap used to draw unconditionally, which made turtling to the cap a
+ *      free out and was half of why allocation was not a real decision (see
+ *      `DEFENSE_BLOCK` for the other half).
  *   5. otherwise the battle continues, and `winner` is `null`.
  *
  * Decisive checks come BEFORE the round cap on purpose: a knockout landing on
@@ -438,14 +457,20 @@ export function evaluateOutcome(playerFS, enemyFS, roundNumber) {
   if (playerFS <= 0 && enemyFS <= 0) return { battle_over: true, winner: 'draw' }
   if (enemyFS <= 0) return { battle_over: true, winner: 'player' }
   if (playerFS <= 0) return { battle_over: true, winner: 'enemy' }
-  if (roundNumber >= MAX_ROUNDS) return { battle_over: true, winner: 'draw' }
+  if (roundNumber >= MAX_ROUNDS) {
+    // D18 — the cap DECIDES on Force Strength; only a dead tie is a draw.
+    return {
+      battle_over: true,
+      winner: playerFS > enemyFS ? 'player' : playerFS < enemyFS ? 'enemy' : 'draw',
+    }
+  }
   return { battle_over: false, winner: null }
 }
 
 /* ------------------------------------------------------------------------- *
  * T-005 — the deterministic AI opponent.
  *
- * PRD: "allocate defense dice proportional to `1 - own_FS/20` (rounded to
+ * PRD: "allocate defense dice proportional to `1 - own_FS/STARTING_FS` (rounded to
  * nearest preset), rest to attack. No hidden state, no RNG in the decision."
  *
  * The whole heuristic is `presetForForceStrength`, a total function of a single

@@ -115,10 +115,16 @@ describe('the allocation heuristic', () => {
     // STARTING_FS) and checked against the implementation; if these disagree the
     // implementation is what is wrong, not this table.
     //
-    // RETUNED 2026-07-26 with STARTING_FS 20 -> 12. The old 21-entry table is
-    // what made this test fail on the retune, correctly: a full FS -> preset
-    // table is inherently a function of STARTING_FS and has to be restated.
-    const expected = [6, 6, 5, 5, 4, 4, 3, 3, 2, 2, 1, 1, 0]
+    // RETUNED 2026-07-26 with STARTING_FS 20 -> 12, then 12 -> 8 for the D18
+    // depth fix. A full FS -> preset table is inherently a function of
+    // STARTING_FS, so it has to be restated by hand every time — which is the
+    // point of it. Deriving it from the same formula the implementation uses
+    // would make this test vacuous (O2).
+    //
+    // At STARTING_FS = 8: round(6 * (8 - fs) / 8) = round(0.75 * (8 - fs)) =
+    //   fs 0..8 -> 6.0, 5.25, 4.5, 3.75, 3.0, 2.25, 1.5, 0.75, 0.0
+    //          -> 6,    5,    5*,  4,    3,   2,    2*,  1,    0     (* = half-up)
+    const expected = [6, 5, 5, 4, 3, 2, 2, 1, 0]
     expect(expected).toHaveLength(STARTING_FS + 1)
     expect(ALL_FS.map(presetForForceStrength)).toEqual(expected)
   })
@@ -135,15 +141,22 @@ describe('the allocation heuristic', () => {
   })
 
   it('breaks the two half-way ties toward defense (D11)', () => {
-    // With STARTING_FS = 12 and POOL_SIZE = 6 the ratio is exactly fs/2, so
-    // every ODD fs is a half-way value: e.g. fs = 9 → 6 * 3 / 12 = 1.5 and
-    // fs = 3 → 6 * 9 / 12 = 4.5. Math.round is half-up, so each rounds to the
-    // MORE defensive preset. That is the decision, not a rounding accident.
-    // (Under the old STARTING_FS = 20 only fs = 15 and fs = 5 were half-way;
-    // the retune made the tie the common case rather than the exception, which
-    // is worth knowing — it means D11's tie-break now decides half the table.)
-    expect(presetForForceStrength(9)).toBe(2)
-    expect(presetForForceStrength(3)).toBe(5)
+    // With STARTING_FS = 8 and POOL_SIZE = 6 the ratio is 0.75 * (8 - fs), so a
+    // half-way value needs (8 - fs) ≡ 2 (mod 4) — exactly fs = 6 (→ 1.5) and
+    // fs = 2 (→ 4.5). Math.round is half-up, so each rounds to the MORE
+    // defensive preset. That is the decision, not a rounding accident.
+    //
+    // The count of half-way cases is itself a function of the constants and has
+    // swung twice: 2 at STARTING_FS = 20 (fs 15, 5), then SIX at 12 (every odd
+    // fs, where the ratio was exactly fs/2), and back to 2 at 8. The test name
+    // says "the two", so assert the count rather than trusting the name.
+    const halfWay = ALL_FS.filter((fs) => {
+      const r = (POOL_SIZE * (STARTING_FS - fs)) / STARTING_FS
+      return Math.abs(r - Math.floor(r) - 0.5) < 1e-9
+    })
+    expect(halfWay).toEqual([2, 6])
+    expect(presetForForceStrength(6)).toBe(2)
+    expect(presetForForceStrength(2)).toBe(5)
   })
 
   it('never asks for more defense as its strength rises', () => {

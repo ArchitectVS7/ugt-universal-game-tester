@@ -143,4 +143,24 @@ The rig got checked before we trusted it, too: one reviewer had predicted, blind
 
 Written up properly as [`LESSONS.md` §D](../../LESSONS.md) so it applies to every game we test, not just this one.
 
+## Fix #3 — the change itself, and what it cost
+
+Three edits, all in `engine.js`: a defense hit now cancels **two** attack hits (`DEFENSE_BLOCK = 2`), the round-12 cap **decides on force strength** instead of drawing, and starting strength went 12 → 8 to bring knockouts back. Twelve rounds still held.
+
+What it bought, measured on the shipped engine rather than the simulation: decisive rate 50% → **91%**, and the thing that was actually broken — all-out attack now **loses** at 216 wins in 500 while a balanced allocation **wins 289**. The peak moved from a corner to the middle. Choosing well is worth 0.131 where it used to be worth 0.000.
+
+Then the bill came in, and it's the same shape as last time but bigger.
+
+**Seven game tests broke**, splitting the same two ways: real goldens that got recomputed by hand, and tests that had hardcoded a number where the rule is a formula. Two were the dangerous kind *again* — the "both sides destroy each other" case had drifted onto a seed that no longer does that, for the second retune running. It's now got a comment saying so, because twice is a pattern.
+
+**The harness caught something I'm glad it caught.** R1 failed on two checks that isolate the bonus-dice rules. Not a bug — at starting strength 8 both sides drop under the "dug in" threshold by round 3, so "+2 means reinforcements alone" stopped being true. The rung was refusing to certify an isolation that no longer isolated, which is precisely correct behaviour, and the fix was to find a line where the windows still exist rather than to loosen the assertion.
+
+**R2 grew.** The cap deciding on points is a genuinely new way for a battle to end, so R2 went from two terminal arms to three — knockout, points decision, exact-tie draw — and from 10 checks to 14. There's a rule in our lessons file that says if a gate returns its old check count after the game gained a system, it never tested the system. That's this.
+
+**And it found a real hole in the harness.** The first ladder run after the change came back almost entirely green — against a **stale build**. The tests drive the compiled bundle, nothing checked the bundle was newer than the source, and it cheerfully reported `12v12` in a passing line while the source said 8. So the ladder was certifying code I wasn't shipping. There's now a freshness check that refuses to serve a `dist/` older than `src/`, and I made it fail on purpose before believing it. Same class of mistake as the stale-server one we already had a rule for, one layer up.
+
+The player briefing needed rewriting too, and that one would have been expensive to miss: it still taught "the cap is a draw, so race for the kill", which after this change is *actively wrong advice*. An LLM playtester reading it would have played the old game badly and I'd have blamed the model.
+
+Suite back to 157/157, ladder green at 19 · 9 · 12 · 14 · 11, `ugt verify` 4/4.
+
 More will land here as we keep going. The full technical write-up, including the findings that are only useful to Claude, stays in [`integration/README.md`](integration/README.md).
