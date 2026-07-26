@@ -549,7 +549,15 @@ function roomObjects(game) {
   return here;
 }
 
-function describeRoom(game) {
+/**
+ * Render the current room (name, description, exits, visible objects).
+ *
+ * Read-only view helper for the front ends — it mutates nothing and does not
+ * count as a move, so `cli.js` can print the opening room before the player has
+ * typed anything without inflating `moves_taken`. Rendering rooms is a
+ * content-model concern, so it lives here rather than in a front end.
+ */
+export function describeRoom(game) {
   const room = game.content.rooms.get(game.currentRoom);
   const lines = [room.name, room.description];
 
@@ -574,10 +582,26 @@ function describeInventory(game) {
  * true. executeCommand owns the move counter and the state snapshot.
  * ---------------------------------------------------------------------- */
 
-function doGo(game, arg) {
-  const raw = typeof arg === 'string' ? arg.trim().toLowerCase() : '';
+/**
+ * Canonicalize free text to a compass direction, or null if it isn't one
+ * (`n`/`s`/`e`/`w` and case are accepted).
+ *
+ * Read-only vocabulary helper: the direction words are engine vocabulary, so a
+ * front end that needs to recognize a bare direction (`cli.js`'s "just type
+ * `n`" shorthand) asks here instead of keeping its own copy of the list.
+ *
+ * @param {string} text
+ * @returns {string|null} 'north' | 'south' | 'east' | 'west' | null
+ */
+export function normalizeDirection(text) {
+  const raw = typeof text === 'string' ? text.trim().toLowerCase() : '';
   const dir = DIRECTION_ALIASES[raw] ?? raw;
-  if (!DIRECTIONS.includes(dir)) return { ok: false, message: REFUSALS.noSuchDirection };
+  return DIRECTIONS.includes(dir) ? dir : null;
+}
+
+function doGo(game, arg) {
+  const dir = normalizeDirection(arg);
+  if (dir === null) return { ok: false, message: REFUSALS.noSuchDirection };
 
   const target = game.content.rooms.get(game.currentRoom).exits[dir];
   if (target === null) return { ok: false, message: REFUSALS.noExit };

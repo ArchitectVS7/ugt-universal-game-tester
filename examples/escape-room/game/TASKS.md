@@ -166,11 +166,27 @@ repo root); orientation came from PRD.md, TASKS.md, the T-002 loader in
 
 ## M3 — Front ends
 
-### T-005 · Human CLI — `status: TODO` · `coder: sonnet` · `after: T-004`
+### T-005 · Human CLI — `status: DONE` · `coder: sonnet` · `after: T-004`
 Free-text parser (8 verbs, direction shorthands) over `executeCommand()`;
 prints descriptions/flavor text.
 **Accept:** manual playthrough of the T-003 walkthrough via typed commands
 reaches "You escape!"; unrecognized input prints a refusal without crashing.
+**Delivered (2026-07-25):** `src/cli.js` is now a real `readline` REPL —
+`parseInput()` turns a typed line into `(verb, arg)` (stripping a leading
+article, recognizing a bare direction as `go <dir>`, carving out `help` as the
+one verb the engine doesn't own), `runRepl()` drives `createGame()` +
+`executeCommand()` in a loop, prints the engine's own message/refusal text
+verbatim, and on `state.escaped` prints the escape banner plus
+moves/rooms-visited and closes cleanly; unknown verbs are dispatched to the
+engine unchanged so it — not the CLI — owns the refusal. `src/engine.js`
+gained two small exports the front end needed (`describeRoom`, so the opening
+room can be printed before any move without inflating `moves_taken`, and
+`normalizeDirection`, so the CLI's bare-direction shorthand doesn't keep its
+own copy of the direction vocabulary); no rule, refusal text, or content
+changed. `test/cli.test.js` covers the parser and the REPL loop end-to-end
+against injected streams. Deliberately out of scope: `src/bridge.js` and the
+JSON-lines machine protocol remain T-006's.
+Orchestration: graphify=none — no `graphify-out/graph.json` in this repo (checked repo root); orientation came from PRD.md, TASKS.md, `src/engine.js`, `src/cli.js`, the authored CSVs a · attempts=1/4.
 
 ### T-006 · Machine bridge (JSON-lines) — `status: TODO` · `coder: opus` · `after: T-004`
 Build the fixed action table (movement + per-object verbs) and the
