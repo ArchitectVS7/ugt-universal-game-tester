@@ -328,7 +328,7 @@ Scope boundary held: no `ugt_bridge.gd`, no TCP, no
 animation or sound.
 Orchestration: graphify=none — no `graphify-out/graph.json` in the game dir or in the git root `_UGT Universal Game Tester/` (both checked); the task is also self-contained (one script · attempts=1/4.
 
-### T-007 · UGT TCP bridge — `status: TODO` · `coder: opus` · `after: T-004`
+### T-007 · UGT TCP bridge — `status: DONE` · `coder: opus` · `after: T-004`
 `ugt_bridge.gd` autoload: `--ugt-bridge` / `UGT_BRIDGE=1` gate, `TCPServer` on
 `127.0.0.1:8910` (or `--ugt-port`), newline-delimited JSON per PRD's exact
 protocol, one connection at a time. Buffer incoming bytes across `_process()`
@@ -338,6 +338,81 @@ one `step`, and gets back the PRD's exact state shape; a single JSON message
 written to the socket **split across two separate writes** still parses
 correctly; an out-of-range `action_id` is a no-op (state unchanged) rather
 than an error or a crash.
+
+**Delivered (2026-07-26):** Added `scripts/ugt_bridge.gd` (registered as the
+`UgtBridge` autoload in `project.godot` — the only edit to that file) plus
+`tests/test_ugt_bridge.gd`, 28 cases, suite **56 → 84 passed, 0 failed**.
+`board.gd` / `level.gd` / `main.gd` / `main.tscn` / `levels/` / the runner were
+not touched. **The bridge contains zero game rules**: it frames bytes, turns a
+wire `action_id` into an `int`, calls `board.try_move()`, and hands
+`board.get_state()` back verbatim — no direction vector, no wall/push check, no
+`boxes_on_target` arithmetic, and **deliberately no range check on
+`action_id`** (T-004 documents an unknown direction as a silent no-op precisely
+so the wire value passes straight through), with `terminated` READ OUT of
+`state["all_levels_solved"]` rather than recomputed. Four layers, each
+independently testable: (1) pure statics `bridge_enabled(args, env)` /
+`port_from_args(args)` so the gate is asserted without touching `OS` —
+`_ready()` reads `get_cmdline_args() + get_cmdline_user_args()` because the
+documented launch puts the flag after `--`, and both `--ugt-port=N` and
+`--ugt-port N` are accepted with a non-numeric/out-of-range value falling back
+to 8910 (`"abc".to_int()` is 0, which would otherwise become a silently wrong
+port); (2) a public frame-independent `poll()` (with `_process()` as a
+one-liner) so the socket cases run inside the synchronous runner — it accepts
+one peer at a time and hangs up on a second, reads available bytes *before*
+judging peer status so a write-then-close client still gets served, and keeps
+listening when a client vanishes without `close`; (3) `feed_bytes()`, the
+buffer that makes "one socket read is not one message" true in both directions
+(split message, two-messages-in-one-read, CRLF, 1 MiB runaway-buffer guard);
+(4) pure `handle_line()` returning `{response, close}` with the PRD's exact
+shapes — `reset` replies `{"state": …}` and nothing else, `step` replies exactly
+`state`/`terminated`/`truncated`/`info`, and `close` writes **no reply at all**
+because `../integration/PRD.md` defines its right-hand side as "Godot process
+exits cleanly", i.e. the client observes EOF. Two traps hardened against:
+`_action_id_from()` must never be `int(msg["action_id"])` — GDScript's
+`int("up")` is `0`, a legal UP move, so a garbage wire value would *move the
+player*; it maps missing/String/null/bool/Array/Dictionary/fractional to `-1`
+while passing whole floats (JSON has one number type) and out-of-**range**
+integers through untouched. And `JSON.parse_string()` was swapped for
+`JSON.new().parse()` because the static helper pushes an engine error on bad
+input, which would let a garbage client spray the game's stderr (T-001's Accept
+requires it stay clean — re-verified: `godot4 --headless --path . --quit` still
+exits 0 with **0 bytes on stderr**, and prints no bridge line at all when the
+flag is absent). Malformed JSON / unknown commands answer `{"error": …}` with
+**no `state` key**, so an error can never be mistaken for a state response;
+blank lines are ignored. `_ensure_board()` prefers the board the human front
+end is already playing (`get_tree().current_scene.board`) over a shadow copy —
+the "drive the real running game" discipline — and only builds its own when
+there is no scene (tests, `-s` runs); `_shutdown()` guards `get_tree().quit()`
+behind `is_inside_tree()` so a `close` test cannot kill the test runner. Tests
+use no `await`, no signal, no `get_tree()` and add no node to a tree (the
+runner is synchronous — an `await` would be scored green while still running);
+every pump loop is bounded by a 2 s wall-clock deadline that asserts on expiry
+rather than leaning on the runner's 60 s watchdog; sockets bind upward from
+**18910, never 8910**, so a stale bridge cannot fail the suite for the wrong
+reason; and `after_each()` frees every bridge and disconnects every client so a
+failing case cannot leak a listening socket. All three Accept criteria are
+pinned twice — at the pure layer and over a **real socket**: `reset`+`step`
+returning the PRD's exact 8-key state (asserted as a sorted key SET, not a
+subset), one message in **two separate `put_data` calls** with a load-bearing
+mid-way assertion that *nothing* has come back yet (proving it buffered rather
+than mis-parsed), and `action_id` 42 over the wire leaving the state
+byte-identical with no `error`, a still-`STATUS_CONNECTED` peer and a working
+next step (no framing desync). Verified not vacuous with three mutations, each
+reverted byte-identically (md5-checked): dropping the framing buffer gave
+`80 passed, 4 failed`; the naive `int(msg.get("action_id", -1))` coercion gave
+`83 passed, 1 failed`; hardcoding `"terminated": false` gave `83 passed, 1
+failed`. Also driven live end-to-end (not committed as a script — that is
+T-008): `godot4 --headless --path . -- --ugt-bridge --ugt-port=18910` printed
+the single stable readiness line `UGT bridge listening on 127.0.0.1:18910`,
+then a Python client replayed all three `solutions.json` sequences over the
+socket to `all_levels_solved: true` / `terminated: true` at `moves_taken: 73`,
+and `{"command":"close"}` exited the process **0 with empty stderr**;
+`UGT_BRIDGE=1 godot4 --headless --path .` (no flag) came up on 8910
+identically. Gate green (editor pass exit 0, suite exit 0, stderr 0 bytes),
+`tools/check_runner_reports_failure.sh` still exits 0 with a clean tree after.
+Scope boundary: no `tools/tcp_smoke_check.py`, no UGT-side Python adapter or
+ladder scripts (T-008 / the integration side), no reset key binding and no HUD.
+Orchestration: graphify=none — no `graphify-out/graph.json` in the game dir (`examples/sokoban/game/`) or the git root (`_UGT Universal Game Tester/`); both checked. · attempts=1/4.
 
 ### T-008 · End-to-end wire check (`tools/tcp_smoke_check.py`) — `status: TODO` · `coder: opus` · `after: T-005, T-007`
 Commit `tools/tcp_smoke_check.py` — a real, repo-tracked Python script (not a
