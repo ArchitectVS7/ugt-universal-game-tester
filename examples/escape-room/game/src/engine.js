@@ -12,7 +12,9 @@
  *
  * Layout: T-002's content loader (parseContent/loadContent) first, then T-004's
  * game state and command rules (createGame/getState/resolveObject/
- * executeCommand) below the marked divider.
+ * executeCommand) below the marked divider, alongside the derived-from-content
+ * helpers the front ends need (describeRoom/normalizeDirection for the CLI,
+ * buildActionTable for the bridge).
  */
 
 import { readFileSync } from 'node:fs';
@@ -567,6 +569,57 @@ export function describeRoom(game) {
   const here = roomObjects(game);
   if (here.length) lines.push(`You can see: ${here.map((o) => o.name).join(', ')}.`);
   return lines.join('\n');
+}
+
+/**
+ * Build the fixed discrete action table the machine front end indexes into
+ * (PRD § "Fixed discrete action space").
+ *
+ * Assignment is deterministic and comes straight from the content model:
+ *   0=north, 1=south, 2=east, 3=west, 4=look, 5=inventory
+ * then, for each row of `objects.csv` **in file order**, append in this
+ * per-object order: `take` (if `takeable`), `drop` (if `takeable`), `examine`
+ * (always), `use` (if `use_verb` is set). Same CSVs always produce the same
+ * ids, so the integration side's `ugt.config.yaml` action_space mapping stays
+ * valid without hand-tuning; an author reorders `objects.csv` to change ids.
+ *
+ * This lives in the engine, not in `bridge.js`, for the same reason
+ * `resolveObject`/`describeRoom`/`normalizeDirection` do: deciding *which verbs
+ * an object supports* is a reading of the content model, i.e. a rule. The
+ * bridge is left with nothing to do but index the returned array.
+ *
+ * The table is built once at startup and is stable for the whole run — it is
+ * never rebuilt on `reset`, because content cannot change mid-process. Entries
+ * (and the array) are frozen so a caller can't mutate the shared table.
+ *
+ * `verb` is always an engine verb: an object's `use_verb` column
+ * (`unlock`/`light`/`turn`/…) is authored *flavor*, never a command, so a
+ * usable object's entry is `use`. `name` is a human-readable label for the
+ * integration's config, not a rule the engine consults.
+ *
+ * @param {{rooms: Map, objects: Map, flags: Set<string>}} [content]
+ * @returns {ReadonlyArray<{verb: string, arg: string|null, name: string}>}
+ */
+export function buildActionTable(content = loadContent()) {
+  const entries = [];
+  const push = (verb, arg) => {
+    entries.push(Object.freeze({ verb, arg, name: arg === null ? verb : `${verb}_${arg}` }));
+  };
+
+  for (const dir of DIRECTIONS) push('go', dir);
+  push('look', null);
+  push('inventory', null);
+
+  for (const obj of content.objects.values()) {
+    if (obj.takeable) {
+      push('take', obj.id);
+      push('drop', obj.id);
+    }
+    push('examine', obj.id);
+    if (obj.useVerb !== null) push('use', obj.id);
+  }
+
+  return Object.freeze(entries);
 }
 
 function describeInventory(game) {

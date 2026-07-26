@@ -188,12 +188,73 @@ against injected streams. Deliberately out of scope: `src/bridge.js` and the
 JSON-lines machine protocol remain T-006's.
 Orchestration: graphify=none — no `graphify-out/graph.json` in this repo (checked repo root); orientation came from PRD.md, TASKS.md, `src/engine.js`, `src/cli.js`, the authored CSVs a · attempts=1/4.
 
-### T-006 · Machine bridge (JSON-lines) — `status: TODO` · `coder: opus` · `after: T-004`
+### T-006 · Machine bridge (JSON-lines) — `status: DONE` · `coder: opus` · `after: T-004`
 Build the fixed action table (movement + per-object verbs) and the
 stdin/stdout JSON-lines loop per PRD's exact protocol.
 **Accept:** piping the T-003 walkthrough (as `action_id`s) into `node
 src/bridge.js` via stdin produces `escaped: true` in the final state; an
 out-of-context action_id returns state unchanged (no-op) instead of erroring.
+
+**Delivered (2026-07-25):** `src/engine.js` gained one export,
+`buildActionTable(content)`, which materializes PRD's deterministic action
+space: `0=north, 1=south, 2=east, 3=west, 4=look, 5=inventory`, then per row of
+`objects.csv` **in file order** `take`/`drop` (if `takeable`), `examine`
+(always), `use` (if `use_verb` is set) — 41 actions for the current content,
+inside PRD's ≤ 60 budget. It lives in the engine, not the bridge, for the same
+reason `resolveObject`/`describeRoom`/`normalizeDirection` do: deciding *which
+verbs an object supports* is a reading of the content model, i.e. a rule, so
+the bridge is left with nothing to do but index a frozen array. An object's
+`use_verb` column (`unlock`/`light`/`turn`/`fit`/`read`) stays authored flavor
+— the table's verb is always the engine verb `use`.
+`src/bridge.js` is now the real JSON-lines loop: `handleCommand()` (pure
+dispatch, unit-testable) plus `runBridge()` (readline over stdin, one
+`JSON.stringify` line per command on stdout). `reset` returns PRD's one-key
+`{state}`; `step` returns exactly `{state, terminated, truncated, info}` with
+`terminated` mirroring the engine-owned latching `escaped`, `truncated` always
+`false` (no timers — PRD non-goals) and `info` exactly `{}`; `close` writes no
+line and ends the process; an unknown command answers `{"error": "Unknown
+command: X"}` so a client never blocks. The table is built **once at startup**
+and never rebuilt on `reset`, and the game is created up front so a `step`
+before any `reset` reads a fresh game instead of crashing. Blank lines are
+skipped and unparseable lines are reported on **stderr** — stdout is a protocol
+channel carrying nothing but JSON (no banner, no farewell, unlike the CLI).
+`UGT_SEED` is deliberately ignored: the game has no randomness.
+**No rule and no content are in the bridge:** invalid `action_id`s (out of
+range, negative, non-integer, wrong type, missing) are simply never dispatched
+and the unchanged state is returned, while an in-context refusal (`use` on
+something not held, `take` on something not here) is the engine's and — per
+T-004's pinned semantics — already consumes nothing, not even `moves_taken`.
+Both readings of Accept clause 2 are asserted by deep-equality against the
+prior state. **Two defects found and fixed while testing, both invisible to a
+test that sends EOF:** (1) a whole pipe-full of input arrives as one chunk and
+readline emits every buffered line from it before `rl.close()` takes effect, so
+lines after `close` were still being answered — fixed with an explicit `closed`
+latch; (2) more seriously, closing the readline interface does **not** end the
+process while the parent's stdin pipe stays open, which is exactly how UGT's
+`SubprocessAdapter` runs — its `close()` sends the command and then does a
+*blocking, un-timed* read, so every UGT run would have wedged forever. Fixed by
+releasing the input handle (`input.pause()` + `input.destroy?.()`) rather than
+`process.exit()`, which could truncate a response still queued on stdout;
+verified by driving the bridge from Python with the adapter's exact call
+pattern (close now returns EOF immediately, exit 0) and pinned by a regression
+test that deliberately never closes stdin — confirmed non-vacuous by mutating
+the fix out and watching it hang for its full 10s timeout. New
+`test/bridge.test.js` (20 tests; suite 65 → 85) derives every room id, object
+id, action id, table length and step count from the loaded CSVs and
+`content/walkthrough.json` — nothing about the world is hardcoded — and covers
+the table's ordering rule (rebuilt independently in the test), Accept clause 1
+via a **real spawned `node src/bridge.js`** fed the walkthrough as `action_id`s
+(asserting `escaped`/`terminated` true, arrival in the last room of
+`rooms.csv`, `moves_taken === walkthrough.length` so a silent mid-run refusal
+would show, and the exact response key lists), Accept clause 2, post-escape
+latching, byte-identical replay across two separate processes (PRD acceptance
+criterion 3), mid-session `reset`, and protocol robustness (close, garbage,
+blank lines, unknown command, step-before-reset). Also added `node
+src/bridge.js --actions`, a one-shot table dump so the integration side can
+generate `ugt.config.yaml`'s `action_space` without hand-tuning. Scope
+boundary: no CSV content, no `cli.js` and no engine rule changed — the only
+engine addition is the derived action table.
+Orchestration: graphify=none — no `graphify-out/graph.json` in the repo root (checked); orientation came from PRD.md, TASKS.md, `src/engine.js`, `src/cli.js`, the authored CSVs, and UG · attempts=1/4.
 
 ---
 
