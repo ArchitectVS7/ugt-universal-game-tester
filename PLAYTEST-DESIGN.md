@@ -18,8 +18,10 @@
 > a written, cited disposition before a batch is worth running.
 >
 > **And run that audit on a LOCAL model (§B P12).** The tier is staged: `--provider ollama` for a 30-action
-> smoke test (up to 100) where the strategy guide and prompting get iterated for free, then Anthropic (Haiku
-> by default) for the run that actually produces numbers. **The local stage proves the CHANNEL, the paid stage
+> **channel check** (up to 100) where the strategy guide and prompting get iterated for free, then Anthropic
+> (Haiku by default) for the run that actually produces numbers. *Call it a channel check, not a "smoke test"
+> — that name already belongs to two other things (`ugt smoke-test`, and ladder rung 2), and they prove
+> nothing this stage proves. See §B P12's disambiguation table.* **The local stage proves the CHANNEL, the paid stage
 > measures the GAME** — do not mix them up, and do not push local past ~100 actions, where its decisions
 > degrade below Haiku's and the run buys degraded play rather than more evidence.
 

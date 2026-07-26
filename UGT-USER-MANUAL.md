@@ -63,6 +63,7 @@ fail-closed gate scripts rather than the bare CLI commands — five rungs, each 
 |---|---|---|---|
 | **Spike** | `spike_<game>.py` | The raw protocol round-trips headlessly (create/auth → act → read state back) | Every raw-protocol check passes; no protocol quirk left unresolved before writing the adapter |
 | **Smoke** | `smoke_<game>_adapter.py` | The same round-trip works through UGT's `BaseAdapter` contract | Same checks pass via `connect()`/`reset()`/`step()`/`close()`, not the raw protocol directly |
+| | | *⚠️ Not the same as `ugt smoke-test` (§7, a CLI wiring check) and not the same as the LLM tier's local **channel check** (`LESSONS.md` §B P12). Three things, one word — always name the rung.* | |
 | **R1 — playability** | `verify_round1.py` | One scripted full loop of the core game, invariants checked after every command | Every invariant holds across the whole loop; the loop reaches a real, meaningful state change (not a no-op); same-seed reproducible |
 | **R2 — full spine** | `verify_round2.py` | Every major mode/system driven to a real outcome (e.g. an actual win), still under invariants | Every mode reaches a genuine terminal outcome under the same invariants; the check count (denominator) is disclosed honestly — no vacuous passes, none silently narrowed or widened |
 | **R3 — invariant-fuzzer** | `verify_round3.py` | Random/heuristic walks (`ugt/core/invariant_fuzzer.py`) asserting the SAME invariants after every step, across multiple seeded episodes | Zero invariant violations/crashes across every episode and step; every action in the vocabulary exercised at least once; a same-seed replay is byte-identical (determinism) |
@@ -682,7 +683,7 @@ ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md \
   --provider ollama --model gemma4:26b --max-actions 30
 ```
 
-Drive a few basic game actions first, then a **30-action smoke test** (up to 100 if the loop is long). This is where you write and rewrite the strategy guide and the prompting *for this specific game*: run → read the logged `reasoning` → fix the guide → run again. Keep going until the pilot cleanly processes the basic game loop. Work the whole §B audit here — P1–P8 are all findable for free, because they are defects in what the pilot can **see**, not in how well it thinks.
+Drive a few basic game actions first, then a **30-action channel check** (up to 100 if the loop is long) — *called a "channel check" and not a "smoke test" on purpose: that word already names `ugt smoke-test` (§7) and ladder rung 2, neither of which proves anything this stage proves.* This is where you write and rewrite the strategy guide and the prompting *for this specific game*: run → read the logged `reasoning` → fix the guide → run again. Keep going until the pilot cleanly processes the basic game loop. Work the whole §B audit here — P1–P8 are all findable for free, because they are defects in what the pilot can **see**, not in how well it thinks.
 
 **Stop at ~100 actions.** Past roughly 200 local calls the run is not merely slow — the decisions get measurably worse than Haiku's. **Bad decisions do not equate to good tests.** A long local run buys degraded play, not more evidence, and any balance number read off it is noise. Local proves the *channel*; never quote it as a result.
 

@@ -179,4 +179,90 @@ Ran it against the card game as a second opinion and it immediately flagged thre
 
 The tests are getting better because the games are getting tested. I'd rather ship one genuinely strong UGT off the back of three small honest games than a big one that's never been argued with.
 
+## Getting ready to let an LLM play it
+
+The next tier up is the one that answers "is this game any *good*" rather than "does it crash". You point a language model at the running game, give it a briefing, and let it play. The rule we've settled on is that you do this in two stages: first on a model running locally on my own machine, which is free, and only then on a paid one. The local stage isn't measuring the game at all — it's proving the wiring. The paid stage is the only one allowed to produce a number anyone quotes.
+
+That distinction sounds pedantic until you notice how the failure works. A run can come back clean — thirty actions, no crashes, no broken rules, a confident-looking result — while the model was playing half-blind the whole time, because something in the plumbing quietly dropped information it needed. Nothing in the output tells you. So there's a checklist, twelve items, and you're supposed to work through every one and write down what you found before spending anything. Two long runs on another game got thrown away for skipping it.
+
+So we did the checklist. Four things were wrong.
+
+**The briefing was more than twice as long as the space allotted to it.** There's a character budget for the strategy guide, it defaults to 2,000, and the guide is 5,649. The guide gets cut from the *end*, and the end is where all the actual advice lives — the front half is just "here are the seven moves". So the model would have received the rules of the game and none of the skill. It doesn't warn you; it just truncates. Fixed, and now there's a check that refuses to start the run if the guide ever outgrows its budget again.
+
+**The model couldn't see the battle log.** This is the one I'd have never guessed. If you play Dice Duel in a browser you get a running commentary down the side — "your volley: 4 hits against 1 blocked, the enemy loses 2 strength". That's where the game tells you whether your last choice worked. The tester was getting the numbers on the two health bars and nothing else. It could watch the enemy's strength drop and had no idea why. There's a hook for exactly this, a function the page can expose to hand its text output to the tester, and we'd simply never written it — so it returned an empty string, forever, silently. Now it returns the same dispatches a human reads, and nothing more (there's a test making sure it doesn't leak the raw dice rolls, which a player doesn't see either).
+
+**The briefing had a wrong fact in it and said nothing about the opponent.** It described the bonus-dice field as what you're getting *this* round when it's actually a report of the round that just finished. Off by one, in the direction that makes you misplan. And the guide never mentioned the enemy at all, which was fine when the model couldn't observe the enemy anyway, and became a gap the moment it could. The enemy is a simple thing — it only reacts to its own health, getting more defensive as it weakens — so now the guide says that. Not the exact formula, deliberately: hand a model the opponent's source code and you're measuring whether it can exploit a known bot, not whether the game is good.
+
+**And the tester lied to it.** This is my favourite one. There's a guard rail in UGT that stops a model getting stuck repeating one action forever — it warns, then hard-blocks. Sensible. But in this game repeating yourself is often the *right move*; the guide literally says the balanced allocation is usually correct, so playing it six rounds running is good play, not a loop. So we set the ceiling high enough to allow a whole match on one allocation. The warning text, though, was hardcoded from back when the ceiling was always three, and it says — in capitals — that another repeat "will be REJECTED, this is a hard rule, not a suggestion."
+
+It wasn't. Nothing was ever going to be rejected. But the model believed it, because why wouldn't it, and wrote this at step 15: *"I cannot use a3_d3 because I have used it 3 times in a row, which would be rejected."* Then it switched to something else. The counter for how many times anything actually got blocked that run reads zero.
+
+So the tester invented a rule and the player obeyed it, and the thing we were trying to measure — does this model choose good allocations — got quietly steered by a sentence in our own prompt. Fixed it so the hard warning only appears when it's actually true. Ran it again: the false beliefs went from two to zero, and the longest run of one allocation went from three to seven. It stopped flinching.
+
+The general shape of that one is worth keeping. **Everything in the prompt is under test, not just the guide I wrote.** The warnings, the framing, the boilerplate — the model reads all of it and reasons from all of it, and it's written once in the framework against whatever the default was that day.
+
+### How it actually played
+
+Two runs of thirty actions each on a local Gemma model. Two complete battles per run, both won, no rule violations across sixty actions.
+
+The way you check whether it was really *playing* rather than pressing buttons is to read what it said it was thinking. It named the reinforcement round and what it does. It tracked its lead and talked about winning on points at the cap rather than racing for the kill, which is exactly the thing the D18 rebalance changed and exactly what the old briefing got wrong. It quoted the guide's own win-rate figure back at me. And at one point it worked out something nobody told it: *"the enemy's behavior is deterministic and they attack aggressively when at full strength."* That's it reading the dispatch log we'd just wired up.
+
+It also surfaced something about the game itself. Three rounds in a row where the only thing that changed was the round counter — a balanced player against a wounded, turtling enemy, both bouncing off each other, nothing happening. That's a real stall and the game does it. Whether it's bad pacing or fine is a question for the paid run, but I only saw it because we'd configured the stall detector to ignore the clock. Left at its default it could never have fired at all, since the round number ticks every turn regardless.
+
+### And the one that would have wasted real money
+
+Every battle in a run was the same battle.
+
+When an episode ends the tester resets the game, the reset takes no arguments, and the game's reset defaults to replaying the seed it already had. So battle two is battle one again. Ten of the first twelve moves-and-outcomes were identical between them, which is how I know rather than how I guessed.
+
+That's harmless for the local stage, which never produces a number. It's fatal for the paid one. You'd run eight battles, get a report saying eight, and have a sample of one — and nothing anywhere would look wrong.
+
+Four problems found, three fixed on the spot, and the only thing spent was about eight minutes of my laptop's time.
+
+## Seeds, and why the obvious measurement was the wrong one
+
+The seed problem turned out to be the interesting one, because fixing the plumbing was easy and deciding *what to do with it* wasn't.
+
+Two things are true at once. Running one seed over and over lets you verify a specific set of circumstances, which is genuinely what you want first — you're validating the loop, not the game. But you can't balance anything that way, because you're only ever watching one roll of the dice. So you need more seeds. And since I'm paying per action, "more" has to mean something between three and ten, not a thousand.
+
+That framing is right, and it led somewhere I didn't expect.
+
+### Ask the engine before you ask the model
+
+Before choosing anything I had Claude play all seven fixed strategies across 200 seeds, straight off the engine. Free, and it takes milliseconds. Three numbers came back and they settled the whole design:
+
+- Within a single seed, the gap between the best and worst allocation is worth about **7.6 strength points**. Choosing well matters a lot.
+- Across seeds, the same fixed strategy's result swings far more than that. The seed matters more than the player.
+- **31 of the 200 seeds cannot be won by any strategy at all.** About one in six is simply unwinnable.
+
+That last one is the killer. If I run eight seeds, I should expect one or two of them to be unwinnable no matter how well the model plays. So a win rate over eight battles isn't measuring the pilot, it's mostly measuring which seeds I happened to pick. The confidence interval says the same thing more bluntly: **±34 points at eight battles.** You cannot tell a 40% player from a 75% player. Getting that down to ±12 would take about sixty battles, which is well past what I said I wanted to spend.
+
+So the honest conclusion is not "run more seeds". It's **the win rate is the wrong number**, and running more of them doesn't rescue it.
+
+### Score against the same seed, not against the average game
+
+The fix is to stop asking "did it win" and start asking "did it do better than a reasonable player would have done *on that exact seed*". Because the engine is deterministic, I can compute what every fixed strategy achieves on any seed for nothing, and score the model as the difference.
+
+That cancels out the seed's difficulty entirely. An unwinnable seed still tells you something, because the baseline is losing too — the question becomes whether the model lost by less. And it's worth **2.7× the battles**: the same measurement that needs 8 paired battles would need 22 unpaired ones. That's what makes a small budget viable.
+
+Landed on **eight seeds**, for three reasons that happened to agree: eight battles is about ninety actions, which fits just under the hundred-action ceiling we've set for free local runs, so the whole set costs nothing to rehearse; eight paired battles gives ±1.5 points against a 7.6-point spread, which is enough to answer the actual question; and eight is inside the range I'd set.
+
+**Picked by rule, not by taste.** `dice-s01` through `dice-s08`, chosen before running anything, never screened for being interesting. Screening would bias the set toward whatever I screened for — and the 200-seed sweep says a rule-based set discriminates fine anyway. The set that came out is a fair one without my help: mean baseline almost exactly neutral, and exactly one unwinnable seed, which is the natural rate.
+
+I'm also still printing the win rate, because people will want it. It just gets an interval wide enough to be honest about itself. First version of that got it wrong in a way I liked catching — the textbook formula reports **±0.0%** when you've won zero of one, which claims perfect certainty from the single loneliest data point there is. Swapped it for one that says [0%, 79%], which is the truth.
+
+### The staging, now four steps instead of two
+
+One seed locally, to check the loop runs. Eight seeds locally, to check the rotation actually rotates. Then one seed on the paid model, to look at the data quality before committing. Then the real thing.
+
+The two local stages are done and both are clean. The eight-seed run played **all eight distinct seeds across nine battles**, no rule violations in 96 actions, and produced a real scoreline — the model came out +1.65 against the reference baseline with an interval of ±1.91, which honestly reported as *not distinguishable from a reasonable player*. Which is the correct answer at nine battles on a weak local model, and exactly why that number isn't allowed to leave the room.
+
+### What I'd take to any other game
+
+Two things, and neither is about dice.
+
+**When a test costs money, the sample size gets set by the budget rather than by the statistics — so spend the design effort on removing variance you can compute for free, not on buying more samples.** Every game has some deterministic core you can sweep offline for nothing. Use it to build the baseline you score against, and a budget that looked hopeless becomes workable.
+
+**And a measurement that can't express doubt is worse than no measurement.** Both times I got that wrong today — the ±0.0% interval, and the tester telling the model a rule that didn't exist — the output looked more confident, not less. That's the direction these mistakes always fail in.
+
 More will land here as we keep going. The full technical write-up, including the findings that are only useful to Claude, stays in [`integration/README.md`](integration/README.md).

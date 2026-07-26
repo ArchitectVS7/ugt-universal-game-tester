@@ -200,6 +200,48 @@ A single sanity run establishes that the pilot can see and act. Balance verdicts
 swapped and pooled (a card game pooled a deck×seat design because turn order confounded the first batch),
 reported with a confidence interval, and compared against the game's own authoritative gate if it has one.
 
+**And before you count that batch: CHECK THAT THE EPISODES ARE DIFFERENT GAMES.** The playtest loop resets
+between episodes by calling the adapter's reset, and the documented soft-reset hook takes **no arguments** —
+so a game whose reset defaults to "replay the current seed" hands the tier N copies of one match. It is
+invisible: the run reports N episodes, the aggregate reports an N-sized denominator, and the sample size is 1.
+Found on a browser dice game, where two consecutive "different" battles shared **10 of their first 12
+(action, state-delta) pairs**. The cheap check is exactly that one — diff the per-step deltas of episode 1
+against episode 2; identical actions producing identical deltas means one seed, not two battles. This is not a
+property of that game: any integration following the parameterless soft-reset contract has it, so seed variety
+has to be arranged deliberately, per episode or per run, and *stated* in the report.
+*(→ `playtest.episode_seeds` + `BaseAdapter.reset_seeded`, which RAISES for adapters that cannot seed rather
+than ignoring the argument. A raise is necessary and not sufficient: a JS hook discards extra arguments in
+silence, so a browser adapter can forward a seed to a game that does nothing with it and nothing anywhere
+throws. The integration must additionally PROVE variety — reset on two seeds, assert the battles differ, and
+assert one seed reproduces itself — and that probe must itself be shown able to fail. It was: patching a live
+page so `__RESET_GAME__` drops its argument reproduces the original bug exactly, and the probe catches it.)*
+
+**Then choose the METRIC to fit the budget you can actually afford — a win rate usually does not.** The
+instinct is to report "the pilot won N of M". At the batch sizes an LLM tier can pay for, that number cannot
+answer anything. Worked on the dice game, all measured off its engine for free before a single paid call:
+
+- **Win rate is hopeless at this scale.** 95% CI is ±34 points at 8 battles and ±30 at 10 — it cannot separate
+  a 40% pilot from a 75% one. Getting to ±12 needs ~60 battles. Raising *n* is not the fix; it is the
+  admission that the metric is wrong.
+- **The variance is mostly the SEED, not the pilot.** Across 200 seeds a fixed policy's final-margin sd is
+  3.53; the same policy's margin *minus that seed's mean across policies* has sd 2.16. And **31 of 200 seeds
+  cannot be won by any policy at all**, so a small-*n* win rate largely reports which seeds you drew.
+- **So score PAIRED, against the same seed's own baseline.** Removing seed difficulty is worth **2.7× the
+  battles** ((3.53/2.16)²), which is what turns a budget of 8 battles from noise into a measurement: ±1.49
+  against a mean best-vs-worst policy spread of 7.6. The baseline costs nothing — a deterministic engine plays
+  every reference policy on those exact seeds in milliseconds (§D3, same instrument, different question).
+- **Do not screen seeds on outcome.** Pick them by a fixed rule, declared before the run. Screening for
+  "interesting" seeds biases the set toward whatever you screened for; the characterisation showed only
+  17/200 seeds fail to discriminate anyway, so the cheap honest option is also the good one. Keep the
+  unwinnable seeds — paired scoring handles them, because the baseline is negative there too.
+- **Report the underpowered metric anyway, with an interval that can express doubt.** Use Wilson, not the
+  normal approximation: the latter returns ±0.0 at 0/N and N/N, which asserts perfect certainty from the
+  data that has least of it. A first pass here printed "0/1 = 0.0%, 95% CI ±0.0" — a vacuous number (O2) in
+  the very line whose job was to show the metric could not be trusted.
+
+*The general form: when a tier's sample size is set by cost rather than by statistics, spend the design effort
+on removing variance you can compute for free, not on buying more samples.*
+
 ### P10 · The pilot needs MEMORY, not just state — a sliding window is not memory
 State tells the agent where it *is*; it does not tell it what it has already tried. Without a
 cumulative record, an agent re-runs actions it completed long ago, and the run looks busy while
@@ -271,12 +313,45 @@ in a 300-action run pushed `rngCounter`'s ratio to just under 80%, flipping `une
 routine single-digit reading to 238/238. Fix: compute the frequency/threshold over only the steps that could
 have produced a real delta, not over every step the loop consumed.
 
+**Corollary — the inverse failure is worse, and it is the one you will ship: a warning that asserts a
+constraint the loop does not enforce.** The ceiling above is a per-game knob, but the warning text that
+announces it was written against the default and hardcoded the claim: *"Picking it again will be REJECTED and
+forced to 'wait' — this is a hard rule, not a suggestion."* Any game that RAISES the threshold — because
+repeating an action is legitimate play there — then has its prompt inventing a rule. Models comply with
+invented rules. A browser dice game set the ceiling to 13 (a whole match on one allocation is a real strategy,
+and the `wait` override does not advance a round, so an override would burn budget *and* corrupt the
+measurement); at step 15 of 30 its pilot wrote *"I cannot use a3_d3 because I have used it 3 times in a row,
+which would be rejected"* and abandoned the allocation its own strategy guide calls correct. `forced_repeat_blocks`
+for that run was **0** — nothing was ever blocked. Fixing the text to emit the hard claim only when the next
+repeat would genuinely be rejected moved false-prohibition beliefs 2 → 0 and the pilot's longest same-action run
+3 → 7 on the very next run. This is P10's own correction resurfacing in a second code path: **report; do not
+instruct**, and if you do state a constraint, make it *true at the threshold this game is actually running*.
+
+**Every sentence in the prompt is under test, not just the guide.** Framework-owned prompt furniture — warnings,
+ledgers, objective lines — is content the pilot reasons from exactly like the guide, and it is written once,
+centrally, for a default that some game will change. Grep the prompt builders for load-bearing claims whenever a
+game overrides a knob one of them mentions.
+
 ### P12 · Validate the harness on a LOCAL model first — never spend an API call proving the plumbing
 **Stage the tier: local model proves the CHANNEL, paid model measures the GAME.** They are different jobs and
 the same run cannot do both.
 
+> ⚠️ **"Smoke test" means three different things in this repo. Say which one.** We have called stage 1 below
+> "the smoke test" in conversation for a long time, and it collides with two unrelated checks:
+>
+> | Name | What it is | What "it passed" means |
+> |---|---|---|
+> | `ugt smoke-test` | CLI subcommand, 5 random steps through `UniversalGameEnv` | the config/bridge wiring is alive |
+> | **Smoke**, ladder rung 2 (`smoke_<game>_adapter.py`) | the spike's round-trip re-run through `BaseAdapter` | the adapter contract holds against the real game |
+> | **Stage 1 / channel check** (below) | a short LOCAL-model playtest | the *pilot* can see and act — says nothing about correctness |
+>
+> They sit in different tiers and prove disjoint things, so "the smoke test passed" is not a reportable
+> sentence. This is M10 again in a different costume: there the name over-promised what one tier proved, here
+> one name covers three tiers. **Prefer "channel check" or "stage 1" for the local playtest**, and if you do
+> say "smoke", name the rung.
+
 **Stage 1 — local (`--provider ollama`, e.g. `gemma4:26b`). Free, so iterate hard.** Drive basic game actions,
-then a **30-action smoke test**, sometimes up to 100. This is where the strategy guide and the prompting get
+then a **30-action channel check**, sometimes up to 100. This is where the strategy guide and the prompting get
 written and rewritten *for that specific game* — the loop is edit-guide → re-run → read the reasoning → edit
 again. Iterate until the pilot cleanly processes the basic game loop. Everything §B asks for is cheaper to
 discover here, and P1–P8 are all findable on a local model because they are defects in what the pilot can SEE,
