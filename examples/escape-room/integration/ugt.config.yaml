@@ -81,3 +81,24 @@ action_space:
 
 evaluation:
   victory_key: "escaped"
+
+playtest:
+  # This game has NO randomness anywhere — one map, one solution, one ending, no
+  # lose state. So every episode is a replay of the same scenario, and that is
+  # correct rather than a bug: there is nothing to vary.
+  #
+  # Declaring it matters because "no seeds configured" used to mean two opposite
+  # things — this, or an author who forgot and is about to publish a win rate
+  # with an N-sized denominator over a 1-sized sample. UGT now refuses to guess,
+  # and the declaration is probed against the live game before a run starts.
+  #
+  # The consequence for this game: the LLM tier measures COMPETENCE (did the
+  # pilot escape, and in how many moves against the 26-move optimum), never a
+  # rate. A win rate over N replays of one puzzle has a sample size of 1 however
+  # large N is. See ugt/core/seeding.py.
+  seeding: deterministic
+  # `look` — always legal, always moves the state (it costs a move). The probe
+  # needs an action that does something from the opening position, or "two resets
+  # matched" would be vacuously true. Action 0 (`go_north`) would also work here;
+  # 4 is chosen because it can never be gated by content edits.
+  probe_action: 4

@@ -134,6 +134,17 @@ playtest:
   # scoring the baseline is negative there too and the seed still measures
   # judgement.
   #
+  # The game's RNG is seeded from state and `__RESET_GAME__(seed)` honours the
+  # argument, so episodes on different seeds are independent samples. Declared
+  # explicitly rather than left to be inferred from the list below: UGT probes
+  # this against the live page before every run, and a game that ACCEPTS a seed
+  # and silently ignores it (JavaScript drops extra arguments without a murmur)
+  # is exactly the failure that probe exists to catch — it happened here.
+  seeding: per_episode
+  # a3_d3 — a legal allocation that always resolves a round, so the probe's
+  # "these two seeds diverge" comparison is never vacuous.
+  probe_action: 3
+
   # CHANGING THIS LIST RE-BASELINES THE TIER (§B P8). Runs on different seed sets
   # are not poolable. Add seeds by extending the tail, never by renumbering.
   episode_seeds:

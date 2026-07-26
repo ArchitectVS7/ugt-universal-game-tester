@@ -55,3 +55,15 @@ action_space:
 
 evaluation:
   victory_key: "all_levels_solved"
+
+playtest:
+  # Sokoban has no randomness at all — three fixed levels, no generation, no
+  # hidden state. Every episode is the same three puzzles in the same order, so
+  # episodes are replays by design and the effective sample size is 1 however
+  # many are run. The LLM tier measures COMPETENCE here (solved / moves against
+  # the committed 73-move solution), never a rate. See ugt/core/seeding.py.
+  seeding: deterministic
+  # `left` — the first move of level 1's committed solution, so the probe is
+  # guaranteed to change the state rather than bounce off a wall (an inert probe
+  # would make "two resets matched" vacuously true, and UGT refuses that).
+  probe_action: 2

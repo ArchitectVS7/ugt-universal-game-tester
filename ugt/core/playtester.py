@@ -20,6 +20,8 @@ import time
 import urllib.request
 import urllib.error
 
+from ugt.core import seeding
+
 # LLMAction JSON schema — returned by the model (tool_use for Anthropic, JSON mode for Ollama)
 LLM_ACTION_SCHEMA = {
     "type": "object",
@@ -289,7 +291,13 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
     # Seeds rotate rather than being consumed, so the list length and the episode
     # count are independent — 8 seeds over 16 episodes is two passes, which is a
     # legitimate paired design, not an error.
-    episode_seeds = [s for s in (playtest_cfg.get("episode_seeds") or [])]
+    #
+    # Since 2026-07-26 the MODE is declared rather than inferred from whether a
+    # seed list happens to be present — `ugt/core/seeding.py` explains why the
+    # absent case was ambiguous — and the declaration is probed against the live
+    # game before the run starts, so a game that silently ignores its seed is
+    # caught here instead of in a batch nobody can trust afterwards.
+    seeding_mode, episode_seeds = seeding.resolve(playtest_cfg)
     _episode_index = 0  # 0-based; also the rotation cursor
 
     def _current_seed():
@@ -308,6 +316,22 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         if not episode_seeds:
             return adapter.reset()
         return adapter.reset_seeded(_current_seed())
+
+    # Prove the declaration before spending anything. This runs for EVERY game,
+    # not just the ones whose author remembered to write a probe — the browser
+    # dice game had to carry its own, which is how the check stayed a per-game
+    # habit instead of a guarantee.
+    _probe_action = playtest_cfg.get("probe_action", 0)
+    try:
+        print(f"[*] {seeding.probe(adapter, seeding_mode, episode_seeds, _probe_action)}")
+    except seeding.SeedingError as e:
+        print(f"[-] Seeding declaration failed against the live game:\n    {e}")
+        raise
+    except NotImplementedError as e:
+        # BaseAdapter.reset_seeded()'s refusal, surfaced with the config context
+        # that makes it actionable.
+        print(f"[-] seeding={seeding_mode!r} needs an adapter that can seed:\n    {e}")
+        raise
 
     # One record per episode the run actually finishes, so a batch can be scored
     # at all. Until now the outcome survived ONLY as a delta inside the action
@@ -881,6 +905,16 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         # How many DISTINCT seeds the run actually played. 1 with more than one
         # episode is the P9 trap firing: the episodes are the same match.
         "distinct_episode_seeds": len({e["seed"] for e in episodes if e["seed"] is not None}),
+        # The declared sample structure, and one sentence saying what the episode
+        # count is actually worth. A reader should never have to infer that from
+        # a seed column — "8 episodes" and "8 samples" are different claims, and
+        # for a deterministic game they are never the same one.
+        "seeding_mode": seeding_mode,
+        "sample_note": seeding.sample_note(
+            seeding_mode,
+            len(episodes),
+            len({e["seed"] for e in episodes if e["seed"] is not None}),
+        ),
     }
     for e in summary_paths:
         final = _resolve_path(current_state, e["path"])
