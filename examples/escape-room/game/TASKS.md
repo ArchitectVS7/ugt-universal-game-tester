@@ -72,7 +72,7 @@ Orchestration: graphify=none — no graphify-out/graph.json in this repo (checke
 
 ## M1 — Content authoring
 
-### T-003 · Author the 10-room adventure — `status: TODO` · `coder: opus` · `after: T-002`
+### T-003 · Author the 10-room adventure — `status: DONE` · `coder: opus` · `after: T-002`
 Write the real `content/rooms.csv` (10 rooms) and `content/objects.csv`
 (≤ 12 objects) per PRD's scope: a linear-with-branches flag chain ending at
 `R10`. Also produce `content/walkthrough.json`: a flat array of
@@ -86,6 +86,26 @@ confirm it reaches `R10` while satisfying every `entry_requires_flag` and
 `use_requires_flag` it crosses. This task's Accept is a structural/traced
 check, not an executed one — the engine to actually *run* the sequence
 doesn't exist until T-004, which re-verifies the same fixture by running it.
+
+**Delivered (2026-07-25):** Wrote the real `content/rooms.csv` (a 10-room
+prison-escape map, R01→R10, linear-with-branches: Watch Post and Flooded
+Cistern are dead-end side rooms off the main spine) and `content/objects.csv`
+(11 objects: a map-scrap/rusted-helmet/stone-mural red herring in each of
+three rooms, plus the real chain — iron key opens the banded door, lantern +
+oil flask lets you read the vented steam pipe, valve wheel vents it, bronze
+cog + ledger yield the hour to set the gallery clock, and the resulting
+skeleton key opens the outer gate into R10). Added `content/walkthrough.json`
+(a 27-step verb/object fixture tracing start to escape) and
+`test/content.test.js`, a new executed check (not just hand-traced) that
+loads the real CSVs through the T-002 loader and walks the fixture against
+the exits/flags/takeable/use_requires_flag/use_consumes the CSV columns
+declare, confirming 0 validation errors, exactly 10 rooms, ≤ 12 objects, the
+action-space budget, and that the walkthrough reaches R10 satisfying every
+gate it crosses. Scope boundary: this is still a structural/simulated trace
+against the CSV's declared rules, not a run through `executeCommand()` — no
+engine logic was added or changed, and T-004 remains the task that re-verifies
+this same fixture by actually executing it.
+Orchestration: graphify=none — no `graphify-out/graph.json` in the repo (checked repo root); orientation came from PRD.md, TASKS.md, and the T-002 loader in `src/engine.js`. · attempts=1/4.
 
 ## M2 — Engine
 
