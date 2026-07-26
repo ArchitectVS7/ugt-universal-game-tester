@@ -6,7 +6,7 @@ demonstrate UGT driving an engine UGT has no native adapter for.
 
 **Why this example exists:** Demonstrate `/tasklist` + `/orchestrate` building
 a small Godot game from a PRD, then a **hand-written, engine-first UGT
-adapter** (the same pattern `examples/harness-game` uses for a Python engine)
+adapter** (the `engine.type: custom` pattern, for engines no built-in adapter fits)
 driving it over a local TCP socket — because Godot's frame-based main loop
 doesn't fit a blocking-stdio subprocess bridge the way Python/Node do.
 

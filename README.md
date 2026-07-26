@@ -27,9 +27,10 @@ These three tiers are run in a standardized sequence per game integration — th
 R2 full content spine → R3 exploit-hunter + determinism. Each integration lives in its own
 `integrations/<game>/` directory (a self-contained set of ladder scripts + a findings log).
 
-**`examples/harness-game/` is a complete, dependency-free worked example of that whole ladder** — a tiny
-deterministic game driven engine-first over a JSON-lines harness, with all five rungs runnable in one
-command. Start there to see the methodology end to end.
+**`examples/sokoban/` is a complete worked example of that whole ladder** — a small deterministic Godot
+game driven engine-first over a TCP socket, with all five rungs runnable in one command. Its sibling
+`examples/dice/` and `examples/escape-room/` show the same methodology through the two built-in engines
+(browser and simulation). Start there to see it end to end.
 
 ## Install
 
@@ -89,13 +90,18 @@ web game through `window.__GET_STATE__`/`__SEND_ACTION__` hooks the game itself 
 (JSON over stdin/stdout to a subprocess harness the game exposes). Games that fit neither declare
 `engine.type: custom` and supply their own purpose-built adapter (plain HTTP, a TCP socket, a JSON-lines
 subprocess harness), constructed directly by that integration's trial-ladder scripts rather than
-dispatched by `env.py` — see `examples/harness-game/`. Every adapter is transport-only — it maps declared action ids to real UI/API
+dispatched by `env.py` — see `examples/sokoban/integration/`. Every adapter is transport-only — it maps declared action ids to real UI/API
 calls and never reimplements game logic; an action not yet wired raises `NotImplementedError` rather than
 fabricating behavior.
 
 ## Where to go next
 
-- **`examples/harness-game/`** — the fastest start: a complete, dependency-free worked example of the full trial ladder. Run all five rungs in one command. R3 (the exploit-hunter) is qualitatively different from R1: it runs random and heuristic walks and re-checks invariants after *every* step, catching states no scripted test can enumerate; the same-seed replay then certifies the engine is deterministic. Start here.
+- **`examples/`** — three worked examples, each pairing a game built from a PRD with the UGT integration that
+  tests it, one per transport: `dice` (React → `browser`), `escape-room` (Node → `simulation`), and
+  `sokoban` (Godot → a hand-written `custom` adapter). **`sokoban/integration/` is the fastest way to see the
+  full trial ladder** — all five rungs runnable in one command. R3 (the exploit-hunter) is qualitatively
+  different from R1: it runs random walks and re-checks invariants after *every* step, catching states no
+  scripted test can enumerate; the same-seed replay then certifies the engine is deterministic. Start here.
 - **`PLAN-FORWARD.md`** — current direction: what's been proven, what's next, links to full history.
 - **`LESSONS.md`** — the canonical cross-game lessons registry: core methodology, the mandatory LLM-playtest
   pre-flight information-integrity audit (read before any balance batch), and operational discipline. Read

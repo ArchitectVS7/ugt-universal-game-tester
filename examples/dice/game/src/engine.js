@@ -7,7 +7,8 @@
  * answer for the same arguments. `rollCounter` is owned by the caller (it
  * lives in game state, per PRD "RNG discipline") and advances once per die.
  *
- * Mirrors `examples/harness-game/engine.py`'s `rng_counter` pattern; JS has no
+ * Uses the RNG-in-state `rng_counter` pattern (the same discipline
+ * `examples/sokoban` follows in GDScript); JS has no
  * synchronous stdlib hash, so the digest below is implemented inline rather
  * than pulling in a dependency.
  *

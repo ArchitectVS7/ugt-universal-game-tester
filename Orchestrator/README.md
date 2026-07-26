@@ -340,8 +340,9 @@ heuristic walks loose on the game while re-checking your invariants after *every
 step, hunting for the state the scripted tests never reach (robustness). **Tier 3 —
 `ugt playtest`** puts an LLM in the player's seat to judge balance, pacing, and
 strategy — the questions no assertion can answer. [`../UGT-USER-MANUAL.md`](../UGT-USER-MANUAL.md)
-is the onboarding path in depth; [`../examples/harness-game/`](../examples/harness-game/)
-is the fastest thing you can actually run.
+is the onboarding path in depth; [`../examples/`](../examples/) holds three worked
+examples — each a game built from a PRD by this Orchestrator, paired with the UGT
+integration that tests it — and is the fastest thing you can actually run.
 
 There is one wiring step in between. The Orchestrator writes code; UGT drives it;
 neither knows the other exists, so your game needs an **adapter**. Pick a bridge via
@@ -349,9 +350,11 @@ neither knows the other exists, so your game needs an **adapter**. Pick a bridge
 over stdin/stdout), `browser` (a headless page exposing `window.__GET_STATE__` /
 `window.__SEND_ACTION__`), or `custom` (anything else — you write a small
 transport-only `BaseAdapter` subclass and your ladder scripts construct it
-directly). The manual's **trial-ladder** section covers the
-methodology; `examples/harness-game/` shows the subprocess harness end-to-end and is
-the fastest orientation available.
+directly). The manual's **trial-ladder** section covers the methodology; there is a
+worked example of each of the three bridges — `examples/escape-room/` (simulation),
+`examples/dice/` (browser) and `examples/sokoban/` (custom) — and
+`examples/sokoban/integration/` is the fastest orientation available, since it runs
+the full five-rung ladder in one command.
 
 The suggested sequence:
 

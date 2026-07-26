@@ -50,8 +50,8 @@ shows, applied to a fresh game instead of a documentation stub.
 - **RNG discipline (required for UGT R3 determinism):** dice rolls must be a
   pure function of `(seed, roll_counter)`, with `roll_counter` stored in game
   state and incremented once per die rolled — never call the platform RNG
-  (`Math.random`) directly. Mirror `examples/harness-game/engine.py`'s
-  `rng_counter` pattern.
+  (`Math.random`) directly. This RNG-in-state pattern is what makes a same-seed
+  replay byte-identical, which R3 asserts.
 - **AI opponent:** deterministic heuristic — allocate defense dice
   proportional to `1 - own_FS/20` (rounded to nearest preset), rest to attack.
   No hidden state, no RNG in the decision.

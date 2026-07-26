@@ -2,8 +2,8 @@
 
 Drives `../game` (Godot 4, headless) through a **hand-written, engine-first
 adapter over a local TCP socket** — the same "transport-only adapter,
-constructed directly by the ladder scripts" pattern `examples/harness-game`
-uses for a Python engine. This is the example for `engine.type: custom`: UGT's
+constructed directly by the ladder scripts" pattern that `engine.type: custom`
+names. This is the reference example for that type: UGT's
 built-in engines don't fit a Godot game, so you write a small `BaseAdapter`
 subclass and the framework's ladder, invariants, and exploit-hunter all work
 unchanged.

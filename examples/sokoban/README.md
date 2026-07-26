@@ -2,7 +2,7 @@
 
 A 4-direction push-crate puzzle, built in Godot, driven through a
 **hand-written, engine-first TCP adapter** (the same pattern
-`../harness-game` uses — Godot has no built-in UGT engine type). **Status:
+UGT's built-in engines cannot cover — Godot has no built-in engine type). **Status:
 PRD + TASKS.md only — not yet built.**
 
 **Prerequisite:** a local `godot4` CLI binary (Godot 4.x) on `PATH`. Unlike
@@ -13,7 +13,7 @@ in both `game/TASKS.md` and `integration/TASKS.md` gates on it.
   Godot game, including the level format and the `--ugt-bridge` TCP protocol.
 - [`integration/PRD.md`](integration/PRD.md) + [`integration/TASKS.md`](integration/TASKS.md) —
   the adapter, feature map, and trial ladder (`spike`/`smoke`/
-  `verify_round1-3`, same shape as `../harness-game`).
+  `verify_round1-3` — the canonical trial-ladder shape).
 
 ## Build order
 

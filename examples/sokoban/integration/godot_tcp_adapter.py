@@ -1,8 +1,8 @@
 """GodotTcpAdapter — transport only, for a headless Godot game over a TCP socket.
 
 Constructed directly by this integration's ladder scripts, NOT dispatched by
-`ugt/core/env.py` (its `ugt.config.yaml` declares `engine.type: custom`) — the
-same precedent `examples/harness-game` sets for a Python engine.
+`ugt/core/env.py` (its `ugt.config.yaml` declares `engine.type: custom`) — which
+is the contract for engines no built-in adapter fits.
 
 **This file contains no game rules.** It opens a socket, writes a JSON line,
 reads a JSON line, and hands back what the game said. Whether a move is legal,

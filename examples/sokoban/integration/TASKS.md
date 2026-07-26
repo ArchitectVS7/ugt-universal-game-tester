@@ -19,14 +19,14 @@ introduced so far all exit 0.
 - No push/collision/win logic here — every rule lives in
   `../game/scripts/board.gd`. This folder only transports state and actions.
 - `GodotTcpAdapter` is constructed directly by each ladder script, per
-  `examples/harness-game`'s precedent — it is not dispatched by
+  the `engine.type: custom` contract — it is not dispatched by
   `ugt/core/env.py` (its `ugt.config.yaml` declares `engine.type: custom`).
 - **Every ladder script owns the bridge's lifecycle** — it spawns
   `godot4 --headless --path ../game -- --ugt-bridge --ugt-port=<port>` itself,
   waits for the port to accept a connection, and tears the process down on
   exit (including on failure). Attaching to an already-running bridge is a
   fallback for interactive debugging, not the normal path. This mirrors
-  `examples/harness-game`, whose adapter spawns `harness.py` rather than
+  the way a subprocess adapter spawns its own harness rather than
   requiring a human to start it, and it is what `PRD.md` specifies for
   `connect()`. No ladder script may require a manual pre-step: a rung that
   only passes when someone started a server by hand cannot run unattended,
@@ -68,7 +68,7 @@ through the adapter and exits 0.
 ### T-003 · Invariants module — `status: DONE` · `coder: opus` · `after: T-002`
 `invariants.py`: `moves_taken` monotonic, `player_x`/`player_y` in-bounds,
 `boxes_on_target ≤ boxes_total`, reusable by R1/R2 and R3 (mirror
-`examples/harness-game/invariants.py`'s `InvariantSuite` shape).
+`ugt.core.trial.InvariantSuite`).
 **Accept:** unit-callable; asserts pass against a known-good state sequence
 and fail against a deliberately corrupted one (test fixture).
 

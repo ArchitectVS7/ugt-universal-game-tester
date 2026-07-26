@@ -1,9 +1,8 @@
 # UGT integration config — Sokoban Mini
 #
 # DOCUMENTARY. `engine.type: custom` means env.py has no adapter to dispatch:
-# the ladder scripts import `GodotTcpAdapter` and construct it themselves, the
-# same precedent examples/harness-game sets. So `ugt verify` / `ugt playtest`
-# do not drive this game — the rungs below do:
+# the ladder scripts import `GodotTcpAdapter` and construct it themselves. So
+# `ugt verify` / `ugt playtest` do not drive this game — the rungs below do:
 #
 #   python3 spike_sokoban.py           # raw TCP contract
 #   python3 smoke_sokoban_adapter.py   # BaseAdapter contract

@@ -36,7 +36,7 @@ class UgtConfig:
         # scripts import it and call BaseAdapter methods) rather than being dispatched by
         # env.py. Such a config is documentary — it carries observation/action mappings and
         # per-game engine settings, but there is no entrypoint for env.py to spawn, so
-        # engine.entry is not required. See examples/harness-game for the pattern.
+        # engine.entry is not required. See examples/sokoban/integration for the pattern.
         if engine["type"] != "custom" and "entry" not in engine:
             raise ConfigError("Missing required field: engine.entry")
 

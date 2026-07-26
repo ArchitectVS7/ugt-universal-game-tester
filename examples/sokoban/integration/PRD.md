@@ -3,7 +3,7 @@
 **One-liner:** Drive `../game` (Godot, headless) through a **hand-written,
 engine-first adapter** over a local TCP socket — the same "purpose-built
 transport-only adapter, constructed directly by the ladder scripts" pattern
-`examples/harness-game` uses, because Godot has no built-in UGT engine type.
+`engine.type: custom` names, because Godot has no built-in UGT engine type.
 
 ## Why a hand-written adapter
 
@@ -19,12 +19,12 @@ Neither fits a Godot game:
   idiom (the same reason the community's Godot-RL-Agents plugin uses TCP,
   not stdio).
 
-So this integration follows `examples/harness-game`'s precedent exactly: a
+So this integration is the reference for `engine.type: custom`: a
 small `BaseAdapter` subclass, constructed directly by the ladder scripts,
 **not** dispatched by `env.py`. Its `ugt.config.yaml` therefore declares
 `engine.type: custom` — the type reserved for exactly this case (documentary
 config, no entrypoint for `env.py` to spawn) — same caveat as
-`harness-game`'s.
+any `custom` integration's.
 
 ## Adapter: `godot_tcp_adapter.py`
 
@@ -62,7 +62,7 @@ all_levels_solved   bool
 
 ## Feature map coverage plan
 
-(Driven directly by the ladder scripts, same as `harness-game` — the `ugt
+(Driven directly by the ladder scripts — the `ugt
 verify` CLI only drives adapters `env.py` dispatches, so these assertions are
 asserted in-harness by the ladder rather than through `verifier.py`.)
 
@@ -75,7 +75,7 @@ asserted in-harness by the ladder rather than through `verifier.py`.)
 | F5 | `level_solved` becomes true exactly when `boxes_on_target == boxes_total` | drive a level to completion |
 | F6 | Solving level 3 sets `all_levels_solved: true` and `terminated: true` | complete all 3 levels in sequence |
 
-## Trial ladder plan (harness-game shape: spike → smoke → R1 → R2 → R3)
+## Trial ladder plan (spike → smoke → R1 → R2 → R3)
 
 - **Spike** — raw TCP round-trip: connect, `reset`, one `step`, `close`. No
   adapter class yet.
@@ -100,7 +100,7 @@ asserted in-harness by the ladder rather than through `verifier.py`.)
 
 ## Acceptance criteria
 
-- All 5 rungs pass (spike/smoke/R1/R2/R3), matching `examples/harness-game`'s
+- All 5 rungs pass (spike/smoke/R1/R2/R3), matching the ladder's
   PASS/FAIL ladder convention.
 - 0 invariant violations across R3's random walks, all 3 levels.
 - Same-seed replay is byte-identical.
