@@ -269,7 +269,7 @@ Orchestration: graphify=none — no `graphify-out/graph.json` in the game dir or
 
 ## M3 — Front ends
 
-### T-006 · Human input — `status: TODO` · `coder: sonnet` · `after: T-004`
+### T-006 · Human input — `status: DONE` · `coder: sonnet` · `after: T-004`
 Wire arrow keys / WASD to `try_move()`; snap sprite positions on move. Route
 key events through a single handler function (e.g.
 `Board._on_direction_input(dir)`) so it is callable directly.
@@ -280,6 +280,53 @@ covers the key→direction mapping table. Do **not** synthesize `InputEventKey`
 through the `Input` singleton — headless Godot's root window is 64x64 and
 synthesized input does not land without resizing it twice. That is an
 environment quirk, not game logic, and it is not what this task is testing.
+
+**Delivered (2026-07-25):** Built the human front end in `scripts/main.gd` (the
+whole implementation — `board.gd`, `level.gd`, `levels/`, `main.tscn` and
+`project.godot` were not touched), plus `tests/test_human_input.gd` (9 cases,
+suite 47 → **56 passed, 0 failed**). Three pieces, none of them a rule: a
+`KEY_DIRECTIONS` table binding the 4 arrows + WASD to ids taken from
+`Board.Direction` (it never spells a number itself, so it cannot drift from the
+PRD's `0=up 1=down 2=left 3=right`), read through one pure
+`static func direction_for_key(keycode) -> int` returning `NO_DIRECTION` (-1)
+for an unbound key; the single handler `_on_direction_input(direction) -> bool`,
+which is nothing but `board.try_move(direction)` plus a view re-sync and
+returns `try_move()`'s own bool untouched; and `_unhandled_input()`, which only
+translates a keycode (physical first so WASD keeps its physical position on a
+non-QWERTY layout, `keycode` fallback for the arrows) and delegates. The
+handler takes an `int`, not an `InputEvent`, which is exactly what lets a test
+drive the real code path — **no `InputEventKey` is synthesized anywhere, no
+`Input.parse_input_event`, no window resizing, no `SceneTree` node adds**, per
+the task's explicit instruction. The view re-syncs unconditionally, including
+when the move returned false, because `board.gd` documents that a false return
+can still coincide with its lazy level advance. Sprite snapping is a pure
+`static func cell_to_position(cell) -> Vector2` (`cell * CELL_SIZE`, 32px);
+`build_view()` draws ColorRects only (no textures, so nothing to import and
+nothing to break headless) — a backdrop, a tile per wall, a centred pip per
+target, one node per box index-aligned with `board.boxes`, one for the player —
+and `_sync_view()` re-places the movable nodes on exactly `cell_to_position()`
+with no inset, rebuilding on a level advance. `_sync_view()` early-returns when
+no view exists, which is what keeps 8 of the 9 tests node-free; `_ready()` is
+the only place a node is created and never runs for a `Main.new()` outside the
+tree. A level-load failure `print()`s the returned `error_code`/`error_message`
+— never `push_error()`/`assert()`, so T-001's clean-stderr Accept still holds
+(re-verified: `godot4 --headless --path . --quit` exits 0 with **0 bytes on
+stderr** even though `_ready()` now loads levels and builds the view). Tests
+compare the two paths on a `[player, boxes, get_state()]` snapshot — positions
+*and* the PRD state dict — over all 4 directions on an open room where RIGHT is
+a real push, over three refused moves (wall-into, wall-behind-box push) so
+parity is pinned on no-ops too, after **every** step of a 6-move sequence, and
+across a lazy level advance; the key table is one `assert_eq` over all 8 keys
+via `direction_for_key()`. Verified not vacuous with three mutations, each
+reverted byte-identically: pointing `KEY_W` at `DOWN` gave `55 passed, 1
+failed`; making the handler return false without calling `try_move()` gave `52
+passed, 4 failed`; adding `+ 1` to `cell_to_position`'s x gave `55 passed, 1
+failed`. Gate green (editor pass exit 0, suite exit 0),
+`tools/check_runner_reports_failure.sh` still exits 0 with a clean tree after.
+Scope boundary held: no `ugt_bridge.gd`, no TCP, no
+`tools/tcp_smoke_check.py` (T-007/T-008), and no reset key binding, HUD, undo,
+animation or sound.
+Orchestration: graphify=none — no `graphify-out/graph.json` in the game dir or in the git root `_UGT Universal Game Tester/` (both checked); the task is also self-contained (one script · attempts=1/4.
 
 ### T-007 · UGT TCP bridge — `status: TODO` · `coder: opus` · `after: T-004`
 `ugt_bridge.gd` autoload: `--ugt-bridge` / `UGT_BRIDGE=1` gate, `TCPServer` on
