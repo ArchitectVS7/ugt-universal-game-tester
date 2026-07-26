@@ -53,7 +53,11 @@ const NEXT_TASK = {
   additionalProperties: false,
   properties: {
     id: { type: ['string', 'null'], description: 'e.g. "T-303", or null if no eligible task' },
-    title: { type: 'string' },
+    title: {
+      type: 'string',
+      description:
+        'the task\'s title ONLY — the text between "### T-NNN · " and the " — `status:" field on the heading line, e.g. "Seeded RNG + dice resolution". Never empty for a non-null id; it becomes the commit subject.',
+    },
     block: { type: 'string', description: 'the full task block, verbatim' },
     accept: { type: 'string', description: 'the **Accept:** acceptance criteria line(s)' },
     isUi: { type: 'boolean', description: 'true if this task is UI work (its milestone is a UI milestone, or its body/coder notes say it builds UI)' },
@@ -79,7 +83,10 @@ const NEXT_TASK = {
       description: 'the verbatim heading line (### T-NNN ...) for the chosen task, copied exactly from TASKS.md',
     },
   },
-  required: ['id'],
+  // `title` is required because it becomes the commit subject. Requiring the key
+  // is not a guarantee (a model can still return ""), so the `taskTitle` fallback
+  // in the loop below is the actual backstop — see the "T-007: undefined" incident.
+  required: ['id', 'title'],
 };
 const REVIEW = {
   type: 'object',
@@ -301,7 +308,23 @@ while (guard++ < 200) {
       break;
     }
   }
-  log(`> ${task.id} — ${task.title}${task.resuming ? ' (resuming)' : ''}`);
+  // ---- TITLE, with a deterministic fallback. `title` comes from a model
+  // extraction, and an omitted/empty one used to be interpolated straight into the
+  // commit subject: a real run landed `T-007: undefined` in git history (the tree
+  // was correct; only the subject was junk). Recover it from the verbatim heading
+  // line — `### T-NNN · <title> — \`status: ...\`` — and fall back to the bare id
+  // rather than ever writing "undefined" into a commit message.
+  const rawHeading =
+    task.headingLine || (typeof task.block === 'string' ? task.block.split('\n', 1)[0] : '');
+  const headingTitle = (rawHeading.match(/^#*\s*T-\d+\s*·\s*(.+?)\s+—\s+`status:/) || [])[1];
+  const taskTitle =
+    (typeof task.title === 'string' && task.title.trim()) ||
+    (headingTitle && headingTitle.trim()) ||
+    task.id;
+  if (!(typeof task.title === 'string' && task.title.trim())) {
+    log(`  (Select returned no title for ${task.id}; using "${taskTitle}" from the heading line)`);
+  }
+  log(`> ${task.id} — ${taskTitle}${task.resuming ? ' (resuming)' : ''}`);
 
   // ---- HUMAN-GATE DETECTION (code, not model judgment). A task carrying an
   // `[BLOCKED BY = <reason>]` input-gate tag (or a legacy CHECKPOINT that says it
@@ -312,7 +335,7 @@ while (guard++ < 200) {
   // a milestone boundary and self-approving a review it cannot perform. The
   // detection is a deterministic regex over the verbatim task block so it cannot
   // be softened by a model rationalizing the prose away.
-  const headingLine = task.headingLine || (typeof task.block === 'string' ? task.block.split('\n', 1)[0] : '');
+  const headingLine = rawHeading;
   const gateTag = headingLine.match(/\[\s*BLOCKED\s+BY\s*[:=]\s*([^\]\n]+?)\s*\]/i);
   // Legacy fallback: a task whose TITLE is a CHECKPOINT (matched on the heading
   // line only, so a normal task merely *discussing* a checkpoint in its body is
@@ -470,7 +493,7 @@ while (guard++ < 200) {
         `CRITICAL — you did NOT perform, witness, or obtain any human review, approval, sign-off, or visual check. Do NOT write that a user/reviewer looked at, reviewed, or approved anything, and do NOT invent an approving quote — that is a fabrication and is forbidden. Describe only the machine work you can see in the diff. ` +
         `End the note with the exact line \`Orchestration: graphify=${graphifyTag} · attempts=${attemptsUsed}/4 · HUMAN-GATE HALT.\` (verbatim) on its own line. ` +
         `Because this task began from a clean working tree, ALL current changes belong to it — run \`git add -A\` then \`git reset ${TREE_IGNORE.join(' ')}\`. ` +
-        `Commit with first line "${task.id}: ${task.title}" and end the message with this trailer on its own line:\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>\nDo NOT push. Do NOT run tests or ANY background command — the gate already verified this tree. Perform the TASKS.md edit and git commands synchronously, confirm the new commit hash with \`git log -1\`, then return.`,
+        `Commit with first line "${task.id}: ${taskTitle}" and end the message with this trailer on its own line:\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>\nDo NOT push. Do NOT run tests or ANY background command — the gate already verified this tree. Perform the TASKS.md edit and git commands synchronously, confirm the new commit hash with \`git log -1\`, then return.`,
       { phase: 'Commit', model: 'sonnet', agentType: 'general-purpose' },
     );
     const gpost = await treeState();
@@ -495,7 +518,7 @@ while (guard++ < 200) {
   await agent(
     `Commit ${task.id}. In TASKS.md set ${task.id} status to DONE and add a one-paragraph "**Delivered (<today>):**" note summarizing what shipped and any deliberate scope boundary, ending with the exact line \`Orchestration: graphify=${graphifyTag} · attempts=${attemptsUsed}/4.\` (verbatim — this is a machine-parsed metric, do not paraphrase it) on its own line. ` +
       `Because this task began from a clean working tree, ALL current changes belong to it — do NOT hand-pick hunks. Stage everything except ignorable infra: run \`git add -A\` then \`git reset ${TREE_IGNORE.join(' ')}\`. ` +
-      `Commit with first line "${task.id}: ${task.title}" and end the message with this trailer on its own line:\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>\nDo NOT push. ` +
+      `Commit with first line "${task.id}: ${taskTitle}" and end the message with this trailer on its own line:\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>\nDo NOT push. ` +
       `Do NOT run tests and do NOT launch ANY background command — the gate has already verified this tree. Perform the TASKS.md edit and the git commands synchronously, confirm the new commit hash with \`git log -1\`, and only then return.`,
     { phase: 'Commit', model: 'sonnet', agentType: 'general-purpose' },
   );
