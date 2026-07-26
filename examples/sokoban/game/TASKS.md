@@ -414,7 +414,7 @@ Scope boundary: no `tools/tcp_smoke_check.py`, no UGT-side Python adapter or
 ladder scripts (T-008 / the integration side), no reset key binding and no HUD.
 Orchestration: graphify=none — no `graphify-out/graph.json` in the game dir (`examples/sokoban/game/`) or the git root (`_UGT Universal Game Tester/`); both checked. · attempts=1/4.
 
-### T-008 · End-to-end wire check (`tools/tcp_smoke_check.py`) — `status: TODO` · `coder: opus` · `after: T-005, T-007`
+### T-008 · End-to-end wire check (`tools/tcp_smoke_check.py`) — `status: DONE` · `coder: opus` · `after: T-005, T-007`
 Commit `tools/tcp_smoke_check.py` — a real, repo-tracked Python script (not a
 throwaway) that launches or attaches to the headless bridge, connects over
 TCP, replays all three `levels/solutions.json` sequences as `step` commands,
@@ -425,6 +425,65 @@ itself does.
 a readable message (not a traceback) if the bridge is not running; running
 `reset` then the same sequence twice reproduces byte-identical state,
 satisfying the PRD's determinism criterion.
+
+**Delivered (2026-07-26):** Added `tools/tcp_smoke_check.py` (mode 755,
+`#!/usr/bin/env python3`, **Python standard library only** — no pip install,
+nothing vendored, the same no-third-party discipline the GDScript runner is
+held to) and no other file. It runs five phases over the real socket:
+**(0)** validate `levels/solutions.json` *before* opening anything — exactly
+the three level keys, each a non-empty list of whole numbers in 0..3 — so a
+missing or `{}` file is a loud exit-2, never a vacuous pass with nothing
+replayed; **(1)** `reset`, asserting the reply key set is exactly `{state}`
+(the PRD's reset carries no `terminated`/`info`) and the state key set is
+exactly the PRD's 8 keys, with `bool` checked *before* `int` since Python's
+`bool` is an `int`; **(2)** replay all 73 committed actions as `step`
+commands with **no filler move between levels** (board.gd advances a solved
+level at the start of the next move and applies that move in the new level),
+asserting on **every** step that `terminated` mirrors `all_levels_solved`,
+`truncated` is false, `info` is `{}`, `boxes_on_target <= boxes_total` and
+`moves_taken` never decreases — then per level that it ended `level_solved`,
+and finally `all_levels_solved: true` with `moves_taken == 73` (proving no
+step was silently dropped by framing); **(3)** determinism by comparing the
+**raw response bytes** of two `reset`+replay passes, stronger than comparing
+parsed dicts and literally what "byte-identical" asks for; **(4)** `close`
+must produce **no reply**, EOF, and process exit 0. 2959 assertions per run.
+Phase 3 reads its level out of the `reset` reply instead of assuming level 1:
+`reset_level()` KEEPS `level_index`, so after phase 2 the board is on level 3
+— assuming otherwise would have replayed the wrong sequence. Client-side
+framing (`read_line()` buffers across `recv()` and splits on `\n`) is the
+mirror image of the bridge's own `feed_bytes()`; one `recv()` is not one
+message in either direction. Three modes: **auto** (default — one connect
+attempt, attach if it lands, else launch), **`--attach`** (never launches;
+this is the Accept's "bridge not running" path) and **`--launch`** (refuses a
+port already in use rather than driving someone else's process). The probe
+socket *is* the connection that gets used, because the bridge accepts one
+peer at a time and a probe-then-reconnect could race its accept loop. Attach
+mode never sends `close` and leaves the foreign bridge running (verified:
+still alive after an exit-0 run); a launched bridge is terminated in a
+`finally` on every path, including failures. Exit codes: 0 pass · 1 check
+failed · 2 environment/usage · 3 unexpected · 130 interrupted; every path
+prints one readable line and no traceback (`--traceback` is the opt-in
+escape hatch). Gate green: editor pass exit 0, suite exit 0 at `84 passed, 0
+failed` with 0 bytes on stderr, `python3 tools/tcp_smoke_check.py` exit 0,
+`tools/check_runner_reports_failure.sh` still exit 0. Also verified:
+`--attach` with nothing listening → exit 2, `Traceback` count 0, and a
+copy-pasteable start command (`shlex.quote`d — this repo's path contains
+spaces, which the first draft printed unquoted); `--attach` against a
+*mid-game* bridge → readable exit-2 naming the level; `--launch` on an
+occupied port → exit 2; `--godot nosuchgodot` → exit 2 with the Homebrew
+symlink hint; run from `/` → exit 0 (cwd-independent); run twice
+back-to-back → 0 both times with `pgrep -f ugt-bridge` empty. Verified not
+vacuous with four mutations, each reverted **md5-identically**: flipping
+`level_02`'s last action `3`→`0` gave exit 1 naming that level (`1/2 boxes on
+target`) and left no stray process; `solutions.json` → `{}` and a fractional
+`2.5` action both gave readable exit-2s rather than a pass; hardcoding
+`"terminated": false` in `ugt_bridge.gd` went red on the per-step mirror
+check at `level_03 step 44/44`. Scope boundary held: **no `.gd` script, no
+`levels/`, no `tests/`, no `main.tscn` and no `project.godot` were touched** —
+no game-side change proved necessary, T-007's live drive-through already
+having exercised this exact path. `git status --porcelain` shows only
+`TASKS.md` + the new tool.
+Orchestration: graphify=none — no `graphify-out/graph.json` in the game dir (`examples/sokoban/game/`) or the git root (`_UGT Universal Game Tester/`); both checked. · attempts=1/4.
 
 ---
 
