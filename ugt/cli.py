@@ -110,11 +110,27 @@ def handle_verify(config_path, feature_map_path, max_turns, output):
         print(f"[-] Feature map error: {e}")
         sys.exit(1)
     try:
-        verify_game(config, feature_map, max_turns=max_turns, output_path=output)
+        report = verify_game(config, feature_map, max_turns=max_turns, output_path=output)
     except Exception as e:
         print(f"[-] Verify failed: {e}")
         import traceback
         traceback.print_exc()
+        sys.exit(1)
+
+    # A red run must exit red. Until 2026-07-26 this function discarded the
+    # report and only exited non-zero on an EXCEPTION, so a run printing
+    # "1 FAILED" still handed the shell a 0 — and every example's gate was
+    # worded "exits 0 with 0 FAILED features". A gate that checks $? was
+    # therefore passing red runs. Found independently by two integrations
+    # (browser dice game, Node text-adventure) before it was fixed.
+    #
+    # NOT_REACHED counts too: a feature the runner never got to has not been
+    # verified, and reporting success for it is the same lie in a quieter voice.
+    failed = int(report.get("failed", 0) or 0)
+    not_reached = int(report.get("not_reached", 0) or 0)
+    if failed or not_reached:
+        print(f"[-] Verification did not pass: {failed} FAILED, "
+              f"{not_reached} NOT REACHED.")
         sys.exit(1)
 
 
