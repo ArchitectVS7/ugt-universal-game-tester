@@ -34,6 +34,7 @@ over one core:
 | `description` | shown on entry / `look` |
 | `exit_north`, `exit_south`, `exit_east`, `exit_west` | target `room_id` or empty (no exit) |
 | `entry_requires_flag` | flag name that must be `true` to enter; empty = unlocked |
+| `entry_fail_text` | what the door says when it refuses you. **Required on a gated room, forbidden on an ungated one** — both enforced at load. It must name the *obstacle*, never the solution ("its ward is deep and cold, and a door like that wants a key"), so a player always has somewhere to go next |
 
 ### `content/objects.csv`
 
@@ -45,8 +46,9 @@ over one core:
 | `description` | shown on `examine` |
 | `takeable` | `true`/`false` |
 | `take_sets_flag` | flag set immediately on successful `take` (empty = none) |
-| `use_verb` | the verb this object responds to (e.g. `unlock`, `open`, `light`); empty = not usable |
+| `use_verb` | the verb this object responds to (e.g. `unlock`, `light`, `read`); empty = not usable. **This is a real command**, accepted on this object only — `read ledger` works, `read lantern` does not |
 | `use_requires_flag` | flag that must already be `true` for `use` to succeed (empty = no prerequisite) |
+| `use_requires_room` | `room_id` where this puzzle physically is (empty = usable anywhere). A key belongs at its door; a lantern you light in your hand. Checked before the flag, so a player carrying the right thing is told to move rather than to go hunting |
 | `use_sets_flag` | flag set on successful `use` (empty = none) |
 | `use_consumes` | `true`/`false` — removed from inventory after a successful use |
 | `use_success_text` / `use_fail_text` | flavor text shown on each outcome |
@@ -59,9 +61,15 @@ linear-with-branches flag chain ending in one exit room (`R10`) whose
 
 `look` · `go <direction>` (also `n`/`s`/`e`/`w`) · `take <object>` ·
 `drop <object>` · `inventory` / `inv` · `examine <object>` · `use <object>` ·
-`help`. Unrecognized input or an inapplicable action (wrong room, missing
-prerequisite, already held) prints a short in-fiction refusal and consumes no
-state.
+`help`, **plus every `use_verb` the content declares** — `unlock`, `light`,
+`turn`, `fit`, `read` — each accepted on the object that declares it. The
+vocabulary therefore grows with the content and needs no engine edit; an
+authored verb used on the wrong object is refused rather than silently treated
+as `use`. Unrecognized input names the verbs that do exist, instead of a bare
+"I don't understand that" that leaves a player nowhere to go.
+
+Unrecognized input or an inapplicable action (wrong room, missing prerequisite,
+already held) prints a short in-fiction refusal and consumes no state.
 
 ## Game state
 
@@ -70,6 +78,7 @@ The engine exposes a snapshot of exactly this shape:
 ```json
 {
   "current_room": "R05",
+  "room_name": "Furnace Walk",
   "inventory": ["key_brass", "lantern"],
   "flags": {"has_brass_key": true, "found_map": false},
   "moves_taken": 14,
@@ -82,6 +91,12 @@ The engine exposes a snapshot of exactly this shape:
 latches. `inventory` serializes in `objects.csv` file order, and the `flags`
 key set covers the whole flag universe from the first move on, so a given held
 set always serializes identically.
+
+`room_name` is the `name` column of `current_room`, derived on read and never
+authored separately. It exists because `current_room` is an internal id that a
+player is never shown — the CLI prints the room's *name* on every entry — so a
+snapshot carrying only the id told a machine client less about where it was
+standing than the screen tells a person. Added 2026-07-26.
 
 ## Non-goals
 

@@ -14,18 +14,19 @@ import { ContentError, loadContent, parseContent } from '../src/engine.js';
 const fixture = (name) => new URL(`fixtures/${name}/`, import.meta.url);
 
 const ROOMS_HEADER =
-  'room_id,name,description,exit_north,exit_south,exit_east,exit_west,entry_requires_flag';
+  'room_id,name,description,exit_north,exit_south,exit_east,exit_west,entry_requires_flag,' +
+  'entry_fail_text';
 const OBJECTS_HEADER =
   'object_id,name,start_room,description,takeable,take_sets_flag,use_verb,' +
-  'use_requires_flag,use_sets_flag,use_consumes,use_success_text,use_fail_text';
+  'use_requires_flag,use_requires_room,use_sets_flag,use_consumes,use_success_text,use_fail_text';
 
 /** Build rooms.csv text from data rows (header supplied unless overridden). */
 const roomsCsv = (rows, header = ROOMS_HEADER) => [header, ...rows].join('\n') + '\n';
 const objectsCsv = (rows, header = OBJECTS_HEADER) => [header, ...rows].join('\n') + '\n';
 
 /** A minimal valid pair used as the base for inline mutation tests. */
-const BASE_ROOM = 'R01,Cell,A damp cell.,,,,,';
-const BASE_OBJECT = 'key_brass,brass key,R01,A small brass key.,true,has_brass_key,,,,false,,';
+const BASE_ROOM = 'R01,Cell,A damp cell.,,,,,,';
+const BASE_OBJECT = 'key_brass,brass key,R01,A small brass key.,true,has_brass_key,,,,,false,,';
 
 /** Assert `fn` throws a ContentError whose message matches every pattern. */
 function assertContentError(fn, patterns) {
@@ -153,7 +154,7 @@ describe('parseContent — malformed input', () => {
   it('rejects a row with the wrong field count', () => {
     assertContentError(
       () => parseContent(roomsCsv([BASE_ROOM]), objectsCsv(['key_brass,brass key,R01'])),
-      [/objects\.csv line 2/, /expected 12 fields/, /found 3/],
+      [/objects\.csv line 2/, /expected 13 fields/, /found 3/],
     );
   });
 
@@ -167,7 +168,7 @@ describe('parseContent — malformed input', () => {
   });
 
   it('rejects an unterminated quoted field', () => {
-    const row = 'R01,Cell,"A damp cell,,,,,';
+    const row = 'R01,Cell,"A damp cell,,,,,,';
     assertContentError(() => parseContent(roomsCsv([row]), objectsCsv([BASE_OBJECT])), [
       /rooms\.csv line 2/,
       /unterminated/i,
@@ -176,10 +177,55 @@ describe('parseContent — malformed input', () => {
 
   it('rejects an unreachable use_requires_flag', () => {
     const row =
-      'lantern,lantern,R01,An oil lantern.,true,,light,has_silver_key,lantern_lit,false,Lit.,Nothing.';
+      'lantern,lantern,R01,An oil lantern.,true,,light,has_silver_key,,lantern_lit,false,Lit.,Nothing.';
     assertContentError(
       () => parseContent(roomsCsv([BASE_ROOM]), objectsCsv([BASE_OBJECT, row])),
       [/lantern/, /has_silver_key/, /use_requires_flag/],
+    );
+  });
+
+  // The playability rules, enforced as content rules (added 2026-07-26). A
+  // locked door that cannot say what kind of lock it is leaves the player with
+  // nowhere to go, and an LLM playtester demonstrated exactly that: it stalled
+  // 20 moves at a door whose only message was "the way is shut".
+
+  it('rejects a gated room with no entry_fail_text', () => {
+    const rooms = [
+      'R01,Cell,A damp cell.,R02,,,,,',
+      'R02,Vault,The vault.,,R01,,,has_brass_key,',
+    ];
+    assertContentError(
+      () => parseContent(roomsCsv(rooms), objectsCsv([BASE_OBJECT])),
+      [/R02/, /entry_fail_text/, /locked door/],
+    );
+  });
+
+  it('rejects entry_fail_text on a room that is not gated — it could never be shown', () => {
+    const rooms = [
+      'R01,Cell,A damp cell.,R02,,,,,',
+      'R02,Vault,The vault.,,R01,,,,"Shut fast."',
+    ];
+    assertContentError(
+      () => parseContent(roomsCsv(rooms), objectsCsv([BASE_OBJECT])),
+      [/R02/, /entry_fail_text/, /never be shown/],
+    );
+  });
+
+  it('rejects a use_requires_room that names no such room', () => {
+    const row =
+      'lantern,lantern,R01,An oil lantern.,true,,light,,R99,lantern_lit,false,Lit.,Nothing.';
+    assertContentError(
+      () => parseContent(roomsCsv([BASE_ROOM]), objectsCsv([BASE_OBJECT, row])),
+      [/lantern/, /R99/, /use_requires_room/],
+    );
+  });
+
+  it('rejects use gating on an object with no use_verb — the gate is unreachable', () => {
+    const row =
+      'rock,rock,R01,A rock.,true,,,has_brass_key,,,false,,';
+    assertContentError(
+      () => parseContent(roomsCsv([BASE_ROOM]), objectsCsv([BASE_OBJECT, row])),
+      [/rock/, /use_verb/],
     );
   });
 
@@ -204,8 +250,8 @@ describe('parseContent — malformed input', () => {
 
   it('reports every violation in a single error', () => {
     const rooms = roomsCsv([
-      'R01,Cell,A damp cell.,R09,,,,',
-      'R02,Vault,The vault.,,R01,,,never_set',
+      'R01,Cell,A damp cell.,R09,,,,,',
+      'R02,Vault,The vault.,,R01,,,never_set,"Shut fast."',
     ]);
     const err = assertContentError(() => parseContent(rooms, objectsCsv([BASE_OBJECT])), [
       /R09/,

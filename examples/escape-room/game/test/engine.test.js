@@ -36,10 +36,11 @@ import {
 const fixture = (name) => new URL(`fixtures/${name}/`, import.meta.url);
 
 const ROOMS_HEADER =
-  'room_id,name,description,exit_north,exit_south,exit_east,exit_west,entry_requires_flag';
+  'room_id,name,description,exit_north,exit_south,exit_east,exit_west,entry_requires_flag,' +
+  'entry_fail_text';
 const OBJECTS_HEADER =
   'object_id,name,start_room,description,takeable,take_sets_flag,use_verb,' +
-  'use_requires_flag,use_sets_flag,use_consumes,use_success_text,use_fail_text';
+  'use_requires_flag,use_requires_room,use_sets_flag,use_consumes,use_success_text,use_fail_text';
 
 const csv = (header, rows) => [header, ...rows].join('\n') + '\n';
 
@@ -52,6 +53,11 @@ const STATE_KEYS = [
   'flags',
   'inventory',
   'moves_taken',
+  // Added 2026-07-26 with the PRD's state shape — the player-facing name of
+  // current_room. This list is deliberately exact: a key appearing or vanishing
+  // on the wire is a contract change, and it should have to be written down here
+  // before it ships.
+  'room_name',
   'rooms_visited',
 ];
 
@@ -259,11 +265,11 @@ describe('executeCommand — use_consumes', () => {
   const consumingContent = () =>
     parseContent(
       csv(ROOMS_HEADER, [
-        'R01,Cell,A damp cell.,R02,,,,',
-        'R02,Vault,The vault stands open.,,R01,,,door_open',
+        'R01,Cell,A damp cell.,R02,,,,,',
+        'R02,Vault,The vault stands open.,,R01,,,door_open,"The vault door is shut fast."',
       ]),
       csv(OBJECTS_HEADER, [
-        'key_fragile,fragile key,R01,A thin key of soft metal.,true,,unlock,,door_open,true,' +
+        'key_fragile,fragile key,R01,A thin key of soft metal.,true,,unlock,,,door_open,true,' +
           '"It turns once and shears off in the lock. The door opens.",It will not fit.',
       ]),
     );
@@ -299,16 +305,123 @@ describe('executeCommand — use_consumes', () => {
   });
 });
 
+describe('a locked door says what kind of lock it is', () => {
+  // Added 2026-07-26. Every gated room used to share one string, so a player
+  // learned only that they had failed. Content authors the hint now, and the
+  // engine's generic `locked` line is a fallback validate() forbids reaching.
+
+  it('answers a blocked move with the room\'s authored entry_fail_text', () => {
+    const content = parseContent(
+      csv(ROOMS_HEADER, [
+        'R01,Cell,A damp cell.,R02,,,,,',
+        'R02,Vault,The vault.,,R01,,,door_open,"The vault door wants a key."',
+      ]),
+      csv(OBJECTS_HEADER, [
+        'key,key,R01,A key.,true,,unlock,,,door_open,false,It turns.,',
+      ]),
+    );
+    const game = createGame(content);
+    const refused = executeCommand(game, 'go', 'north');
+
+    assert.equal(refused.ok, false);
+    assert.equal(refused.message, 'The vault door wants a key.');
+  });
+
+  it('every gated room in the shipped content authors its own hint', () => {
+    // Content-derived: a new locked door is covered the moment it is authored.
+    const content = loadContent();
+    const gated = [...content.rooms.values()].filter((r) => r.entryRequiresFlag !== null);
+    assert.ok(gated.length > 0, 'the game should still have locked doors');
+    for (const room of gated) {
+      assert.ok(
+        room.entryFailText && room.entryFailText.length > 20,
+        `room ${room.id} is gated but says nothing useful when it refuses you`,
+      );
+    }
+  });
+});
+
+describe('a puzzle resolves where it lives', () => {
+  // Added 2026-07-26: `use` checked held/usable/flag and never location, so the
+  // banded iron door could be unlocked from inside the cell two rooms away —
+  // and the game narrated "the door swings open" at you where you stood.
+
+  it('refuses a place-bound object used in the wrong room, and changes nothing', () => {
+    const content = parseContent(
+      csv(ROOMS_HEADER, [
+        'R01,Cell,A damp cell.,R02,,,,,',
+        'R02,Corridor,A corridor.,,R01,,,,',
+      ]),
+      csv(OBJECTS_HEADER, [
+        'key,key,R01,A key.,true,,unlock,,R02,door_open,false,It turns.,',
+      ]),
+    );
+    const game = createGame(content);
+    executeCommand(game, 'take', 'key');
+    const before = getState(game);
+
+    const refused = executeCommand(game, 'use', 'key');
+    assert.equal(refused.ok, false);
+    assert.deepEqual(refused.state, before, 'a wrong-place refusal must cost nothing');
+
+    assert.equal(executeCommand(game, 'go', 'north').ok, true);
+    const granted = executeCommand(game, 'use', 'key');
+    assert.equal(granted.ok, true, 'the same call must work in the right room');
+    assert.equal(granted.state.flags.door_open, true);
+  });
+});
+
+describe('an object\'s authored use_verb is a real command', () => {
+  // `use_verb` used to be decoration: the engine only null-checked the column,
+  // so the game declared a verb per object, never accepted it, and never
+  // printed it. `read ledger` answered "I don't understand that."
+
+  it('accepts the verb the object declares', () => {
+    const content = loadContent();
+    const game = createGame(content);
+    const ledger = [...content.objects.values()].find((o) => o.useVerb === 'read');
+    assert.ok(ledger, 'the shipped content should still declare a `read` object');
+
+    game.inventory.add(ledger.id);
+    const res = executeCommand(game, 'read', ledger.id);
+    // Refused for a missing prerequisite is fine — what matters is that the
+    // verb REACHED the object rather than dying in the parser.
+    assert.ok(
+      !/^I don't understand/.test(res.message),
+      `the parser swallowed an authored verb: ${res.message}`,
+    );
+  });
+
+  it('refuses a verb that belongs to a different object', () => {
+    const content = loadContent();
+    const game = createGame(content);
+    const lantern = [...content.objects.values()].find((o) => o.useVerb === 'light');
+    assert.ok(lantern);
+
+    game.inventory.add(lantern.id);
+    const res = executeCommand(game, 'read', lantern.id);
+    assert.equal(res.ok, false);
+    assert.equal(res.state.flags[lantern.useSetsFlag], false, 'it must not fire the effect');
+  });
+
+  it('still refuses a verb no object declares, and names the vocabulary', () => {
+    const game = validGame();
+    const res = executeCommand(game, 'xyzzy', 'lantern');
+    assert.equal(res.ok, false);
+    assert.match(res.message, /use/, 'a dead end should point at the real verbs');
+  });
+});
+
 describe('executeCommand — take / drop / examine / look / inventory', () => {
   it('refuses take of a non-takeable object and of one in another room', () => {
     const content = parseContent(
       csv(ROOMS_HEADER, [
-        'R01,Cell,A damp cell.,R02,,,,',
-        'R02,Corridor,A long corridor.,,R01,,,',
+        'R01,Cell,A damp cell.,R02,,,,,',
+        'R02,Corridor,A long corridor.,,R01,,,,',
       ]),
       csv(OBJECTS_HEADER, [
-        'slab,stone slab,R01,A slab bolted to the wall.,false,,,,,false,,',
-        'coin,copper coin,R02,A worn copper coin.,true,found_coin,,,,false,,',
+        'slab,stone slab,R01,A slab bolted to the wall.,false,,,,,,false,,',
+        'coin,copper coin,R02,A worn copper coin.,true,found_coin,,,,,false,,',
       ]),
     );
     const game = createGame(content);

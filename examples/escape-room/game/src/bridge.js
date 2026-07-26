@@ -10,21 +10,28 @@
  * so T-006 implements it without drift:
  *
  *   {"command": "reset"}
- *     -> {"state": {...}}
+ *     -> {"state": {...}, "info": {"message": "<the opening room, in prose>"}}
  *   {"command": "step", "action_id": N}
- *     -> {"state": {...}, "terminated": bool, "truncated": bool, "info": {}}
+ *     -> {"state": {...}, "terminated": bool, "truncated": bool,
+ *         "info": {"message": "<narration, may be empty>"}}
  *   {"command": "close"}
  *     -> clean process exit
  *
  * State shape:
  *   {
  *     "current_room": "R05",
+ *     "room_name": "Furnace Walk",
  *     "inventory": ["key_brass", "lantern"],
  *     "flags": {"has_brass_key": true, "found_map": false},
  *     "moves_taken": 14,
  *     "rooms_visited": 6,
  *     "escaped": false
  *   }
+ *
+ * Both `info` on reset and `room_name` were added 2026-07-26, after a local-model
+ * playtest found the machine client seeing strictly less of the game than a
+ * person at `src/cli.js` does. The rule they enforce: **anything the CLI prints
+ * unprompted is player-facing, and the wire owes it too.**
  *
  * `escaped` becomes true the moment the player successfully enters R10;
  * `terminated` in the step response mirrors it.
@@ -58,6 +65,7 @@ import { pathToFileURL } from 'node:url';
 import {
   buildActionTable,
   createGame,
+  describeRoom,
   executeCommand,
   getState,
   loadContent,
@@ -82,8 +90,26 @@ export function handleCommand(message, session) {
 
   if (command === 'reset') {
     session.game = createGame(session.content);
-    // PRD's reset shape is exactly one key — no terminated/truncated/info.
-    return { response: { state: getState(session.game) }, close: false };
+    return {
+      response: {
+        state: getState(session.game),
+        // The opening room, in prose — the same block `src/cli.js` prints
+        // before it accepts a single command.
+        //
+        // Reset used to be exactly one key, and the cost was invisible: a wire
+        // client's FIRST decision was made with an empty text panel, while a
+        // human's first screen is the cell description, its exits and what is
+        // lying in it. So the machine player had to spend a move on `look` to
+        // see the room it woke up in — a move the 26-move optimum does not
+        // spend, which quietly biases any move-count comparison against it.
+        //
+        // `terminated`/`truncated` are still deliberately absent: a fresh game
+        // can be neither, and inventing them here would be the bridge asserting
+        // a rule instead of reporting one. Narration is not a rule.
+        info: { message: describeRoom(session.game) },
+      },
+      close: false,
+    };
   }
 
   if (command === 'step') {

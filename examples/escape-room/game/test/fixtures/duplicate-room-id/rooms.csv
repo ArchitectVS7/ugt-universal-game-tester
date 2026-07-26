@@ -1,5 +1,5 @@
-room_id,name,description,exit_north,exit_south,exit_east,exit_west,entry_requires_flag
-R01,Cell,"A damp cell, barely lit.",R02,,,,
-R02,Corridor,"A long corridor, dust everywhere.",,R01,R03,,
-R03,Vault,The vault door hangs open.,,,,R02,has_brass_key
-R01,Second Cell,An identical cell.,,,,,
+room_id,name,description,exit_north,exit_south,exit_east,exit_west,entry_requires_flag,entry_fail_text
+R01,Cell,"A damp cell, barely lit.",R02,,,,,
+R02,Corridor,"A long corridor, dust everywhere.",,R01,R03,,,
+R03,Vault,The vault door hangs open.,,,,R02,has_brass_key,"The vault door is shut, and its lock wants a key."
+R01,Second Cell,An identical cell.,,,,,,

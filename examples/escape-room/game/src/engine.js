@@ -44,6 +44,12 @@ const ROOM_COLUMNS = [
   'exit_east',
   'exit_west',
   'entry_requires_flag',
+  // Shown when the player tries to enter while `entry_requires_flag` is unset.
+  // A locked door that only says "you can't" teaches nothing; this is where a
+  // door says what KIND of obstacle it is, so the player has somewhere to go
+  // next. Required on any gated room (validated below) and forbidden on an
+  // ungated one, where it could never be shown.
+  'entry_fail_text',
 ];
 
 const OBJECT_COLUMNS = [
@@ -55,6 +61,12 @@ const OBJECT_COLUMNS = [
   'take_sets_flag',
   'use_verb',
   'use_requires_flag',
+  // Where the puzzle physically IS. Empty means "anywhere", which is right for
+  // something you do to the object itself (lighting a lantern, reading a
+  // ledger) and wrong for something you do to the world (a key belongs at its
+  // door). Without it the engine happily let you unlock a door two rooms away
+  // while narrating "the door swings open" at you in your cell.
+  'use_requires_room',
   'use_sets_flag',
   'use_consumes',
   'use_success_text',
@@ -234,6 +246,7 @@ function mapRooms(parsed, label, errors) {
         west: orNull(r.exit_west),
       },
       entryRequiresFlag: orNull(r.entry_requires_flag),
+      entryFailText: orNull(r.entry_fail_text),
       line,
     });
   }
@@ -274,6 +287,7 @@ function mapObjects(parsed, label, errors) {
       takeSetsFlag: orNull(r.take_sets_flag),
       useVerb: orNull(r.use_verb),
       useRequiresFlag: orNull(r.use_requires_flag),
+      useRequiresRoom: orNull(r.use_requires_room),
       useSetsFlag: orNull(r.use_sets_flag),
       useConsumes: toBool(r.use_consumes, 'use_consumes', label, line, errors),
       useSuccessText: r.use_success_text,
@@ -306,6 +320,21 @@ function validate(rooms, objects, flags, errors) {
         `rooms.csv line ${room.line}: room ${JSON.stringify(room.id)} entry_requires_flag ${JSON.stringify(room.entryRequiresFlag)} is unreachable — no object sets it via take_sets_flag/use_sets_flag`,
       );
     }
+    // A locked room MUST say what kind of lock it is. This is a playability
+    // rule enforced as a content rule: the generic refusal tells a player only
+    // that they failed, never what to go and do about it, and a door that
+    // cannot be reasoned about is indistinguishable from a dead end.
+    if (room.entryRequiresFlag !== null && room.entryFailText === null) {
+      errors.push(
+        `rooms.csv line ${room.line}: room ${JSON.stringify(room.id)} is gated on ${JSON.stringify(room.entryRequiresFlag)} but has no entry_fail_text — a locked door must tell the player what kind of obstacle it is`,
+      );
+    }
+    // ...and an ungated room must not carry text that could never be shown.
+    if (room.entryRequiresFlag === null && room.entryFailText !== null) {
+      errors.push(
+        `rooms.csv line ${room.line}: room ${JSON.stringify(room.id)} has entry_fail_text but no entry_requires_flag — that text can never be shown`,
+      );
+    }
   }
 
   for (const obj of objects.values()) {
@@ -317,6 +346,18 @@ function validate(rooms, objects, flags, errors) {
     if (obj.useRequiresFlag !== null && !flags.has(obj.useRequiresFlag)) {
       errors.push(
         `objects.csv line ${obj.line}: object ${JSON.stringify(obj.id)} use_requires_flag ${JSON.stringify(obj.useRequiresFlag)} is unreachable — no object sets it via take_sets_flag/use_sets_flag`,
+      );
+    }
+    if (obj.useRequiresRoom !== null && !rooms.has(obj.useRequiresRoom)) {
+      errors.push(
+        `objects.csv line ${obj.line}: object ${JSON.stringify(obj.id)} use_requires_room ${JSON.stringify(obj.useRequiresRoom)} is not a known room_id`,
+      );
+    }
+    // Gating columns on an object with no use_verb are dead: `use` refuses it
+    // before any of them is read.
+    if (obj.useVerb === null && (obj.useRequiresFlag !== null || obj.useRequiresRoom !== null)) {
+      errors.push(
+        `objects.csv line ${obj.line}: object ${JSON.stringify(obj.id)} has use gating but no use_verb — the gate can never be reached`,
       );
     }
   }
@@ -415,11 +456,23 @@ const DIRECTION_ALIASES = { n: 'north', s: 'south', e: 'east', w: 'west' };
 
 /** Generic refusals — never name a specific room, object or puzzle. */
 const REFUSALS = {
-  unknownVerb: "I don't understand that.",
+  // Names the vocabulary rather than just saying no: this game has seven verbs
+  // and no way for a player to discover them by guessing, so a bare "I don't
+  // understand that" is a dead end at exactly the moment someone is trying.
+  unknownVerb:
+    "I don't understand that. Try a direction, or one of: look, inventory, take, drop, examine, use.",
   noSuchObject: "You don't see that here.",
   noSuchDirection: 'That is not a direction.',
   noExit: "You can't go that way.",
-  locked: "The way is shut. You are missing something you'd need to pass.",
+  // Fallback only. A gated room is REQUIRED to author its own entry_fail_text
+  // (see validate()), so this is what an ungated engine-level lock would say —
+  // deliberately terse, because a door with nothing to teach should not pretend
+  // otherwise.
+  locked: 'The way is shut.',
+  // The object is right, the place is not.
+  wrongPlace: "Not here. Whatever this works on, it isn't in this room.",
+  // e.g. `read lantern`, where `light` is the lantern's verb.
+  wrongUseVerb: 'That is not what you do with it.',
   notHere: "You don't see that here.",
   notTakeable: "It won't budge.",
   alreadyHeld: 'You are already carrying it.',
@@ -508,6 +561,18 @@ export function getState(game) {
 
   return {
     current_room: game.currentRoom,
+    // The player-facing name of `current_room`, e.g. "Storeroom".
+    //
+    // `current_room` is an internal id (`R04`) that NO human is ever shown: the
+    // CLI prints the room's name on every entry and every `look`. A machine
+    // client reading only the id therefore had to reconstruct the name from
+    // prose that scrolls, and an LLM playtester was observed binding the wrong
+    // name to the right id ("R04 (Guard Corridor)" — R04 is the Storeroom) and
+    // then walking into a wall for twelve moves. Added 2026-07-26.
+    //
+    // Derived, never authored: it is a read of the same `rooms.csv` column the
+    // CLI prints, so it cannot drift from what a human sees.
+    room_name: game.content.rooms.get(game.currentRoom).name,
     inventory,
     flags,
     moves_taken: game.movesTaken,
@@ -661,7 +726,9 @@ function doGo(game, arg) {
 
   const next = game.content.rooms.get(target);
   if (next.entryRequiresFlag !== null && game.flags.get(next.entryRequiresFlag) !== true) {
-    return { ok: false, message: REFUSALS.locked };
+    // The refusal flavor is authored content, not an engine string — same rule
+    // the `use` gate already followed. validate() requires it to exist.
+    return { ok: false, message: next.entryFailText || REFUSALS.locked };
   }
 
   game.currentRoom = target;
@@ -715,6 +782,13 @@ function doUse(game, arg) {
   if (!game.inventory.has(obj.id)) return { ok: false, message: REFUSALS.notHeld };
   if (obj.useVerb === null) return { ok: false, message: REFUSALS.notUsable };
 
+  // Place before prerequisite: "are you even standing at the thing" is the more
+  // basic question, and answering it first means a player carrying a key around
+  // is told where to go rather than what else to find.
+  if (obj.useRequiresRoom !== null && game.currentRoom !== obj.useRequiresRoom) {
+    return { ok: false, message: REFUSALS.wrongPlace };
+  }
+
   if (obj.useRequiresFlag !== null && game.flags.get(obj.useRequiresFlag) !== true) {
     // The refusal flavor is authored content, not an engine string.
     return { ok: false, message: obj.useFailText || REFUSALS.nothingHappens };
@@ -728,6 +802,40 @@ function doUse(game, arg) {
   // A non-consuming object may be re-used freely; the effect is idempotent
   // (the same flag is simply set true again).
   return { ok: true, message: obj.useSuccessText || REFUSALS.nothingHappens };
+}
+
+/**
+ * Dispatch a verb that isn't one of the seven built-ins.
+ *
+ * `objects.csv` authors a `use_verb` per usable object — `unlock`, `light`,
+ * `turn`, `fit`, `read`. Those used to be decoration: the engine only ever
+ * asked whether the column was non-null and never read the value, so the game
+ * declared a verb per object, never accepted it as a command, and never printed
+ * it. Typing the most natural thing in the world — `read ledger` — answered
+ * "I don't understand that."
+ *
+ * Now the authored verb IS a command, and only on the object that declares it:
+ * `read ledger` works, `read lantern` does not (the lantern's verb is `light`).
+ * That keeps the vocabulary content-driven — a new object with a new verb
+ * teaches the parser a word, with no engine edit — while still refusing
+ * nonsense pairings rather than silently treating every verb as `use`.
+ *
+ * @returns {{ok: boolean, message: string}}
+ */
+function doAuthoredVerb(game, name, arg) {
+  let known = false;
+  for (const o of game.content.objects.values()) {
+    if (o.useVerb === name) {
+      known = true;
+      break;
+    }
+  }
+  if (!known) return { ok: false, message: REFUSALS.unknownVerb };
+
+  const obj = resolveObject(game, arg);
+  if (obj === null) return { ok: false, message: REFUSALS.noSuchObject };
+  if (obj.useVerb !== name) return { ok: false, message: REFUSALS.wrongUseVerb };
+  return doUse(game, arg);
 }
 
 const HANDLERS = {
@@ -773,7 +881,7 @@ export function executeCommand(game, verb, arg) {
     : null;
 
   const result = handler === null
-    ? { ok: false, message: REFUSALS.unknownVerb }
+    ? doAuthoredVerb(game, name, arg)
     : handler(game, arg);
 
   if (result.ok) game.movesTaken += 1;

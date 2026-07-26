@@ -1,11 +1,11 @@
-room_id,name,description,exit_north,exit_south,exit_east,exit_west,entry_requires_flag
-R01,Holding Cell,"A damp stone cell with a slab bunk and a barred window set too high to reach. The only way out is a low arch to the north.",R02,,,,
-R02,Guard Corridor,"A long corridor of soot-black brick. A banded iron door blocks the way north, a watch post opens east, and a storeroom stands west.",R05,R01,R03,R04,
-R03,Watch Post,"A cramped guard nook: a stool, a cold brazier, and a shelf of kit nobody came back for.",,,,R02,
-R04,Storeroom,"Shelves of mildewed sacking. Whatever was worth stealing went long ago, but something small still hangs on a nail by the door.",,,R02,,
-R05,Furnace Room,"The great furnace ticks as it cools. Scalding steam hisses from a choked pipe that climbs toward the gallery above, and a stair drops west into standing water.",R07,R02,,R06,iron_door_open
-R06,Flooded Cistern,"Black water laps at the third step down. Supplies float where the flood left them, knocking softly against the wall.",,,R05,,
-R07,Clockwork Gallery,"Brass gears the size of cartwheels turn overhead, one of them missing a tooth. A reading room opens east, and a stair climbs north.",R09,R05,R08,,steam_vented
-R08,Records Room,"Ledgers rot in their pigeonholes. A keyring still hangs behind the clerk's desk, forgotten by everyone who fled.",,,,R07,
-R09,Antechamber,"A vaulted hall before the outer gate. The gate is shut fast, and its lock is older than the prison built around it.",R10,R07,,,clock_set
-R10,Courtyard,"Open sky, wet cobbles, and an unguarded road past the gatehouse. You are out.",,R09,,,gate_open
+room_id,name,description,exit_north,exit_south,exit_east,exit_west,entry_requires_flag,entry_fail_text
+R01,Holding Cell,"A damp stone cell with a slab bunk and a barred window set too high to reach. The only way out is a low arch to the north.",R02,,,,,
+R02,Guard Corridor,"A long corridor of soot-black brick. A banded iron door blocks the way north, a watch post opens east, and a storeroom stands west.",R05,R01,R03,R04,,
+R03,Watch Post,"A cramped guard nook: a stool, a cold brazier, and a shelf of kit nobody came back for.",,,,R02,,
+R04,Storeroom,"Shelves of mildewed sacking. Whatever was worth stealing went long ago, but something small still hangs on a nail by the door.",,,R02,,,
+R05,Furnace Room,"The great furnace ticks as it cools. Scalding steam hisses from a choked pipe that climbs toward the gallery above, and a stair drops west into standing water.",R07,R02,,R06,iron_door_open,"The banded iron door does not give. Its ward is deep and cold, and a door like that wants a key."
+R06,Flooded Cistern,"Black water laps at the third step down. Supplies float where the flood left them, knocking softly against the wall.",,,R05,,,
+R07,Clockwork Gallery,"Brass gears the size of cartwheels turn overhead, one of them missing a tooth. A reading room opens east, and a stair climbs north.",R09,R05,R08,,steam_vented,"Scalding steam roars up the shaft. You would be boiled before the third step, unless that pipe were stopped."
+R08,Records Room,"Ledgers rot in their pigeonholes. A keyring still hangs behind the clerk's desk, forgotten by everyone who fled.",,,,R07,,
+R09,Antechamber,"A vaulted hall before the outer gate. The gate is shut fast, and its lock is older than the prison built around it.",R10,R07,,,,
+R10,Courtyard,"Open sky, wet cobbles, and an unguarded road past the gatehouse. You are out.",,R09,,,gate_open,"The outer gate stands fast. Its lock has not turned in years, and it will want a key cut for this gate alone."

@@ -26,6 +26,7 @@ import {
   CONTENT_DIR,
   buildActionTable,
   createGame,
+  describeRoom,
   getState,
   loadContent,
 } from '../src/engine.js';
@@ -230,10 +231,11 @@ describe('bridge protocol (spawned process, piped JSON lines)', () => {
     assert.equal(responses.length, 1 + walkthrough.length);
     assert.equal(stdout.split('\n').filter((l) => l.trim() !== '').length, responses.length);
 
-    // reset returns PRD's one-key shape and a pristine game.
+    // reset returns state + the opening room's prose, and a pristine game.
     const [resetResponse, ...steps] = responses;
-    assert.deepEqual(Object.keys(resetResponse), ['state']);
+    assert.deepEqual(Object.keys(resetResponse).sort(), ['info', 'state']);
     assert.deepEqual(resetResponse.state, getState(createGame(content)));
+    assert.equal(resetResponse.info.message, describeRoom(createGame(content)));
 
     for (const [i, resp] of steps.entries()) {
       assert.deepEqual(
@@ -388,7 +390,7 @@ describe('bridge robustness', () => {
     assert.equal(code, 0);
     assert.equal(stderr, '');
     assert.equal(responses.length, 1); // the reset only
-    assert.deepEqual(Object.keys(responses[0]), ['state']);
+    assert.deepEqual(Object.keys(responses[0]).sort(), ['info', 'state']);
   });
 
   it('exits on close while the parent still holds stdin open', { timeout: 30000 }, async () => {
@@ -449,7 +451,9 @@ describe('bridge robustness', () => {
 
     assert.equal(code, 0);
     assert.deepEqual(responses[0], { error: 'Unknown command: bogus' });
-    assert.deepEqual(Object.keys(responses[1]), ['state']);
+    // reset answers {state, info} — narration included since 2026-07-26, but
+    // still no terminated/truncated: a fresh game can be neither.
+    assert.deepEqual(Object.keys(responses[1]).sort(), ['info', 'state']);
   });
 
   it('answers a step that arrives before any reset', { timeout: 30000 }, async () => {
@@ -570,5 +574,101 @@ describe('bridge narration (info.message)', () => {
       response.info.message.length > 0,
       'a refused use should still say why — a silent refusal teaches nothing',
     );
+  });
+
+  // Second half of the same defect, found 2026-07-26 by the local-model channel
+  // check: the step path had been fixed, but `reset` still answered with state
+  // alone, so a wire client's FIRST decision was made with an empty text panel
+  // while a human's first screen is the cell itself. The rule both halves serve:
+  // anything `src/cli.js` prints unprompted is player-facing, and the wire owes
+  // it too.
+
+  it('narrates the opening room on reset', () => {
+    const content = loadContent(CONTENT_DIR);
+    const actions = buildActionTable(content);
+    const session = { content, actions, game: createGame(content) };
+
+    const { response } = handleCommand(RESET, session);
+    assert.ok(
+      response.info.message.length > 20,
+      'reset should describe the room the player wakes up in',
+    );
+    assert.equal(
+      response.info.message.includes(content.rooms.get(response.state.current_room).name),
+      true,
+      'the opening narration should name the starting room',
+    );
+  });
+
+  it('gives reset the SAME opening text the human CLI prints', () => {
+    const content = loadContent(CONTENT_DIR);
+    const actions = buildActionTable(content);
+    const session = { content, actions, game: createGame(content) };
+
+    // describeRoom is what src/cli.js prints before accepting a command, so
+    // this pins wire and screen to one source rather than two that agree today.
+    const { response } = handleCommand(RESET, session);
+    assert.equal(response.info.message, describeRoom(session.game));
+  });
+
+  it('reset still reports neither terminated nor truncated', () => {
+    const content = loadContent(CONTENT_DIR);
+    const actions = buildActionTable(content);
+    const session = { content, actions, game: createGame(content) };
+
+    // Narration was added to reset; a RULE was not. A fresh game can be neither
+    // terminated nor truncated, and the bridge must not invent either.
+    const { response } = handleCommand(RESET, session);
+    assert.deepEqual(Object.keys(response).sort(), ['info', 'state']);
+  });
+});
+
+describe('state carries the room NAME, not just its id', () => {
+  // Found 2026-07-26 by the local-model channel check: the pilot read
+  // `current_room: "R04"` and reasoned about "R04 (Guard Corridor)" — R04 is the
+  // Storeroom — then spent twelve moves walking into a wall. A human is never
+  // shown a room id; they are shown the name, on every entry.
+
+  it('reports the player-facing name of the current room', () => {
+    const content = loadContent(CONTENT_DIR);
+    const game = createGame(content);
+    const state = getState(game);
+
+    assert.equal(state.room_name, content.rooms.get(state.current_room).name);
+    assert.ok(state.room_name.length > 0);
+  });
+
+  it('the name tracks the room as the player moves', () => {
+    const content = loadContent(CONTENT_DIR);
+    const actions = buildActionTable(content);
+    const session = { content, actions, game: createGame(content) };
+    const north = actions.findIndex((a) => a.verb === 'go' && a.arg === 'north');
+
+    const before = getState(session.game);
+    const { response } = handleCommand({ command: 'step', action_id: north }, session);
+
+    assert.notEqual(response.state.current_room, before.current_room, 'the move should land');
+    assert.notEqual(response.state.room_name, before.room_name);
+    assert.equal(
+      response.state.room_name,
+      content.rooms.get(response.state.current_room).name,
+      'id and name must never disagree — that disagreement is the whole bug',
+    );
+  });
+
+  it('agrees with the name the narration prints, for every room in the content', () => {
+    // Content-derived rather than hardcoded: a new room in rooms.csv is covered
+    // the moment it is authored, and cannot ship with a name only one side sees.
+    const content = loadContent(CONTENT_DIR);
+    for (const roomId of content.rooms.keys()) {
+      const game = createGame(content, { startRoom: roomId });
+      const state = getState(game);
+      assert.equal(state.room_name, content.rooms.get(roomId).name, `room ${roomId}`);
+      assert.equal(
+        describeRoom(game).startsWith(state.room_name),
+        true,
+        `room ${roomId}: narration and state must name it identically`,
+      );
+    }
   });
 });
