@@ -17,18 +17,20 @@ sys.path.insert(0, HERE)
 
 from bridge_process import port_is_open  # noqa: E402
 from godot_tcp_adapter import GodotTcpAdapter  # noqa: E402
+from ugt.core.trial import GateRunner  # noqa: E402
 
 STATE_KEYS = {
     "level_index", "player_x", "player_y", "boxes_on_target",
     "boxes_total", "moves_taken", "level_solved", "all_levels_solved",
 }
 
-checks: list[tuple[bool, str, str]] = []
+gate = GateRunner()
 
 
 def check(ok, label, detail=""):
-    checks.append((bool(ok), label, detail))
-    print(f"  [{'PASS' if ok else 'FAIL'}] {label}" + (f"  — {detail}" if detail else ""))
+    """Adapter to GateRunner's (name, ok, detail) order, kept so the call sites below read naturally."""
+    return gate.ck(label, ok, detail)
+
 
 
 def main() -> int:
@@ -84,18 +86,7 @@ def main() -> int:
     check(ok2 and not port_is_open(p2),
           "a second adapter can connect and clean up independently", f"port={p2}")
 
-    passed = sum(1 for ok, _, _ in checks if ok)
-    total = len(checks)
-    print("\n" + "=" * 70)
-    if passed == total:
-        print(f"SMOKE MET — {passed}/{total} checks. GodotTcpAdapter honours the BaseAdapter "
-              f"contract and owns the bridge's lifecycle cleanly.")
-        return 0
-    print(f"SMOKE NOT MET — {passed}/{total} checks.")
-    for ok, label, detail in checks:
-        if not ok:
-            print(f"  FAILED: {label}  {detail}")
-    return 1
+    return gate.finish("SMOKE", "GodotTcpAdapter honours the BaseAdapter contract and owns the bridge's lifecycle cleanly.")
 
 
 if __name__ == "__main__":

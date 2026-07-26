@@ -18,6 +18,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+from ugt.core.trial import GateRunner  # noqa: E402
 from bridge_process import bridge, connect_with_retry, listening_pid  # noqa: E402
 
 STATE_KEYS = {
@@ -25,12 +26,12 @@ STATE_KEYS = {
     "boxes_total", "moves_taken", "level_solved", "all_levels_solved",
 }
 
-checks: list[tuple[bool, str, str]] = []
+gate = GateRunner()
 
 
-def check(ok: bool, label: str, detail: str = "") -> None:
-    checks.append((bool(ok), label, detail))
-    print(f"  [{'PASS' if ok else 'FAIL'}] {label}" + (f"  — {detail}" if detail else ""))
+def check(ok: bool, label: str, detail: str = "") -> bool:
+    """Adapter to GateRunner's (name, ok, detail) order, so call sites read naturally."""
+    return gate.ck(label, ok, detail)
 
 
 class Wire:
@@ -157,19 +158,8 @@ def main() -> int:
         finally:
             w.close()
 
-    passed = sum(1 for ok, _, _ in checks if ok)
-    total = len(checks)
-    print("\n" + "=" * 70)
-    if passed == total:
-        print(f"SPIKE MET — {passed}/{total} checks. The raw bridge contract holds: exact "
-              f"message shapes, inert refusals, cross-write framing, and deterministic "
-              f"replay. Safe to build the adapter on it.")
-        return 0
-    print(f"SPIKE NOT MET — {passed}/{total} checks.")
-    for ok, label, detail in checks:
-        if not ok:
-            print(f"  FAILED: {label}  {detail}")
-    return 1
+    return gate.finish("SPIKE", "The raw bridge contract holds: exact message shapes, inert refusals, cross-write framing, "
+        "and deterministic replay. Safe to build the adapter on it.")
 
 
 if __name__ == "__main__":

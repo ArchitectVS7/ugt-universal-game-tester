@@ -33,9 +33,13 @@ Recorded results (2026-07-26, against the game at 84/84 tests green):
 |---|---|---|
 | 1 | `spike_sokoban.py` | **SPIKE MET — 14/14** |
 | 2 | `smoke_sokoban_adapter.py` | **SMOKE MET — 9/9** |
-| 3 | `verify_round1.py` | **ROUND 1 MET — 12/12** |
-| 4 | `verify_round2.py` | **ROUND 2 MET — 11/11** |
+| 3 | `verify_round1.py` | **ROUND 1 MET — 12/12** (+1 finding) |
+| 4 | `verify_round2.py` | **ROUND 2 MET — 13/13** |
 | 5 | `verify_round3.py` | **ROUND 3 MET — 7/7** (240 random steps, 2 seeds, 0 findings) |
+
+Every rung uses `ugt.core.trial.GateRunner`, so a failure is fail-closed
+(non-zero exit) and a game anomaly that is *not* a gate failure has somewhere to
+go — the `[FINDING]` channel, printed in a block above the footer.
 
 Tier 3 (`ugt playtest`) is deliberately out of scope for this example — `dice`
 and `escape-room` already demonstrate that tier end to end.
@@ -77,6 +81,41 @@ across every field, and R3 does the same for illegal action ids. Both hold.
 scoped to a single `level_index`; asserting it globally would have produced a
 false violation the moment level 1 was solved. Noted because it is exactly the
 kind of thing that gets discovered by a red run rather than by reading a spec.
+
+**4. The state contract exposes no box coordinates.** Only `boxes_on_target` /
+`boxes_total`, so a push that does not cross a target is **invisible to a
+black-box tester**. F2 ("a box moves") can therefore only be evidenced where it
+coincides with F4 ("a box reaches a target"). This is raised as a live
+`[FINDING]` in R1 rather than buried here, because adding box positions to the
+wire would let the two be tested independently. It is also the reason the
+first version of this harness got F2 wrong — see below.
+
+## Corrections to this harness
+
+Recorded rather than quietly rewritten, because the failure mode is the one
+this whole repo exists to catch.
+
+**F2 was vacuous in the first version.** It read
+`boxes_on_target >= prev_boxes_on_target`, which is true on *any* player move —
+so "the solution actually moves boxes" could never fail. Proven against the live
+game: a box-free walk (right/left along row 3, never touching the box) satisfied
+the old predicate and fails the new one, which requires a **strict** increase.
+
+**F3 was never tested — in R1 *or* R2.** Both probed for "any direction that is
+a total no-op" and took the first hit. On `level_01` the player starts at (3,3)
+with a wall directly below, so both found `down` — a **wall**, i.e. they
+silently re-tested F1 while reporting F3 covered. A blocked *box push* is now
+constructed explicitly: from the start, `up` lines the player up, the first
+`left` pushes the box to x=1 (asserted **accepted**, so the setup is real), and
+the second `left` would drive it into the wall at x=0 and must be refused with
+the state completely unchanged.
+
+**There was no findings channel.** The rungs originally hand-rolled their own
+PASS/FAIL accumulator instead of using `GateRunner`, which meant an anomaly that
+was not a hard failure had nowhere to go — it would have to be forced into a
+FAIL or dropped. All five rungs now use `GateRunner` (and R3 uses
+`first_divergence`), which restores the `[FINDING]` channel and removes the
+duplication.
 
 ## Notes
 

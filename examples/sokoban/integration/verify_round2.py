@@ -22,17 +22,19 @@ for _p in (HERE, REPO):
         sys.path.insert(0, _p)
 
 from godot_tcp_adapter import GodotTcpAdapter  # noqa: E402
+from ugt.core.trial import GateRunner  # noqa: E402
 from invariants import SUITE  # noqa: E402
 
 SOLUTIONS = os.path.join(HERE, "..", "game", "levels", "solutions.json")
 OPPOSITE = {0: 1, 1: 0, 2: 3, 3: 2}
 
-checks: list[tuple[bool, str, str]] = []
+gate = GateRunner()
 
 
 def check(ok, label, detail=""):
-    checks.append((bool(ok), label, detail))
-    print(f"  [{'PASS' if ok else 'FAIL'}] {label}" + (f"  — {detail}" if detail else ""))
+    """Adapter to GateRunner's (name, ok, detail) order, kept so the call sites below read naturally."""
+    return gate.ck(label, ok, detail)
+
 
 
 class Driver:
@@ -70,8 +72,8 @@ def main() -> int:
     try:
         drv.reset()
 
-        # ---- no-op probes, per level ----------------------------------------
-        print("\n  -- deliberate no-ops (F1 wall / F3 blocked push) --")
+        # ---- F1: walking into a WALL is inert -------------------------------
+        print("\n  -- F1: wall no-op --")
         noop_seen = 0
         for d in (0, 1, 2, 3):
             b = drv.state
@@ -81,18 +83,38 @@ def main() -> int:
                 if a == b:
                     noop_seen += 1
                 else:
-                    check(False, f"a blocked move in direction {d} still mutated state",
-                          f"delta={ {k: (b[k], a[k]) for k in a if a[k] != b[k]} }")
+                    gate.ck(f"a blocked move in direction {d} still mutated state", False,
+                            f"delta={ {k: (b[k], a[k]) for k in a if a[k] != b[k]} }")
             else:
                 drv.step(OPPOSITE[d])  # undo, leave no trace
-        check(noop_seen > 0, "a blocked move changes NOTHING at all (whole state identical)",
-              f"{noop_seen} of 4 directions were total no-ops")
+        gate.ck("F1: a wall-blocked move changes NOTHING at all (whole state identical)",
+                noop_seen > 0, f"{noop_seen} of 4 directions were total no-ops")
+
+        # ---- F3: a blocked BOX PUSH is inert --------------------------------
+        # Distinct from F1, and deliberately so: an earlier version of this rung
+        # only probed for "some direction is a no-op", which finds a WALL and
+        # therefore re-tested F1 while claiming to cover F3. On level_01
+        # (player (3,3), box (2,2)) `up` lines up, the first `left` pushes the
+        # box to x=1, and the second `left` would shove it into the wall at x=0.
+        print("\n  -- F3: blocked box push --")
+        drv.reset()
+        drv.step(0)                       # up
+        pre = drv.state
+        post = drv.step(2)                # left — this push must be ACCEPTED
+        gate.ck("F3 setup: the first box push is accepted",
+                post["moves_taken"] == pre["moves_taken"] + 1,
+                f"moves {pre['moves_taken']} -> {post['moves_taken']}")
+        b = drv.state
+        a = drv.step(2)                   # left again — box would hit the wall
+        gate.ck("F3: a box pushed into a wall is refused, state COMPLETELY unchanged",
+                a == b, f"player stayed ({b['player_x']},{b['player_y']}), "
+                        f"moves stayed {b['moves_taken']}")
 
         # An out-of-range action must be equally inert.
         b = drv.state
         a = drv.step(99)
-        check(a == b, "an out-of-range action_id is completely inert",
-              f"moves_taken stayed {b['moves_taken']}")
+        gate.ck("an out-of-range action_id is completely inert", a == b,
+                f"moves_taken stayed {b['moves_taken']}")
 
         # ---- solve every level ----------------------------------------------
         print("\n  -- solving all 3 levels back to back --")
@@ -140,19 +162,9 @@ def main() -> int:
     finally:
         ad.close()
 
-    passed = sum(1 for ok, _, _ in checks if ok)
-    total = len(checks)
-    print("\n" + "=" * 70)
-    if passed == total:
-        print(f"ROUND 2 MET — {passed}/{total} checks. Every shipped level was solved through the "
-              f"live bridge to all_levels_solved, blocked moves and out-of-range actions were "
-              f"proven totally inert, and all invariants held across {drv.commands} commands.")
-        return 0
-    print(f"ROUND 2 NOT MET — {passed}/{total} checks.")
-    for ok, label, detail in checks:
-        if not ok:
-            print(f"  FAILED: {label}  {detail}")
-    return 1
+    return gate.finish("ROUND 2", f"Every shipped level was solved through the live bridge to all_levels_solved, F1 (wall) "
+        f"and F3 (blocked box push) were proven distinct and totally inert, and all invariants "
+        f"held across {drv.commands} commands.")
 
 
 if __name__ == "__main__":

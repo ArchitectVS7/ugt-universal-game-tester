@@ -25,6 +25,7 @@ for _p in (HERE, REPO):
         sys.path.insert(0, _p)
 
 from godot_tcp_adapter import GodotTcpAdapter  # noqa: E402
+from ugt.core.trial import GateRunner, first_divergence  # noqa: E402
 from invariants import SUITE  # noqa: E402
 from ugt.core.exploit_hunter import ExploitHunter  # noqa: E402
 
@@ -32,12 +33,13 @@ ACTIONS = {0: "up", 1: "down", 2: "left", 3: "right"}
 STEPS = 120          # PRD asks for >= 100
 SEEDS = (0, 1)
 
-checks: list[tuple[bool, str, str]] = []
+gate = GateRunner()
 
 
 def check(ok, label, detail=""):
-    checks.append((bool(ok), label, detail))
-    print(f"  [{'PASS' if ok else 'FAIL'}] {label}" + (f"  — {detail}" if detail else ""))
+    """Adapter to GateRunner's (name, ok, detail) order, kept so the call sites below read naturally."""
+    return gate.ck(label, ok, detail)
+
 
 
 def replay(seq, port_hint=None):
@@ -101,10 +103,12 @@ def main() -> int:
     seq = [0, 2, 2, 0, 3, 1, 2, 0, 0, 3, 1, 1, 2, 3, 0]
     a = replay(seq)
     b = replay(seq)
-    same = json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
-    check(same, "two fresh processes replay the same actions byte-identically",
-          "" if same else f"first divergence at index "
-                          f"{next(i for i,(x,y) in enumerate(zip(a,b)) if x!=y)}")
+    # first_divergence() is the framework's own helper: None when the two streams
+    # match, otherwise the index of the first differing state — which is the only
+    # detail worth printing when a determinism check fails.
+    div = first_divergence(a, b)
+    check(div is None, "two fresh processes replay the same actions byte-identically",
+          "" if div is None else f"first divergence at index {div}")
     distinct = len({json.dumps(s, sort_keys=True) for s in a})
     check(distinct > 1, "the determinism proof is NON-VACUOUS (state actually moved)",
           f"{distinct} distinct states over {len(a)} steps")
@@ -119,20 +123,10 @@ def main() -> int:
     check(bool(fired), "the shared invariant suite FIRES on a corrupted transition",
           f"{len(fired)} violation(s): {fired[:2]}")
 
-    passed = sum(1 for ok, _, _ in checks if ok)
-    total = len(checks)
-    print("\n" + "=" * 70)
-    if passed == total:
-        print(f"ROUND 3 MET — {passed}/{total} checks. UGT's real ExploitHunter drove the live "
-              f"Godot bridge for {total_steps} random steps across {len(SEEDS)} seeds with zero "
-              f"findings, every illegal action id was proven state-inert, two fresh processes "
-              f"replay byte-identically, and the invariant suite was shown able to fail.")
-        return 0
-    print(f"ROUND 3 NOT MET — {passed}/{total} checks.")
-    for ok, label, detail in checks:
-        if not ok:
-            print(f"  FAILED: {label}  {detail}")
-    return 1
+    return gate.finish("ROUND 3", f"UGT's real ExploitHunter drove the live Godot bridge for {total_steps} random steps "
+        f"across {len(SEEDS)} seeds with zero findings, every illegal action id was proven "
+        f"state-inert, two fresh processes replay byte-identically, and the invariant suite was "
+        f"shown able to fail.")
 
 
 if __name__ == "__main__":
