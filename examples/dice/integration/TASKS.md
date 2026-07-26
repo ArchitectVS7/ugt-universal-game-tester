@@ -82,6 +82,8 @@ diff is empty (byte-identical).
 
 **Delivered (2026-07-25):** `exploit_hunt.py` — **TIER 2 MET, 8/8 checks**. 7 invariants (force in 0..20 and non-increasing, round monotonic and capped, winner implies battle_over, battle_over terminal+inert, winner value legal), 2 seeds x 120 random steps (>=100 required), 0 findings; byte-identical same-seed replay proven non-vacuous; negative control proving all 7 invariants can fire and none false-positives. Also carries PRD F2 and F5, which the feature-map model cannot express (see README). Spawns/reaps its own server on an ephemeral port so a stale :8080 cannot substitute a different bundle.
 
+**Superseded (2026-07-26):** `exploit_hunt.py` has been replaced by the full trial ladder — `spike_dice.py`, `smoke_dice_adapter.py`, `verify_round1.py`, `verify_round2.py`, `verify_round3.py`. Everything it did is still covered and then some: its random walks and determinism check are now R3, its defense-vs-attack A/B and its knockout drive are now R2 (where they belong, since both are content-spine claims). Invariants moved into a shared `invariants.py` built on `InvariantSuite`, so R1/R2 and R3 assert the identical predicates instead of two hand-maintained copies.
+
 ### T-006 · `strategy-guide.md` + playtest run — `status: BLOCKED(awaiting user approval to spend API credits)` · `coder: sonnet` · `after: T-004`
 Write the strategy guide per PRD (ruleset, 7 choices, win condition, no
 assumed context). Run `ugt playtest` once with `--max-actions 30` to confirm
@@ -96,3 +98,23 @@ max-actions budget honestly reported as insufficient).
 
 **Deliberately deferred:** RL train/evaluate profiles (legacy tier, not the
 point of this example).
+
+## M4 — Trial ladder (added 2026-07-26)
+
+The rungs below were not in the original list; this integration was written
+CLI-first (`ugt verify` + a standalone hunt) and later brought up to the same
+five-rung shape the other integrations use, so all three examples can be run
+and read the same way.
+
+### T-007 · Full trial ladder — `status: DONE` · `coder: opus` · `after: T-005`
+`serve_process.py` (shared server lifecycle, ephemeral port), `invariants.py`
+(8 predicates via `InvariantSuite`, shared by all rungs), and the five rungs.
+**Accept:** every rung fail-closed via `GateRunner`, each proving its own
+non-vacuity, all green from a cold machine.
+
+**Delivered (2026-07-26):** SPIKE 17/17 (+1 finding) · SMOKE 8/8 (+1 finding) ·
+R1 12/12 · R2 10/10 (+1 finding) · R3 10/10 (+1 finding). The spike immediately
+found something the CLI tiers never touched — `__SEND_ACTION__` THROWS on an
+out-of-range action id where the other two examples return unchanged state —
+and R3 quantified the termination gap: only ~9% of a 120-step random episode
+lands on a live battle, because the adapter never sees the battle end.
