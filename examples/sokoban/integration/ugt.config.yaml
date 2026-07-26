@@ -1,0 +1,58 @@
+# UGT integration config — Sokoban Mini
+#
+# DOCUMENTARY. `engine.type: custom` means env.py has no adapter to dispatch:
+# the ladder scripts import `GodotTcpAdapter` and construct it themselves, the
+# same precedent examples/harness-game sets. So `ugt verify` / `ugt playtest`
+# do not drive this game — the rungs below do:
+#
+#   python3 spike_sokoban.py           # raw TCP contract
+#   python3 smoke_sokoban_adapter.py   # BaseAdapter contract
+#   python3 verify_round1.py           # R1 — one level solved, F1-F5
+#   python3 verify_round2.py           # R2 — all 3 levels, no-op probes
+#   python3 verify_round3.py           # R3 — exploit hunter + replay
+#
+# Godot has no built-in UGT engine type, and none of the built-ins fit: it is
+# not a web page (browser), and its frame-based _process() loop cannot do a
+# blocking stdin.readline() the way a Python/Node script can (simulation) — a
+# non-blocking TCP socket polled once per frame is Godot's natural idiom.
+#
+# `engine.entry` is intentionally absent: "custom" is the one type where it is
+# optional, because there is no entrypoint for env.py to spawn. The adapter
+# owns the bridge's lifecycle instead (see bridge_process.py).
+
+project:
+  name: "SokobanMini"
+  version: "1.0.0"
+
+engine:
+  type: "custom"
+  # Read by the ladder scripts, not by env.py.
+  host: "127.0.0.1"
+  # Omitted deliberately: bridge_process.py picks an EPHEMERAL port per run, so
+  # two runs cannot collide and a stale bridge on the default 8910 can never be
+  # silently mistaken for the one under test.
+  # port: 8910
+  game_dir: "../game"
+
+observation_space:
+  type: "box"
+  shape: 6
+  mappings:
+    - { path: "level_index",     min: 0, max: 2 }
+    - { path: "player_x",        min: 0, max: 32 }
+    - { path: "player_y",        min: 0, max: 32 }
+    - { path: "boxes_on_target", min: 0, max: 8 }
+    - { path: "boxes_total",     min: 0, max: 8 }
+    - { path: "moves_taken",     min: 0, max: 500 }
+
+action_space:
+  type: "discrete"
+  size: 4
+  actions:
+    0: { name: "up" }
+    1: { name: "down" }
+    2: { name: "left" }
+    3: { name: "right" }
+
+evaluation:
+  victory_key: "all_levels_solved"
