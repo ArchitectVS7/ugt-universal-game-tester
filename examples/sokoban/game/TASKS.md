@@ -42,7 +42,7 @@ Statuses: `TODO` | `IN-PROGRESS` | `DONE` | `BLOCKED(reason)`
 
 ## M0 — Scaffold + test harness
 
-### T-001 · Godot project scaffold — `status: TODO` · `coder: sonnet` · `after: —`
+### T-001 · Godot project scaffold — `status: DONE` · `coder: sonnet` · `after: —`
 Create the Godot 4 project: `project.godot`, one main scene, and empty
 `res://scripts/`, `res://levels/`, `res://tests/` directories. Do **not**
 commit `.godot/` (the machine-specific import cache) — the Gate regenerates
@@ -50,6 +50,20 @@ it on every run, including on a fresh clone.
 **Accept:** on a fresh clone, `godot4 --headless --editor --path . --quit`
 exits 0, and `godot4 --headless --path . --quit` opens and closes the project
 with no errors on stderr.
+
+**Delivered (2026-07-25):** Added `project.godot` (Godot 4.4, gl_compatibility
+renderer, 640×480 viewport, `main.tscn` as the run scene), the empty
+`main.tscn` root `Node2D` wired to a deliberately-empty `scripts/main.gd`
+(doc-commented to say push/collision/win rules must live only in the future
+`board.gd`), and empty `res://scripts/`, `res://levels/`, `res://tests/`
+directories (kept present via `.gitkeep` where Godot itself left them empty).
+Added a repo-local `.gitignore` for `.godot/` per the standing constraint —
+the machine-specific import cache is never committed since the Gate
+regenerates it every run. Scope boundary: no gameplay, no board/rules script,
+and no test runner — those are T-002 onward; this task is scaffold-only and
+was verified against the two `godot4 --headless` Accept commands, not against
+the project's own test suite (which does not exist yet).
+Orchestration: graphify=none — no `graphify-out/graph.json` in the repo root (checked); scaffold task is self-contained anyway. · attempts=1/4.
 
 ### T-002 · Headless test runner — `status: TODO` · `coder: opus` · `after: T-001`
 Write `tests/run_tests.gd`, run as `godot4 --headless --path . -s

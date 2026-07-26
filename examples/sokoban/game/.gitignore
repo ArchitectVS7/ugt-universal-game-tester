@@ -1,0 +1,3 @@
+# Godot's machine-specific import cache. The Gate regenerates it on every run
+# (godot4 --headless --editor --path . --quit), including on a fresh clone.
+.godot/
