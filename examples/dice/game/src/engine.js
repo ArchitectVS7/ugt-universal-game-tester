@@ -16,6 +16,10 @@
  *
  * Layer 3 (T-004): battle end conditions (`battle_over` / `winner`) — see the
  * banner comment above `evaluateOutcome`.
+ *
+ * Layer 4 (T-005): the deterministic AI opponent (`presetForForceStrength` /
+ * `chooseEnemyPreset`) plus the `applyAction(state, actionId)` wrapper the UI
+ * and the UGT hooks drive — see the banner comment at the bottom of the file.
  */
 
 /** Faces on a die. */
@@ -435,4 +439,92 @@ export function evaluateOutcome(playerFS, enemyFS, roundNumber) {
   if (playerFS <= 0) return { battle_over: true, winner: 'enemy' }
   if (roundNumber >= MAX_ROUNDS) return { battle_over: true, winner: 'draw' }
   return { battle_over: false, winner: null }
+}
+
+/* ------------------------------------------------------------------------- *
+ * T-005 — the deterministic AI opponent.
+ *
+ * PRD: "allocate defense dice proportional to `1 - own_FS/20` (rounded to
+ * nearest preset), rest to attack. No hidden state, no RNG in the decision."
+ *
+ * The whole heuristic is `presetForForceStrength`, a total function of a single
+ * number, so the Accept criterion ("a pure function of its current FS") is
+ * assertable with no state fixture at all. `chooseEnemyPreset` is the thin
+ * state-level entry point, and `applyAction` is the single-argument wrapper D8
+ * promised to T-006/T-007. Neither adds a rule of its own.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * The preset index this side plays at the given Force Strength.
+ *
+ * "Rounded to nearest preset" is literally "round the defense-die count to the
+ * nearest integer", because `ALLOCATIONS[i].defense === i` and
+ * `ALLOCATIONS[i].attack === POOL_SIZE - i` for every preset — so choosing a
+ * defense count *is* choosing an index, and "remainder to attack" follows for
+ * free since every preset sums to `POOL_SIZE`. That structural fact is asserted
+ * in the tests rather than assumed here.
+ *
+ * The arithmetic is written as `POOL_SIZE * (STARTING_FS - fs) / STARTING_FS`
+ * rather than `POOL_SIZE * (1 - fs / STARTING_FS)`. The two are algebraically
+ * identical, but the integer-numerator form keeps the half-way cases exactly
+ * representable instead of leaning on `1 - 0.75`-style intermediates. The
+ * golden FS→preset table in `ai.test.js` is what actually pins the mapping.
+ *
+ * D11 — TIE-BREAK ROUNDS TOWARD DEFENSE. `Math.round` is half-up, so the only
+ * two half-way values in range go to the more defensive preset: `fs = 15` gives
+ * 1.5 → 2, and `fs = 5` gives 4.5 → 5. That is a decision, not an accident.
+ *
+ * D12 — CLAMPED, AND TOTAL. `resolveRound` floors FS at 0 and `STARTING_FS` is
+ * the maximum, so every reachable state already lands in `[0, POOL_SIZE]`. The
+ * clamp is here anyway so a hand-built or rewound state (negative FS, FS above
+ * the start) still yields a legal preset rather than an out-of-range index —
+ * the same defensive posture `evaluateOutcome` takes with its `<=`/`>=`.
+ *
+ * @param {number} fs this side's Force Strength
+ * @returns {number} a preset index in [0, ALLOCATIONS.length - 1]
+ */
+export function presetForForceStrength(fs) {
+  if (typeof fs !== 'number' || !Number.isFinite(fs)) {
+    throw new TypeError(`presetForForceStrength: fs must be a finite number, got ${String(fs)}`)
+  }
+  const defenseDice = Math.round((POOL_SIZE * (STARTING_FS - fs)) / STARTING_FS)
+  return Math.min(ALLOCATIONS.length - 1, Math.max(0, defenseDice))
+}
+
+/**
+ * The enemy's allocation for the round about to be resolved.
+ *
+ * D13 — THE AI READS ONLY ITS OWN FS. Not the round number, not the player's
+ * FS, not the log, not the seed, not any memory of earlier rounds. That is
+ * exactly what makes "same FS → same preset" assertable, and it is why this
+ * function is one line: any lookahead or difficulty tuning would be a different
+ * game than the PRD's deliberately shallow heuristic.
+ *
+ * Reads the *pre-round* state (the same object handed to `resolveRound`), so
+ * the enemy reacts to the strength it starts the round with — consistent with
+ * D2, where every bonus reads the round-start snapshot.
+ *
+ * @param {object} state
+ * @returns {number} a preset index in [0, ALLOCATIONS.length - 1]
+ */
+export function chooseEnemyPreset(state) {
+  return presetForForceStrength(state.enemy.force_strength)
+}
+
+/**
+ * Resolve one round against the AI: the caller supplies only the player's
+ * action id, the enemy's allocation comes from the heuristic above.
+ *
+ * This is the seam T-006's buttons and T-007's `__SEND_ACTION__` both call. It
+ * is deliberately a one-liner — every rule it appears to have is really
+ * `resolveRound`'s. In particular an invalid `actionId` still raises the same
+ * `RangeError` from `presetAt`, and a call made after the battle is over is
+ * still D10's no-op returning the identical state object.
+ *
+ * @param {object} state
+ * @param {number} actionId 0-6, the player's allocation preset
+ * @returns {object} the new state (or `state` itself if the battle is over)
+ */
+export function applyAction(state, actionId) {
+  return resolveRound(state, actionId, chooseEnemyPreset(state))
 }

@@ -145,11 +145,35 @@ Orchestration: graphify=none — no `graphify-out/graph.json` exists in this
 repo root (`examples/dice/game`) or above it, so there is no graph to query; I
 grounded the plan in `PRD.md`, · attempts=1/4.
 
-### T-005 · Deterministic AI opponent — `status: TODO` · `coder: sonnet` · `after: T-003`
+### T-005 · Deterministic AI opponent — `status: DONE` · `coder: sonnet` · `after: T-003`
 Implement the AI allocation heuristic (`defense dice ∝ 1 - own_FS/20`, rounded
 to nearest preset, remainder to attack). No RNG in the choice.
 **Accept:** unit test asserts the AI's chosen preset is a pure function of its
 current FS (same FS → same preset, across repeated calls).
+
+**Delivered (2026-07-25):** Added `presetForForceStrength(fs)` to
+`src/engine.js` as a total, pure function of a single number — the PRD's
+`1 - own_FS/20` ratio is computed as the integer-numerator form
+`POOL_SIZE * (STARTING_FS - fs) / STARTING_FS` (exact at the half-way cases
+rather than leaning on a float intermediate), rounded with `Math.round`
+(half-up, so both exact half-way FS values — 15 and 5 — round toward the more
+defensive preset, D11), then clamped into `[0, ALLOCATIONS.length - 1]` (D12)
+so a hand-built or rewound out-of-range FS still yields a legal preset. Added
+`chooseEnemyPreset(state)` as the one-line state-level entry point that reads
+only `state.enemy.force_strength` (D13 — no round number, player FS, seed, or
+log), and `applyAction(state, actionId)` as the single-argument
+`resolveRound` wrapper T-006/T-007 will call, adding no rule of its own. New
+`src/ai.test.js` covers the Accept criterion head-on (repeated calls and
+structurally different states at the same FS agree), the full FS→preset table
+0–20, the D11 tie-breaks, the D12 clamp, monotonicity, the `applyAction`
+wiring identity against `resolveRound`, pre- vs post-round FS timing,
+post-battle inertness, invalid-action-id throwing, and a `Math.random`-throws
+discipline check plus same-seed replay. Scope was held to this layer only —
+`src/engine.js`'s existing state shape, `resolveRound`, and `evaluateOutcome`
+were not touched, and no UI or `window.__*__` hook work (T-006/T-007) was
+done. Gate: `npm test -- --run` green, `npm run build` and `npm run lint`
+both clean.
+Orchestration: graphify=none — no `graphify-out/graph.json` exists in this repo root (`examples/dice/game`) or anywhere above it; I grounded the plan in `PRD.md`, `TASKS.md`, `src/engi · attempts=1/4.
 
 ## M2 — UI + UGT hooks
 
