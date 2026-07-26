@@ -177,13 +177,42 @@ Orchestration: graphify=none — no `graphify-out/graph.json` exists in this rep
 
 ## M2 — UI + UGT hooks
 
-### T-006 · Round log + HP display — `status: TODO` · `coder: sonnet` · `after: T-004, T-005`
+### T-006 · Round log + HP display — `status: DONE` · `coder: sonnet` · `after: T-004, T-005`
 Build the React UI: FS bars for both sides, a scrolling round log with flavor
 text ("Your soldiers charge forward!", "Enemy reinforcements arrive!"), and 7
 allocation buttons.
 **Accept:** manual allocation click resolves a round and updates the log and
 bars; a Vitest component test spies on `console.error`/`console.warn` during
 a scripted multi-round battle and asserts zero calls.
+
+**Delivered (2026-07-25):** Rebuilt `src/App.jsx` as a pure render/dispatch
+tree over a new `useBattle` hook (`src/useBattle.js`) that owns the only
+`createInitialState`/`applyAction` calls in the UI layer — a `useRef` mirror
+alongside `useState` so `sendAction` can return the freshly-applied state
+synchronously, which T-007's `window.__SEND_ACTION__` will need. The screen
+renders a `ForceBar` per side (FS number + percentage bar + a bonus-dice
+callout when `bonus_dice > 0`), the 7 `AllocationButtons` read straight off
+`ALLOCATIONS` (no hardcoded labels), a `RoundLog` listing newest-round-first,
+a battle-over outcome banner keyed off `state.winner`'s enum, and a "muster a
+new battle" reset button. All log prose was pulled into a new
+`src/flavor.js` (`flavorLines(record)`), which is presentation-only and
+RNG-free: every line is gated on a field the engine already wrote
+(`bonuses.morale`, `.dug_in`, `.reinforcements`, `damage_taken`), never on
+round number or a recomputed comparison, and posture wording ("charge
+forward!" vs "braces behind the earthworks") is a lookup over
+`preset_index` sized off `ALLOCATIONS.length` so it can't drift if that
+table changes shape. New `src/App.test.jsx` (7 tests) and `src/flavor.test.js`
+cover the Accept criterion head-on — a scripted multi-round battle driven via
+real button clicks (`fireEvent`) with `console.error`/`console.warn` spies
+asserting zero calls — plus opening-state rendering, single- and
+multi-round log stacking/ordering, the disabled-buttons-plus-reset
+post-battle state, and flavor-line content per bonus/damage combination.
+Scope was held to the UI/flavor layer only — no rule in `src/engine.js` or
+`src/ai.js` was touched, and the `window.__GET_STATE__` /
+`__SEND_ACTION__` / `__RESET__` hooks are deliberately NOT here (T-007, on
+the `useBattle` seam this task built for it). Gate: `npm test -- --run`
+green, `npm run build` and `npm run lint` both clean.
+Orchestration: graphify=none — no `graphify-out/graph.json` exists in this repo root (`examples/dice/game`) or anywhere above it in `_UGT Universal Game Tester/`, so there is no graph  · attempts=1/4.
 
 ### T-007 · Window hooks for UGT — `status: TODO` · `coder: opus` · `after: T-006`
 Expose `window.__GET_STATE__`, `window.__SEND_ACTION__(actionId)`,
