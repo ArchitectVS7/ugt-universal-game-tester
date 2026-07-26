@@ -27,26 +27,50 @@ for s in spike_sokoban smoke_sokoban_adapter verify_round1 verify_round2 verify_
 done
 ```
 
-Recorded results (2026-07-26, against the game at 84/84 tests green):
+Recorded results — **whole ladder re-run 2026-07-26 (late), on the wire contract
+`b66f710` landed**, against the game at 89/89 tests green:
 
 | Rung | Script | Result |
 |---|---|---|
-| 1 | `spike_sokoban.py` | **SPIKE MET — 14/14** |
+| 1 | `spike_sokoban.py` | **SPIKE MET — 18/18** |
 | 2 | `smoke_sokoban_adapter.py` | **SMOKE MET — 9/9** |
-| 3 | `verify_round1.py` | **ROUND 1 MET — 12/12** (+1 finding) |
-| 4 | `verify_round2.py` | **ROUND 2 MET — 13/13** |
+| 3 | `verify_round1.py` | **ROUND 1 MET — 14/14** (F1–F6; no findings — see below) |
+| 4 | `verify_round2.py` | **ROUND 2 MET — 15/15** (90 commands) |
 | 5 | `verify_round3.py` | **ROUND 3 MET — 7/7** (240 random steps, 2 seeds, 0 findings) |
+
+⚠️ **The previous table was stale in four places** (spike 14, R1 12 + a standing
+finding, R2 13, suite 84/84) and nothing failed to say so. `b66f710` added the
+`grid` field and action 4, which grew the spike and both scripted rungs, and the
+table was written before it. **Re-run the ladder rather than citing this table**
+whenever the game or the scripts have moved — a recorded result is evidence about
+a commit, not about the working tree.
 
 Every rung uses `ugt.core.trial.GateRunner`, so a failure is fail-closed
 (non-zero exit) and a game anomaly that is *not* a gate failure has somewhere to
 go — the `[FINDING]` channel, printed in a block above the footer.
 
-Tier 3 (`ugt playtest`) is **not built yet** — no strategy guide, no playtest
-script, nothing run. It is in scope: this is the only one of the three examples
-inside a game engine, so it is the only place the LLM tier can be shown to drive
-one. `playtest.seeding: deterministic` and `probe_action` in `ugt.config.yaml`
-are already set for it. When it runs it measures competence (solved, and moves
-against the committed 73-move solution), never a rate.
+Tier 3 is **not built yet** — no strategy guide, no playtest driver, nothing run.
+It is in scope: this is the only one of the three examples inside a game engine,
+so it is the only place the LLM tier can be shown to drive one. When it runs it
+measures competence (solved, and moves against the committed 73-move solution),
+never a rate.
+
+What exists for it so far, all landed by `b66f710` while *preparing* the tier
+rather than running it: the `grid` field (Finding 4), action 4 = `reload`
+(Finding 5), `playtest.seeding: deterministic` and a non-vacuous `probe_action`
+in `ugt.config.yaml`. What is still missing, so the gap is a list rather than a
+shrug: `strategy-guide.md`; a `playtest_sokoban.py` (this is `engine.type:
+custom`, so the `ugt playtest` CLI cannot dispatch it — the driver has to own the
+bridge lifecycle and call `playtest_game_with_adapter()`, the way
+`examples/dice/integration/playtest_dice.py` does for its server); the
+`playtest.*` context knobs (`objective`, `guide_char_budget`, `history_window`
+— the config carries only the seeding pair today); and a `LESSONS.md` §B P1–P14
+disposition table, which per P12 gets worked through on a local model before any
+paid call.
+
+There is deliberately no `feature-map.yaml` here either: `ugt verify` has no
+`custom` path to dispatch (see `PLAN-FORWARD.md`'s backlog), and the same
+properties are asserted per command by the ladder's own rungs.
 
 ## Files
 
@@ -54,13 +78,13 @@ against the committed 73-move solution), never a rate.
 |---|---|
 | `bridge_process.py` | Spawns / waits for / reaps the headless Godot bridge. Every rung imports it. |
 | `godot_tcp_adapter.py` | Transport-only `BaseAdapter`: connect/reset/step/close over newline-delimited JSON. **No game rules.** |
-| `invariants.py` | The 8 properties, defined once, used by R1/R2 (`check_command`) and R3 (`to_hunter_invariants`). |
+| `invariants.py` | The 9 properties, defined once, used by R1/R2 (`check_command`) and R3 (`to_hunter_invariants`). |
 | `spike_sokoban.py` | Rung 1 — raw protocol, no adapter. |
 | `smoke_sokoban_adapter.py` | Rung 2 — the `BaseAdapter` contract. |
-| `verify_round1.py` | Rung 3 — level 1 solved, F1–F5. |
+| `verify_round1.py` | Rung 3 — level 1 solved, F1–F6. |
 | `verify_round2.py` | Rung 4 — all 3 levels to `all_levels_solved`, no-op probes. |
 | `verify_round3.py` | Rung 5 — invariant fuzzer, illegal ids, replay determinism. |
-| `ugt.config.yaml` | Documentary (`engine.type: custom` — env.py dispatches nothing). |
+| `ugt.config.yaml` | Documentary (`engine.type: custom` — env.py dispatches nothing). 5 actions: four directions plus `4 = reload`. |
 
 ## Findings
 
@@ -81,18 +105,42 @@ is far too weak an assertion for a blocked move: a transport bug can leave the
 position alone while still advancing `moves_taken`. R2 asserts `after == before`
 across every field, and R3 does the same for illegal action ids. Both hold.
 
-**3. `moves_taken` resets on level advance.** So the monotonic invariant is
-scoped to a single `level_index`; asserting it globally would have produced a
-false violation the moment level 1 was solved. Noted because it is exactly the
-kind of thing that gets discovered by a red run rather than by reading a spec.
+**3. `moves_taken` rewinds only on a reload — and this entry used to claim the
+opposite.** What it said was "`moves_taken` resets on level advance", and that is
+false: the counter counts the whole session, and the game's own test suite pins
+it (`test_board.gd`). The one legal decrease is a `reset_level`, which zeroes it
+exactly. `moves_never_decrease` is written to that boundary — a backwards step to
+any non-zero value is a wire or rules defect — rather than being scoped per
+`level_index`, which is what the false belief had produced. Left in place rather
+than deleted, because the belief survived a green ladder: the old invariant was
+*narrower* than the truth, so it never fired and never argued back.
 
-**4. The state contract exposes no box coordinates.** Only `boxes_on_target` /
-`boxes_total`, so a push that does not cross a target is **invisible to a
-black-box tester**. F2 ("a box moves") can therefore only be evidenced where it
-coincides with F4 ("a box reaches a target"). This is raised as a live
-`[FINDING]` in R1 rather than buried here, because adding box positions to the
-wire would let the two be tested independently. It is also the reason the
-first version of this harness got F2 wrong — see below.
+**4. The state contract exposed no box coordinates — CLOSED by `b66f710`.**
+`get_state()` used to carry only `boxes_on_target` / `boxes_total`, so a push that
+did not cross a target was **invisible to a black-box tester**: F2 ("a box
+moves") could only ever be evidenced where it coincided with F4 ("a box reaches a
+target"), and R1 raised it as a live `[FINDING]` on every run. It is also why the
+first version of this harness got F2 wrong (see below).
+
+The wire now carries `grid` — the player-facing ASCII render, one string per row
+in the PRD's legend, the same thing a human reads off the screen. R1 asserts F2
+on its own from it: the accepted push moves a box cell `(2,2) -> (1,2)` while
+`boxes_on_target` stays 0, which the old contract could not express. Reading the
+render is **not** re-implementing a rule — the game drew the grid, the harness
+only looks at it. A ninth invariant, `grid_matches_scalar_state`, checks the
+render against the scalars on every transition so the two halves of the contract
+cannot drift apart.
+
+**5. The PRD promised a retry the game had never bound.** Preparing the LLM tier
+asked a question the scripted rungs never had to: what does a machine player do
+with a wedged box? A human presses R. There was no R — `main.gd` bound no key for
+it, and the PRD's "a player can always retry" was unimplemented. So this is a
+**real product bug found by preparing a test**, not by running one, and it is the
+clearest dual-validation case in this example: the wire needed `reset_level`
+(action 4, dispatched through the board's new `apply_action()`, the one id table
+every front end shares), and giving the machine the capability revealed the human
+never had it either. R1's F6 now proves action 4 returns the exact level-start
+state, and the game's suite covers the keybinding.
 
 ## Corrections to this harness
 
@@ -121,6 +169,13 @@ FAIL or dropped. All five rungs now use `GateRunner` (and R3 uses
 `first_divergence`), which restores the `[FINDING]` channel and removes the
 duplication.
 
+**And this file asserted a fact about the game that was not true** — see
+Finding 3. It is listed here as well as there because the mechanism is a harness
+correction, not a game one: a doc claim and an invariant were written from the
+same wrong belief, and because the invariant was narrower than reality it stayed
+green and never contradicted the doc. Nothing in a passing ladder can catch that;
+only the game's own test suite could, and it did.
+
 ## Notes
 
 Ports are **ephemeral**, not the PRD's fixed 8910. Two consequences, both
@@ -135,3 +190,8 @@ Every rung is a fail-closed gate: it prints `[PASS]`/`[FAIL]` per check and a
 asserts its own non-vacuity — the invariant suite is fed a deliberately
 corrupted transition and must report violations, because a suite that has never
 been seen to fail is not evidence.
+
+Fail-closed is **demonstrated** on the current scripts, not inherited from an
+older run: inverting R1's F4 predicate (`rises > 0` → `rises > 99`) gives
+`ROUND 1 NOT MET — 13/14 checks passed` and exit **1**, and the file was restored
+byte-identical (md5 compared) afterwards rather than reverted with a checkout.

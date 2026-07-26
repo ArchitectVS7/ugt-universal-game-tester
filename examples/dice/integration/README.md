@@ -30,7 +30,8 @@ cd examples/dice/integration && python3 serve.py &
 ugt verify --config ugt.config.yaml --feature-map feature-map.yaml
 ```
 
-Recorded results (2026-07-26, after D19 — game suite 162/162 green):
+Recorded results — **whole ladder re-run 2026-07-26 (late)**, after D19, against
+the game at 162/162 tests green. Every number below came from that pass:
 
 | Rung | Script | Result |
 |---|---|---|
@@ -52,21 +53,34 @@ content-spine claims and belong there. Invariants now live once in
 
 ## Where the PRD's six features live
 
-All six are covered, but not all in `feature-map.yaml` — two of them are not
-expressible in that model, so they are asserted in `exploit_hunt.py` instead.
+All six are covered. Four are in `feature-map.yaml`; two are not expressible in
+that model and live in **R2** (`verify_round2.py`), which is also where the two
+that `exploit_hunt.py` used to own went when it was absorbed.
 
 | PRD | Rule | Where | Why |
 |---|---|---|---|
-| F1 | Attack reduces enemy force | feature map | |
-| F2 | All-defense takes less damage than all-attack | **exploit_hunt.py** | comparison **between two rounds**; a feature only sees before/after of its own action list |
-| F3 | Morale surge (+1 when ahead) | feature map | isolated at round 4 |
-| F4 | Reinforcements (+2 at round 3) | feature map | isolated via the enemy, which has no other bonus that round |
-| F5 | Reaching 0 force sets a decisive winner | **exploit_hunt.py** | **unreachable on the default seed** — see Findings |
-| F6 | Round-12 cap forces a draw | feature map | |
+| F1 | Attack reduces enemy force | feature map | `combat.attack_reduces_enemy_force` |
+| F2 | All-defense takes less damage than all-attack | **R2** | comparison **between two rounds**; a feature only sees before/after of its own action list |
+| F3 | Morale surge (+1 when ahead) | feature map | `bonus.morale_surge_when_ahead`, isolated at round 4 |
+| F4 | Reinforcements (+2 at round 3) | feature map | `bonus.reinforcements_fire_once_at_round_three`, isolated via the enemy, which has no other bonus that round |
+| F5 | Reaching 0 force sets a decisive winner | feature map **+ R2** | `battle.knockout_sets_decisive_winner`. It was unreachable on the default seed for two retunes running and had to live in R2 on a hand-picked seed; post-D18 six `a5_d1` rounds finish it on round 10, so the map can assert it directly. R2 still drives the arm too |
+| F6 | The round-12 cap | **R2** | **The rule itself changed.** D18 made the cap DECIDE on force strength; a draw now happens only on an exact tie. R2 drives all three terminal arms — knockout, points decision at the cap, exact-tie draw — which is a claim about the whole content spine, not a single delta |
 
-The feature map adds a sixth of its own — `battle.concluded_battle_is_inert` —
-because the adapter cannot see termination (Finding 2), so UGT keeps sending
-actions into a finished battle and the harness depends on that being harmless.
+⚠️ Earlier versions of this table sent readers to **`exploit_hunt.py`** for F2 and
+F5, and described F6 as "the cap forces a draw" in the feature map. The file was
+deleted, the rule was rebalanced, and the map has four entries, not six. It is
+recorded rather than silently fixed because it is the documentation half of the
+same failure the ladder keeps catching in code: **a table does not fail when it
+goes stale.**
+
+The map used to add a fifth of its own — `battle.concluded_battle_is_inert` —
+which is **removed** as of 2026-07-26 and worth reading about in
+`feature-map.yaml:124`: it only ever passed *because of* the termination bug
+(Finding 2). With that fixed, the verifier resets after a terminal feature, so a
+feature map structurally cannot look at post-battle state any more. The property
+moved somewhere strictly better — R1 asserts it, R2 asserts it for all seven
+allocations, and `invariants.py::concluded_battle_is_inert` checks it after every
+command in every rung.
 
 ## Tier 3 pre-flight — the `LESSONS.md` §B audit (T-008, 2026-07-26)
 
@@ -185,19 +199,34 @@ calls in `try/except` for this game and not the other two. Worth settling one
 way across all three. Neither `ugt smoke-test` nor the feature map could ever
 have found this: both only ever send ids drawn from the declared action space.
 
-**2. The termination gap, now quantified.** The smoke rung asserts it and R3
-measures the cost: in a 120-step random episode **only ~11 steps (9%) land on a
-live battle**. The rest hammer a concluded one, because `PlaywrightAdapter`
-reads `state.pop("terminated")` while the hooks expose `battle_over`, so UGT
-never sees the match end and the episode never resets. The invariants do still
-cover those steps — "a concluded battle stays inert" is a real property — but
-the effective exploration budget is a tenth of the nominal step count. Adding
-`terminated` to the hook payload is a one-line game change and would multiply
-R3's useful coverage. This generalises: ANY browser game whose terminal flag
-is not literally named `terminated` has the same blind spot.
+**2. The termination gap — quantified, then FIXED (D14).** `PlaywrightAdapter`
+reads `state.pop("terminated")`; the hooks exposed `battle_over` and nothing else,
+so UGT never saw a match end and never reset the episode. R3 put the cost in
+numbers: in a 120-step random episode **only ~11 steps (9%) landed on a live
+battle** — the rest hammered a concluded one. The invariants did still cover those
+steps (a concluded battle staying inert is a real property), but nine tenths of
+the nominal exploration budget was spent proving one thing.
 
-**3. Draws dominated — RETUNED 2026-07-26, and what is left is worse.** The
-original finding: 205 sequences on the shipped seed never got the enemy below
+`ugtHooks.js:173` now returns the structured envelope
+(`{state, terminated: state.battle_over, truncated, info}`), which is deliberately
+**not** the same as adding `terminated` to the state projection — the projection
+is what a human can see on screen, and `terminated` is a transport concern. Today's
+R3 reports **110 live steps across 10 completed battles, 55% of a 200-step budget**,
+against ~9% before.
+
+The fix had a second effect worth knowing, because it looks like a regression: it
+made a feature-map entry start failing, correctly. See the `concluded_battle_is_inert`
+note above — that entry had only ever passed because of this bug.
+
+Still generalises: ANY browser game whose terminal flag is not literally named
+`terminated` has this blind spot, and it presents as a green run with a tenth of
+the coverage it claims.
+
+**3. Draws dominated, then depth did — BOTH CLOSED 2026-07-26, in two retunes.**
+This entry is kept in two halves on purpose: the first retune fixed the symptom
+and left the real defect standing, which is the interesting part.
+
+The original finding: 205 sequences on the shipped seed never got the enemy below
 1 force strength inside the 12-round cap, and only 2 of 12 seeds produced a
 knockout under pure all-attack. `game/tools/balance_sweep.mjs` put a number on
 it — **13% decisive, 87% draws** across four player strategies x 40 seeds.
@@ -207,14 +236,35 @@ match is the intent) and moving `STARTING_FS` 20 -> 12 with `DUG_IN_THRESHOLD`
 10 -> 6. `HIT_THRESHOLD` was left alone on purpose: "a die showing 5 or 6 is a
 hit" is a rule players read in the PRD, where starting strength is just a
 number. Sweep after: **50% decisive**, and an aggressive line converts ~90%.
+(D18 later took it to **91% decisive** on the shipped engine, with `STARTING_FS`
+12 → 8; the cap now decides rather than draws, so a draw needs an exact tie.)
 
-**What the retune did NOT fix, and this is the bigger problem:** allocation
-barely matters. In the same sweep all-attack wins 35 of 60 and a balanced
-allocation wins **1 of 60**. The round-by-round choice is not a trade-off, it
-is a question with one right answer. That follows from the damage model —
-`damage = max(0, attack hits - defense hits)`, so two cautious sides converge
-on zero damage and the AI turtles harder as it drops. Changing that is a design
-decision, not a constant, so it is FILED (R2 prints it every run) not fixed.
+**What that retune did NOT fix — and it was the bigger problem. Now CLOSED by
+D18.** Allocation barely mattered: in the same sweep all-attack won 35 of 60 while
+a balanced allocation won **1 of 60**, so the round-by-round choice was not a
+trade-off but a question with one right answer. It followed from the damage model
+(`damage = max(0, attack hits − defense hits)`, so two cautious sides converge on
+zero damage while the AI turtles harder as it drops), which is why it was filed as
+a **design** question rather than a constant to tune.
+
+Two independent reviews then showed it was structural — the marginal gap between
+an attack die and a defense die is `p(1−p)·P(tie) > 0`, an expression containing no
+balance constant, so no retune could ever have fixed it. Resolved by
+`DEFENSE_BLOCK = 2` plus a cap that decides on force strength, chosen by
+simulating six rule variants over **3.15M battles before any code was written**
+(`LESSONS.md` §D). Best response is now `[3,3,3,3,3,2,0]` rather than all-zeros,
+the regret of all-attack went **0.000 → 0.131**, and optimal play picks a genuine
+mix **61%** of the time against 7% before.
+
+R2 still prints it every run — as a **CLOSED** record with those numbers, not as an
+open item — and `game/tools/balance_sweep.mjs` now warns if regret ever falls back
+under 0.02, so the finding has a regression guard rather than a memory.
+
+**This is the finding that justified the whole robustness-tier rename.** R3 held
+this game green at 11/11 for weeks while one allocation strictly dominated every
+other. Random input against an oracle cannot find "the game's only decision is
+meaningless", because it has no notion of reward to notice it with — see
+`PLAN-FORWARD.md` on the exploit-hunting tier that still does not exist.
 
 **4. `engine.reset_command` is silently ignored whenever `__RESET_GAME__`
 exists.** In `PlaywrightAdapter.reset()`, the soft-reset branch runs first and
@@ -327,6 +377,8 @@ actively harmful" — this time in the warning block rather than the ledger.
 by `(priority, definition order)` — hence all `critical` — and on
 `MAX_TASKS_PER_TURN = 3`. The file header documents both.
 
-`exploit_hunt.py` spawns `serve.py` on an **ephemeral** port rather than 8080,
-so a stale server left on 8080 cannot silently substitute its own bundle for
-the one under test.
+Every rung spawns `serve.py` through `serve_process.py` on an **ephemeral** port
+rather than 8080, so a stale server left on 8080 cannot silently substitute its
+own bundle for the one under test — and `served_bundle()` additionally refuses to
+serve a `dist/` older than `src/`, because the first ladder run after the D18
+rebalance came back green against a stale build.

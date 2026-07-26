@@ -1,6 +1,6 @@
 # Sokoban Mini
 
-Push crates onto targets. Three levels, one box then two then three, four directions and nothing else. You can't die, there's no timer, and the only number the game keeps is how many moves you took. If you wedge a box into a corner you reload the level and try again.
+Push crates onto targets. Three levels, one box then two then three, four directions and an R to start the level over. You can't die, there's no timer, and the only number the game keeps is how many moves you took. If you wedge a box into a corner you reload the level and try again — which sounds like the most obvious sentence in this file, and it's in here because the game didn't actually do it until the tester asked for it. That's further down.
 
 It's built in Godot, and it's here because it's the **custom** example — the one where UGT has no built-in adapter and you write your own. Dice is a browser page, the escape room is a Node process on a pipe, and neither of those shapes fits a game engine: Godot isn't a web page, and its frame loop can't sit blocking on stdin the way a script can. So the game opens a TCP socket, polls it once per frame, and the harness dials in. About a hundred and fifty lines on each side.
 
@@ -19,7 +19,7 @@ Then:
 ```bash
 cd game
 godot4 --headless --editor --path . --quit     # regenerates the import cache on a fresh clone
-godot4 --headless --path . -s tests/run_tests.gd   # 84 tests
+godot4 --headless --path . -s tests/run_tests.gd   # 89 tests
 godot4 --path .                                # play it yourself, arrow keys or WASD
 ```
 
@@ -69,17 +69,29 @@ The rungs originally hand-rolled their own pass/fail counters instead of using U
 
 All five rungs use the gate runner now, which brings back the findings channel — and it paid for itself on the very next run.
 
-### The wire can't see the boxes
+### The wire couldn't see the boxes — and then it could
 
-R1 immediately raised one: the state the game reports has the player's position, how many boxes are on targets, and the move count. **It never says where the boxes are.** So a push that doesn't happen to cross a target is completely invisible to a black-box tester. "A box moved" can only ever be evidenced in the same breath as "a box reached a target", which puts a hard ceiling on what that check can prove — and is exactly why it was easy to get wrong in the first place.
+R1 raised this one on every single run: the state the game reported had the player's position, how many boxes were on targets, and the move count. **It never said where the boxes were.** So a push that didn't happen to cross a target was completely invisible to a black-box tester. "A box moved" could only ever be evidenced in the same breath as "a box reached a target", which put a hard ceiling on what that check could prove — and is exactly why it was easy to get wrong in the first place.
 
-That's a wire-contract improvement, not a bug. It's raised on every R1 run rather than buried in a document, so it can't get quietly forgotten.
+I left it as a live finding rather than a document footnote precisely so it couldn't get quietly forgotten, and that worked: it's fixed now. The state carries a `grid` — the player-facing ASCII picture, one string per row, the same legend the game draws on screen. R1 now proves "a box moved" on its own terms: the box goes from one cell to another while the on-target count stays at zero, which the old contract had no way to say.
 
-The broader habit: work out what you genuinely **can't observe** while you're still poking the raw protocol, before you write a confident-looking assertion around a blind spot.
+Two things I'd carry from it. **Reading the game's own render isn't re-implementing the game** — the harness looks at a picture the game drew, which is what a human does; parsing the level file to work out where the walls are would have been the other thing entirely, and that's the line I care about. And the fix came out of the LLM tier prep rather than the ladder, because a model needs to be told no less than a human at the keyboard, and a human can see the boxes.
+
+The broader habit still stands, and it's the reason this got fixed rather than lived with: work out what you genuinely **can't observe** while you're still poking the raw protocol, before you write a confident-looking assertion around a blind spot.
+
+### The PRD promised a retry that didn't exist
+
+Same session, and this one's a real bug in the game rather than in the wire.
+
+Getting ready to let a model play, I asked what it should do when it wedges a box. A human presses R. So I went looking for R, and there wasn't one — `main.gd` bound the four arrows and WASD and nothing else. The PRD says in as many words that a player can always retry. Nobody had implemented it, every test suite was green, and eighty-four passing tests had never asked.
+
+It took a machine player to notice, because a machine player *has* to have an answer to "now what" — a wedged box ends its episode, so the missing capability is fatal rather than annoying. A human just sighs and quits to the menu.
+
+Both sides got it: the wire has action 4, the keyboard has R, and both go through one shared dispatch on the board so they can't drift into meaning different things. **The general shape: designing for the machine player audits the human one.** The tester didn't find this by running, it found it by being specified.
 
 ### Small ones, each of which cost a red run
 
-- **A move counter that resets.** `moves_taken` starts over when you advance a level, so the "it only ever goes up" invariant is scoped to a single level. Asserting it globally would have fired falsely the instant level 1 was solved. That's a fact about the game you learn from a red run, not from reading the spec.
+- **A move counter I was wrong about twice.** I had written down that `moves_taken` starts over when you advance a level, so the "it only ever goes up" invariant got scoped to a single level. It doesn't start over — the counter runs for the whole session, and the game's own test suite says so explicitly. The invariant was *narrower* than the truth, which is the sneaky kind of wrong: it never fired, so it never argued with the note, and both sat there agreeing with each other through a green ladder. The real boundary is that a reload rewinds it to exactly zero and nothing else may take it backwards, which is what it now asserts. **Two artifacts written from one wrong belief will corroborate each other forever.**
 - **A no-op check has to compare the whole state.** "The player didn't move" is far too weak for a blocked push — a transport bug can leave the position alone and still tick the move counter. Blocked moves and illegal action ids now both require the entire state dict to come back byte-identical.
 - **Two scripts only worked because UGT was installed on my machine.** They put their own directory on the path but not the repo root, so on a bare clone they'd have died instantly with `ModuleNotFoundError`. Found by deliberately running the ladder in a venv with nothing installed — worth doing once per example, and it only takes a minute.
 - **Ports are ephemeral and the launcher refuses to attach.** Not the fixed port the PRD specified. Two runs can't collide, and a bridge left over from an earlier build can never be mistaken for the one under test. This repo has already lost an entire campaign to a stale server answering on the expected port.
@@ -94,13 +106,15 @@ The pattern from the other two examples holds here: pointing the tester at a gam
 
 ## Where it's up to
 
-Ladder green at **14 · 9 · 12 · 13 · 7**, game suite **84/84**. Re-run from scratch today rather than copied out of the table — the rule in this repo is that a number in a README is evidence about one commit, and a results table doesn't fail when it goes stale, it just quietly stops being true.
+**As of 2026-07-26**, ladder green at **18 · 9 · 14 · 15 · 7**, game suite **89/89**. Re-run from scratch rather than copied out of the table — the rule in this repo is that a number in a README is evidence about one commit, and a results table doesn't fail when it goes stale, it just quietly stops being true. Which it did: this section used to read `14 · 9 · 12 · 13 · 7` and `84/84`, both true when written, both wrong the moment the wire gained a field and the ladder grew checks to cover it. Two rungs got bigger, and per our own rule that's the point — a gate that returns its old count after the contract changed never tested the change.
 
-Fail-closed is demonstrated, not assumed: breaking one assertion on purpose gives `ROUND 1 NOT MET — 11/12 checks passed` and exit 1. Every rung also feeds its invariant suite a deliberately corrupted transition and requires it to complain, because a suite that's never been seen to fail is decoration.
+Fail-closed is demonstrated on *these* scripts, not assumed from an older run: inverting R1's box-reached-a-target predicate gives `ROUND 1 NOT MET — 13/14 checks passed` and exit 1, and I compared the checksum afterwards to be sure the file went back exactly as it was. Every rung also feeds its invariant suite a deliberately corrupted transition and requires it to complain, because a suite that's never been seen to fail is decoration.
 
-**The LLM tier hasn't been run here yet, and it's the next thing.** Dice and the escape room have both had a model driving them; this one hasn't, and that's the gap I actually care about closing, because it's the only one of the three inside a game engine. A browser page and a subprocess have both been proven to carry a model's decisions. A Godot frame loop over a socket has not, and *"can a language model play a game running in a real engine"* is a different question from *"can a harness step it."*
+**The LLM tier still hasn't been run here, and it's the next thing.** Dice and the escape room have both had a model driving them; this one hasn't, and that's the gap I actually care about closing, because it's the only one of the three inside a game engine. A browser page and a subprocess have both been proven to carry a model's decisions. A Godot frame loop over a socket has not, and *"can a language model play a game running in a real engine"* is a different question from *"can a harness step it."*
 
-Four directions and three levels is about the smallest surface that question can be asked on — no economy, no combat, no hidden state, nothing to read but a grid position and a box count. If it can't work here it won't work anywhere, and if it does work it's the transport that's been proven rather than the puzzle.
+Preparing for it has already paid for itself twice over without a single model call — the `grid` field and the missing R key both came out of asking "what would a player see, and what could a player do?" — but the run itself is genuinely not done. What's missing is a briefing, a driver script (this is a `custom` engine, so the CLI can't dispatch it), the context budgets, and the pre-flight checklist. That list is written out in [`integration/README.md`](integration/README.md) so it's a task rather than a vibe.
+
+Four directions, three levels and an R is about the smallest surface that question can be asked on — no economy, no combat, no hidden state, nothing to read but a grid and a box count. If it can't work here it won't work anywhere, and if it does work it's the transport that's been proven rather than the puzzle.
 
 What it'll measure when it runs is **competence, not balance**: solved or not, and moves against the committed 73. There's no win rate to quote — the game has no randomness at all, so every episode is the same three puzzles in the same order and the honest sample size is one however many you run. The config already says `seeding: deterministic` out loud for exactly that reason.
 

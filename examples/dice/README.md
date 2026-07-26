@@ -265,4 +265,14 @@ Two things, and neither is about dice.
 
 **And a measurement that can't express doubt is worse than no measurement.** Both times I got that wrong today — the ±0.0% interval, and the tester telling the model a rule that didn't exist — the output looked more confident, not less. That's the direction these mistakes always fail in.
 
-More will land here as we keep going. The full technical write-up, including the findings that are only useful to Claude, stays in [`integration/README.md`](integration/README.md).
+## Where it's up to
+
+**As of 2026-07-26**, ladder green at **19 · 9 · 12 · 14 · 13**, game suite **162/162**, `ugt verify` **4/4** with 0 failed. Re-run from scratch rather than copied down from the sections above — everything higher up in this file is a diary entry, true about the commit it describes and no further. The 157/157 in the rebalance section, for instance, was accurate that afternoon and five game tests out of date by the evening. That's not a mistake to fix, it's what a diary is; this section is the one that gets re-run.
+
+The feature map is down to four entries from five, and that's a fix rather than a loss. The one that went was asserting that a finished battle ignores further input — which only ever passed *because* the harness couldn't see battles finish. Once it could, the entry correctly failed, and the property moved to somewhere it's checked after every single command instead of once.
+
+**One finding is still open**, and it's deliberately the smallest one: sending an out-of-range action id to this game **throws**, where the other two examples return the state unchanged. Nothing gets corrupted either way and the throwing is intentional — a contract violation should be loud. The gap is that the decision lives in a code comment and never made it into the PRD, so a client has to discover by experiment that it must wrap calls for this game and not the others. Three examples, three transports, and this is the one place they disagree about something a client can observe. Worth settling across all three and writing down where clients actually look.
+
+**The next thing here is stage 2** — the paid model, eight seeds twice over, sixteen battles, paired scoring. Everything up to it is done and free: the pre-flight checklist is worked through, four things it found are fixed, and both local stages ran clean. What's left is a credit decision rather than a blocked one, which is exactly where I wanted it to end up.
+
+The full technical write-up, including the findings that are only useful to Claude, stays in [`integration/README.md`](integration/README.md).
