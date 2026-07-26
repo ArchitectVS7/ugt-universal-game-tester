@@ -72,29 +72,47 @@ a human to trigger:
 ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md --max-actions 40
 ```
 
-**There is no seed axis here, and that is settled, not pending.** The game has
-no RNG at all — one map, one solution, one ending, no lose state — so dice's
-`playtest.episode_seeds` fix has nothing to rotate, and `SubprocessAdapter` does
-not implement `reset_seeded()` (it inherits `BaseAdapter`'s raise). N episodes
-are N replays of the same puzzle. That makes this tier a **competence** measure
-(does a pilot given the guide escape, and in how many moves against the 26-move
-optimum), not a balance figure, and one episode is the honest sample size. If
-variety is ever wanted it has to come from authoring alternate CSV content sets,
-which the game's design already supports.
+**There is no seed axis here, and it is now DECLARED rather than described in
+prose.** The game has no RNG at all — one map, one solution, one ending, no lose
+state — so dice's `playtest.episode_seeds` has nothing to rotate, and
+`SubprocessAdapter` does not implement `reset_seeded()` (it inherits
+`BaseAdapter`'s raise). The config says so explicitly:
+
+```yaml
+playtest:
+  seeding: deterministic
+  probe_action: 4          # `look` — always legal, always moves the state
+```
+
+UGT probes that against the live game before a run starts (verified: PROVEN over
+4 steps, and the vacuity guard confirmed to fire when pointed at an action that
+is inert from the opening position). The consequence: this tier is a
+**competence** measure — does a pilot given the guide escape, and in how many
+moves against the 26-move optimum — never a rate. The run report now carries
+`seeding_mode` and a `sample_note` saying the effective sample size is 1
+regardless of episode count, so the denominator cannot be misread later.
+
+If variety is ever wanted it has to come from authoring alternate CSV content
+sets, which the game's design already supports. See `LESSONS.md` **P13** and
+`ugt/core/seeding.py`.
 
 ## Findings
 
 Things this integration surfaced that are worth knowing.
 
-**1. `ugt verify` exits 0 even when features FAIL.** `handle_verify`
-(`ugt/cli.py`) only calls `sys.exit(1)` on an *exception* — a run reporting
-`1 FAILED` still exits 0. Re-confirmed 2026-07-26 by inverting F6's assertion:
-report said `passed 5 failed 1`, shell still saw exit 0. Every example's gate
-used to be phrased "`ugt verify` … exits 0 with 0 FAILED features", so **a gate
-that checks only the exit code passes a red run**. Also hit independently by
-`dice` (its Finding 5). Until it's fixed, gate on the `failed` count in
-`results/coverage-report.json`, not on `$?` — or use the ladder, which is
-fail-closed by construction.
+**1. `ugt verify` exited 0 even when features FAILED — FIXED 2026-07-26.**
+`handle_verify` (`ugt/cli.py`) discarded `verify_game`'s return value and only
+called `sys.exit(1)` on an *exception*, so a run reporting `1 FAILED` still
+exited 0. Confirmed by inverting F6's assertion: report said `passed 5 failed 1`,
+shell saw 0. Every example's gate is phrased "`ugt verify` … exits 0 with 0
+FAILED features", so **a gate checking only the exit code was passing red runs**.
+Also hit independently by `dice` (its Finding 5).
+
+Now exits 1 on `failed` **or** `not_reached` (a feature never reached has not
+been verified). Negative control run before believing it — inverted assertion
+gives exit 1, clean map gives exit 0 — and every feature-map integration in the
+repo re-run to check nothing had been silently red: `dice` 4/4, `escape-room`
+6/6, `spacerquest` 9/9, all still exit 0. Blast radius was zero.
 
 **2. `ugt smoke-test` passes ~45% of the time on a FROZEN state here.** Only
 **6 of 41** actions change state from the start room, and an inapplicable action
@@ -105,7 +123,9 @@ consecutive runs on 2026-07-26 produced a frozen vector in two of them.
 `smoke_escape_room_adapter.py` drives a known-good script instead and asserts
 the state moved. **This generalises to any game with a large action space and
 context-gated actions** — the smoke tier's uniform-random policy is the wrong
-probe for that shape.
+probe for that shape. Promoted to `LESSONS.md` **O11**; the CLI tier itself is
+unchanged, so `ugt smoke-test` still has this property and the ladder's smoke
+rung is what the gate rests on.
 
 **3. Random play cannot solve this game, by design.** R3's walk reached **9
 distinct states and 2 of 10 rooms in 60 steps**, and never escaped. A uniform

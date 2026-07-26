@@ -76,34 +76,36 @@ Both were fixed at the time. Neither had a test guarding them. They were written
 
 The spike now checks both, and checks the second one the way it actually broke, with the pipe deliberately left open. That's the argument for having a spike rung at all: it's the only place that talks to the raw wire, and wire bugs don't show up anywhere else.
 
-### I was wrong before the game was, twice
+### I was wrong before the game was
 
-Worth recording because it keeps happening.
+R1 went red the first time I ran it, on an invariant I'd written myself: "if you've escaped, you must be standing in the courtyard". But the courtyard has an exit going back south, and escaping is *sticky* by design — the PRD says so. You can walk back inside and the flag stays true. So two of my own invariants were contradicting each other, and the game was right. It now checks the *transition* — you can only ever become escaped in the courtyard — which is compatible with stickiness and still catches winning from the wrong room.
 
-R1 went red the first time I ran it, on an invariant I'd written myself saying "if you've escaped, you must be standing in the courtyard". Except the courtyard has an exit going back south, and escaping is *sticky* by design — the PRD says so. So you can walk back inside and the flag stays true, which is correct behaviour and my check called it a bug. Two of my own invariants contradicting each other. It now checks the *transition* instead — you can only ever become escaped in the courtyard — which is compatible with stickiness and still catches winning from the wrong room.
+(R2's first run went red on a bad assertion of mine too, a miscount. Detail's in the integration notes; it isn't interesting twice.)
 
-Then R2 went red on an assertion that the content ships exactly three objects with no puzzle role. It ships four — I'd been counting the three deliberate red herrings and forgotten the iron bunk bolted to the cell wall, which is scenery and does nothing either. I'd written the three from memory of a sentence I'd typed an hour earlier instead of counting the actual file.
-
-Same lesson both times, and it's one that's already in our rules file: **suspect your own test before you suspect the game.** The failure I *want* is the game being wrong. The failure I keep getting first is me.
+The lesson is already in our rules file: **suspect your own test before you suspect the game.** The failure I *want* is the game being wrong. The failure I keep getting first is me.
 
 ## What this fed back into UGT
 
-Less than the dice game did, and I want to be accurate about that rather than tidy.
+Three things, and this is the part of the process I actually care about — the game is the instrument, and what it measures is the tester.
 
-Two things came out of it that are UGT's problem rather than the escape room's, and **both are filed, not fixed**:
+**`ugt verify` reported failures and then exited zero.** If a feature failed, the report said so — `passed 5, failed 1` — and the shell still saw success. Every example's build gate is worded "exits 0 with 0 failures", so a gate checking the exit code was waving red runs through. I confirmed it by inverting an assertion and watching it happen rather than taking an earlier note's word for it. **Fixed.** Before believing the fix I ran the negative control (inverted assertion → exit 1, clean map → exit 0) and then re-ran every integration in the repo that has a feature map, to find out whether anything had been quietly red all along. Nothing had — all three were genuinely green. That was worth knowing either way.
 
-**`ugt verify` reports failures and then exits zero.** If a feature fails, the report says so — `passed 5, failed 1` — and the shell still sees success. Every example's build gate used to be worded "exits 0 with 0 failures", which means a gate checking the exit code would wave through a red run. I confirmed it directly by inverting an assertion and watching it happen rather than taking the earlier note's word for it. The dice integration had hit the same thing independently. The new ladder sidesteps it by refusing to return zero unless every check passed, but the CLI is still misleading for anyone who trusts it.
+**The smoke test's random probe is the wrong instrument for a game like this.** Five random actions out of 41, when only six do anything from the opening cell, means a ~45% chance of proving nothing. The new smoke rung fixes it for the escape room by driving a known-good script, but the general problem belongs to UGT and it's now written up as a rule so the next game inherits the warning instead of rediscovering it.
 
-**The smoke test's random probe is the wrong shape for context-gated games**, per the 45% above. That's a real framework-level finding and it generalises well beyond this game, and it's currently written down rather than solved.
+**And the seed question turned out to be a design flaw, not an escape-room quirk.** My first instinct was to write "this game has no seeds, that's fine" in a comment here and move on. That's wrong, and it's wrong in a way worth spelling out: UGT decided whether episodes were independent samples by checking whether a seed list *happened to be present in the config*. Absent meant two opposite things. Either "this game is deterministic and one playthrough is the honest sample" — true here — or "I forgot to configure seeds and I'm about to publish a win rate whose denominator is eight and whose real sample size is one." Identical in the config file, identical in the report.
 
-There's a third thing that isn't a bug, just a conclusion: **this game has no seed axis and never will.** No randomness anywhere, one map, one solution, one ending. The fix we built for the dice game — rotate a list of seeds so each playthrough is a different match — has nothing to rotate here. So when we get to the LLM tier, N runs are N replays of the identical puzzle, and the honest thing to measure is competence (does the model escape, and in how many moves against the 26-move optimum) rather than a win rate over a sample that doesn't exist. Settled, not pending.
+So the game now **declares** what it is — `deterministic`, `per_episode`, or `uncontrolled` — and UGT **proves the declaration against the running game** before spending anything. Declare deterministic and it checks two resets really do replay identically. Declare seeded and it checks two seeds really do diverge *and* that one seed reproduces itself, because a reset hook returning random state would pass the first test and be equally broken. It even refuses a probe that never moves the state, since "identical" proves nothing if nothing happened.
 
-The pattern from the dice write-up still holds, though, just at lower volume. **Pointing the tester at a game keeps finding things wrong with the tester.** A simpler game on a simpler transport finds fewer, which is itself the argument for having three of them on three different transports — the browser game found bugs a subprocess game structurally cannot, and this one found a hole in the random-probe design that a six-action game would never have exposed.
+The bit I'd underline: **that proof already existed, in the dice game's own playtest script.** It had been sitting there for a week doing its job perfectly for exactly one game, which meant every other game in the portfolio had no such check and nobody had noticed. Anything you'd end up writing into every integration belongs in the framework instead, keyed off a declaration the game makes. That's the difference between universal and configurable, and configurable is the one that's actually achievable.
+
+The pattern from the dice write-up holds. **Pointing the tester at a game keeps finding things wrong with the tester** — and a game with no combat, no randomness and no way to lose still found three. Different transports and different genres stress different parts of it; the browser game found bugs a subprocess game structurally cannot, and this one found a probe design that a four-action puzzle would never have embarrassed.
 
 ## Where it's up to
 
 Ladder green at 27 · 12 · 17 · 47 · 10, game suite 85/85.
 
 The LLM tier is wired and the briefing is written, but hasn't been run — that one costs real money per action, so it waits for a deliberate decision rather than happening as a side effect. The local free rehearsal comes first, same as the dice game.
+
+When it does run, it's measuring **competence, not balance**: did the model escape, and in how many moves against the 26-move optimum. There's no win rate to quote here and the config now says so out loud.
 
 The full technical write-up, including the findings that are only useful to Claude, stays in [`integration/README.md`](integration/README.md).

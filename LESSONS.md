@@ -242,6 +242,9 @@ answer anything. Worked on the dice game, all measured off its engine for free b
 *The general form: when a tier's sample size is set by cost rather than by statistics, spend the design effort
 on removing variance you can compute for free, not on buying more samples.*
 
+**Superseded in mechanism by P13, which makes this a declared, probed property instead of a per-game habit.
+The reasoning above still stands; the manual per-integration proof no longer has to be re-written each time.**
+
 ### P10 · The pilot needs MEMORY, not just state — a sliding window is not memory
 State tells the agent where it *is*; it does not tell it what it has already tried. Without a
 cumulative record, an agent re-runs actions it completed long ago, and the run looks busy while
@@ -375,6 +378,35 @@ around far faster than human testing, and that is the whole point: **the target 
 already relatively bug-free**, so a person's time is spent on feel, readability and onboarding — the things no
 tier can see — instead of on defects a 30-action local run would have caught for nothing.
 
+### P13 · Whether episodes are SAMPLES or REPLAYS is a property of the game — declare it, then prove it
+P9 says arrange seed variety deliberately. The trap is one level up: **"no seeds configured" means two
+opposite things and looks identical in both.** A deterministic game — a fixed-layout puzzle, a
+single-solution text adventure, one map with one ordering — is *correct* to replay; its episodes are replays
+by design and the honest sample size is 1 however large N is. A game that merely never configured seeds is
+about to publish a rate whose denominator is N and whose sample is 1. Same config, same report, and no tier
+can tell them apart by looking.
+
+So the game declares its class and the tier proves the declaration against the live game before spending
+anything:
+
+| declaration | meaning | what the tier may report |
+|---|---|---|
+| `per_episode` | seedable RNG, seeds rotate | rates, with an interval |
+| `deterministic` | no RNG at all | **competence only** — finished or not, in how many actions vs. a known optimum |
+| `uncontrolled` | RNG that cannot be seeded | rates, but no finding can be replayed |
+
+**Probe every mode in BOTH directions, because one-directional checks pass for the wrong reasons.** "Two
+seeds differ" is satisfied by a hook returning random state on every call, which is just as broken as one
+ignoring the seed. "Two resets match" is satisfied vacuously by a probe action that never moves the state.
+Both shapes were caught by the generalised probe; the second fired against a real game the first time it ran,
+on an action that is inert from the opening position.
+
+*The general form, and why it is here rather than in one integration: a check that lives in a game's own
+script is a habit, not a guarantee. The seed-variety proof sat in a browser dice game's playtest script for a
+week, which meant every other game in the portfolio had no such proof and nobody noticed. Anything you would
+write into every integration belongs in the framework, keyed off a declaration the game makes.*
+*(→ `ugt/core/seeding.py`; `tools/prove_seeding.py` is its test suite.)*
+
 ---
 
 ## C. Operational discipline
@@ -426,6 +458,19 @@ economy — because it never touched it. The identical count *was* the signal. W
 gate's denominator must move; if it doesn't, the gate is certifying ground it never walked. Grep the gate for
 the new system's nouns before trusting its green. (Bumping that gate 36/36 → 46/46 surfaced a determinism-seam
 defect one rung before it would have corrupted R3's replay criterion.)
+
+**O11 · A uniform-random probe is the wrong instrument for a context-gated game — measure how often it proves
+nothing.** `ugt smoke-test` sends 5 random action ids and reports the wiring healthy. In a Node text-adventure
+with 41 declared actions, only **6 are live from the opening position**, and the engine's refusals are
+documented to consume *nothing* — not a move, not a counter. So five random steps leave the observation vector
+frozen with probability (35/41)^5 ≈ **45%**, and the tier prints "fully operational" anyway. Observed in 2 of
+3 consecutive runs. Nothing was broken, which is what makes it dangerous: a green meaning "the pipe is open"
+is indistinguishable from a green meaning "the game works". This is not a property of that game — **any game
+whose action space is large and mostly context-gated has it**, which is most adventure, RPG and strategy
+games; a 4-action puzzle game does not. Fixes, in order of preference: drive a short known-good script instead
+of random ids, and assert the state moved; and compute the inert fraction inside the rung so it stays honest
+when the content changes. Corollary of O2 — an assertion that *can* fail but usually has nothing to fail
+against is only marginally better than one that cannot.
 
 ---
 
