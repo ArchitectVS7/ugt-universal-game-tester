@@ -10,6 +10,12 @@ class PlaywrightAdapter(BaseAdapter):
       - window.__GET_STATE__()       → Returns game state as a JSON object
       - window.__SEND_ACTION__(id)   → Executes action, returns {state, terminated, truncated, info}
       - window.__RESET_GAME__()      → (Optional) Soft-resets without page reload
+      - window.__RESET_GAME__(seed)  → (Optional) Soft-resets onto an EXPLICIT seed.
+                                       Same hook, one argument. A game that ignores
+                                       the argument stays exactly as it was, so this
+                                       is backward compatible — but see
+                                       `reset_seeded()` for why "backward compatible"
+                                       is also the danger here.
     """
     def __init__(self, config):
         super().__init__(config)
@@ -38,6 +44,40 @@ class PlaywrightAdapter(BaseAdapter):
         except Exception as e:
             self.close()
             raise RuntimeError(f"Playwright failed to navigate to '{url}' or game did not mount __GET_STATE__: {e}")
+
+    def reset_seeded(self, seed) -> dict:
+        """Soft-reset onto an explicit seed via `window.__RESET_GAME__(seed)`.
+
+        Requires the soft-reset hook: there is no way to push a seed through a
+        page reload, and falling back to an UNSEEDED reset here would be the
+        silent-ignore failure `BaseAdapter.reset_seeded` exists to forbid — the
+        caller would get its N "independent" episodes and they would all be the
+        same match.
+
+        This adapter CANNOT verify the game honoured the seed: JS discards extra
+        arguments without complaint, so a game that never implemented seeding
+        returns a perfectly normal state here. Proving seed variety is the
+        caller's job and it must be done by comparing two seeded episodes (O2).
+        """
+        if not self.page:
+            self.connect()
+
+        has_soft_reset = self.page.evaluate("() => typeof window.__RESET_GAME__ === 'function'")
+        if not has_soft_reset:
+            raise NotImplementedError(
+                "PlaywrightAdapter.reset_seeded() needs window.__RESET_GAME__(seed); "
+                "this game exposes no soft-reset hook, and a page reload cannot carry "
+                "a seed. Every episode would replay the same one."
+            )
+        try:
+            self.page.evaluate("(s) => window.__RESET_GAME__(s)", seed)
+            self.page.wait_for_function(
+                "typeof window.__GET_STATE__ === 'function'",
+                timeout=5000
+            )
+            return self._get_game_state()
+        except Exception as e:
+            raise RuntimeError(f"Error resetting browser game onto seed {seed!r}: {e}")
 
     def reset(self):
         if not self.page:

@@ -278,7 +278,60 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
             name = action_def.get("name", str(action_id)) if isinstance(action_def, dict) else str(action_def)
             name_to_id[name] = int(action_id)
 
-    current_state = adapter.reset()
+    # ── Per-episode seeding (LESSONS.md §B P9) ──────────────────────────────
+    # Without this, every episode in a run replays whatever seed the game reset
+    # itself to, so a "batch" of N episodes is one match sampled N times — an
+    # N-sized denominator over a 1-sized sample, and nothing in the output says
+    # so. `playtest.episode_seeds` rotates a fixed, declared seed list one seed
+    # per EPISODE (not per run: a 30-action run spans several episodes, and they
+    # must differ from each other, not just from the next run's).
+    #
+    # Seeds rotate rather than being consumed, so the list length and the episode
+    # count are independent — 8 seeds over 16 episodes is two passes, which is a
+    # legitimate paired design, not an error.
+    episode_seeds = [s for s in (playtest_cfg.get("episode_seeds") or [])]
+    _episode_index = 0  # 0-based; also the rotation cursor
+
+    def _current_seed():
+        return episode_seeds[_episode_index % len(episode_seeds)] if episode_seeds else None
+
+    def _reset_episode(first=False):
+        """Reset onto this episode's seed, or plainly if no seeds are configured.
+
+        `reset_seeded` raises for adapters that cannot control the seed, and that
+        refusal is deliberately NOT caught: a caller that asked for seed variety
+        and silently did not get it is the exact failure this knob exists to
+        remove."""
+        nonlocal _episode_index
+        if not first:
+            _episode_index += 1
+        if not episode_seeds:
+            return adapter.reset()
+        return adapter.reset_seeded(_current_seed())
+
+    # One record per episode the run actually finishes, so a batch can be scored
+    # at all. Until now the outcome survived ONLY as a delta inside the action
+    # log ("winner: None -> 'player'"), which no aggregate could read.
+    episodes = []
+    _victory_key = ((getattr(config, "data", None) or {}).get("evaluation") or {}).get("victory_key") \
+        if isinstance(getattr(config, "data", None), dict) else None
+    _episode_first_step = 1
+
+    def _close_episode(final_state, last_step, reason):
+        episodes.append({
+            "episode": len(episodes) + 1,
+            "seed": _current_seed(),
+            "first_step": _episode_first_step,
+            "last_step": last_step,
+            "actions": max(0, last_step - _episode_first_step + 1),
+            "end_reason": reason,
+            # The game's own declared outcome field (evaluation.victory_key),
+            # read verbatim — this module never interprets it.
+            "outcome": _resolve_path(final_state, _victory_key) if _victory_key else None,
+            "final_state": json.loads(json.dumps(final_state, default=str)),
+        })
+
+    current_state = _reset_episode(first=True)
     baseline_state = json.loads(json.dumps(current_state, default=str))
     # Progressive-content metric (owner requirement: is the pilot AGILE about newly
     # revealed commands / quest lines?). Read-only over the state the loop already
@@ -349,8 +402,9 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
                 # means the match ended between steps. Reset to a fresh episode
                 # rather than spin — same banking/re-baseline as a normal reset.
                 pre_reset = current_state
+                _close_episode(pre_reset, step_num - 1, "no_legal_actions")
                 try:
-                    current_state = adapter.reset()
+                    current_state = _reset_episode()
                 except Exception:
                     ended_early = "no_legal_actions_and_reset_failed"
                     break
@@ -358,6 +412,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
                     bank_deltas(pre_reset)
                     baseline_state = json.loads(json.dumps(current_state, default=str))
                     episode_resets += 1
+                    _episode_first_step = step_num
                     inv_ctx.clear()
                     reveals.note_reset(current_state)
                     continue
@@ -550,14 +605,16 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
                 # False so pilot confusion costs a turn, not the whole run.
                 if bool(playtest_cfg.get("diagnose_resets_episode", True)):
                     pre_reset = current_state
+                    _close_episode(pre_reset, step_num, "diagnose")
                     try:
-                        current_state = adapter.reset()
+                        current_state = _reset_episode()
                     except Exception:
                         pass
                     else:
                         bank_deltas(pre_reset)
                         baseline_state = json.loads(json.dumps(current_state, default=str))
                         episode_resets += 1
+                        _episode_first_step = step_num + 1
                         inv_ctx.clear()
                         reveals.note_reset(current_state)
                     continue
@@ -595,14 +652,16 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
             # same rule as invariant_fuzzer's crash path).
             executed_action_id = None
             pre_reset = current_state
+            _close_episode(pre_reset, step_num, "execution_error")
             try:
-                current_state = adapter.reset()
+                current_state = _reset_episode()
             except Exception:
                 pass
             else:
                 bank_deltas(pre_reset)
                 baseline_state = json.loads(json.dumps(current_state, default=str))
                 episode_resets += 1
+                _episode_first_step = step_num + 1
                 inv_ctx.clear()
                 reveals.note_reset(current_state)
 
@@ -734,11 +793,15 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         if terminated or truncated:
             print(f"  [Step {step_num}] Episode ended (terminated={terminated}) — resetting")
             pre_reset = current_state
+            # Closed BEFORE the reset, on the pre-reset state — that state is the
+            # only place the outcome exists, and the reset overwrites it.
+            _close_episode(pre_reset, step_num, "terminated" if terminated else "truncated")
             try:
-                current_state = adapter.reset()
+                current_state = _reset_episode()
                 bank_deltas(pre_reset)
                 baseline_state = json.loads(json.dumps(current_state, default=str))
                 episode_resets += 1
+                _episode_first_step = step_num + 1
                 inv_ctx.clear()
                 reveals.note_reset(current_state)
                 # Insert a marker so the LLM knows this is a fresh episode, not a crash.
@@ -755,6 +818,14 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
                 break
 
     duration = round(time.time() - start_time, 1)
+
+    # The episode still in progress when the budget ran out is recorded too, with
+    # its own end_reason, so a scorer can SEE it and exclude it deliberately.
+    # Dropping it silently would understate the run; counting it as a finished
+    # episode would put an unresolved match into an outcome tally (O8).
+    _last_step = max((e.get("step", 0) for e in action_log), default=0)
+    if _last_step >= _episode_first_step:
+        _close_episode(current_state, _last_step, "budget_exhausted")
 
     # ── Per-run summary: deltas from the post-reset baseline (plus banked segments) ──
     real_actions = [e for e in action_log if e.get("action_type") != "episode_reset"]
@@ -801,6 +872,15 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         "unexpected_delta_steps": unexpected_delta_steps,
         "back_to_back_repeat_steps": back_to_back_repeat_steps,
         "forced_repeat_blocks": forced_repeat_blocks,
+        # Episodes that reached a real ending, i.e. the only ones an outcome tally
+        # may count. Kept separate from `episode_resets` (which counts resets of
+        # every kind, including confusion and error recoveries) so a scorer never
+        # has to guess which number is its denominator.
+        "episodes_completed": sum(1 for e in episodes if e["end_reason"] in ("terminated", "truncated")),
+        "episodes_recorded": len(episodes),
+        # How many DISTINCT seeds the run actually played. 1 with more than one
+        # episode is the P9 trap firing: the episodes are the same match.
+        "distinct_episode_seeds": len({e["seed"] for e in episodes if e["seed"] is not None}),
     }
     for e in summary_paths:
         final = _resolve_path(current_state, e["path"])
@@ -836,6 +916,9 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         "content_engagement": content_engagement,
         "baseline_state": baseline_state,
         "final_state": current_state,
+        # One record per episode: seed, step span, why it ended, and the game's
+        # own declared outcome. This is what a batch is scored from.
+        "episodes": episodes,
         "action_counts": action_counts,
         "potential_bugs": potential_bugs,
         "novel_behaviors": novel_behaviors,
@@ -881,7 +964,15 @@ def _aggregate_runs(run_reports):
 
 def _print_run_summary(report, output_path):
     print(f"\n[+] Playtest complete in {report['duration_seconds']}s")
-    print(f"[+] Actions taken: {report['total_actions']}")
+    # `total_actions` is len(action_log), which also counts the synthetic
+    # EPISODE_RESET markers — so on a multi-episode run this line used to print
+    # MORE "actions taken" than the max-actions budget allowed (96 actions and 9
+    # resets read as "Actions taken: 105"). The summary's own count has always
+    # been right; only this line was wrong, and it is the line people read.
+    _taken = (report.get("summary") or {}).get("actions_taken", report["total_actions"])
+    _resets = report["total_actions"] - _taken
+    print(f"[+] Actions taken: {_taken}"
+          + (f"  (+{_resets} episode-reset markers in the log)" if _resets else ""))
     print(f"[+] Potential bugs flagged: {len(report['potential_bugs'])}")
     print(f"[+] Invariant violations: {len(report.get('invariant_violations', []))}")
     print(f"[+] Novel behaviors observed: {len(report['novel_behaviors'])}")
@@ -1633,7 +1724,7 @@ def _available_actions_line(playtest_cfg, current_state, fallback):
     return fallback
 
 
-def _noop_warning_block(noop_streaks, repeat_streak=None, threshold=2):
+def _noop_warning_block(noop_streaks, repeat_streak=None, threshold=2, block_threshold=3):
     """Render a '## Warnings' section covering two DISTINCT stall signals:
 
     1. `noop_streaks` — an action whose last `threshold`+ attempts produced no material
@@ -1668,14 +1759,45 @@ def _noop_warning_block(noop_streaks, repeat_streak=None, threshold=2):
         f"time{'s' if count != 1 else ''} you tried it — do NOT just repeat it, try something else"
         for key, count in (noop_streaks or {}).items() if count >= threshold
     ]
-    lines += [
-        f"  you just picked '{key.split(':', 1)[-1]}' {count} times in a row, back-to-back — "
-        f"an immediate repeat shows the exact SAME result every time. Picking it again will "
-        f"be REJECTED and forced to 'wait' instead — this is a hard rule, not a suggestion. "
-        f"If you want to use it again later (e.g. after moving or after another action), "
-        f"that's fine — just not right now"
-        for key, count in (repeat_streak or {}).items() if count >= threshold
-    ]
+    for key, count in (repeat_streak or {}).items():
+        if count < threshold:
+            continue
+        action = key.split(':', 1)[-1]
+        # Say the TRUE thing. The "will be REJECTED / hard rule" claim is only
+        # honest when the very next repeat would actually hit the deterministic
+        # ceiling — i.e. when `count + 1 >= playtest.repeat_block_threshold`.
+        #
+        # It used to be printed unconditionally, from a message written when the
+        # threshold was always its default of 3. Any game that RAISES the
+        # threshold (because repetition is legitimate play there) then had the
+        # prompt asserting a rule the loop does not enforce, and models comply
+        # with it: a browser dice game set the threshold to 13 and its pilot
+        # wrote, at step 15 of 30, "I cannot use a3_d3 because I have used it 3
+        # times in a row, which would be rejected" — and switched away from the
+        # allocation its own strategy guide called correct. `forced_repeat_blocks`
+        # for that run was 0: nothing was ever blocked. The warning was not
+        # reporting a constraint, it was inventing one, and it steered the very
+        # behaviour under test.
+        #
+        # This is LESSONS.md P10's own correction resurfacing in a second code
+        # path: an anti-repetition NUDGE is actively harmful in the many games
+        # where repeating an action is the right move. Report; do not instruct.
+        if count + 1 >= block_threshold:
+            lines.append(
+                f"  you just picked '{action}' {count} times in a row, back-to-back — "
+                f"an immediate repeat shows the exact SAME result every time. Picking it "
+                f"again NOW will be REJECTED and forced to 'wait' instead — this is a hard "
+                f"rule, not a suggestion. If you want to use it again later (e.g. after "
+                f"moving or after another action), that's fine — just not right now"
+            )
+        else:
+            lines.append(
+                f"  you have picked '{action}' {count} times in a row. That is allowed "
+                f"here — repeating an action is legitimate in many games — but if it is "
+                f"producing the same result every time, consider whether something else "
+                f"would tell you more. (A {block_threshold}th consecutive repeat would be "
+                f"rejected.)"
+            )
     if not lines:
         return ""
     return "## Warnings\n" + "\n".join(lines) + "\n\n"
@@ -1848,7 +1970,8 @@ def _build_prompt(config, strategy_guide, current_state, terminal_text, action_l
         + _key_values_line(playtest_cfg, current_state)
         + f"```json\n{_compact_state_block(_redact_state(current_state, redact), state_char_budget, 'Current State')}\n```\n\n"
         f"## Recent Actions\n{recent_summary}\n\n"
-        + _noop_warning_block(noop_streaks, repeat_streak)
+        + _noop_warning_block(noop_streaks, repeat_streak,
+                              block_threshold=int(playtest_cfg.get('repeat_block_threshold', 3)))
         + _action_ledger_block(ledger)
         + _terminal_recall_block(recall, int(playtest_cfg.get('terminal_recall_budget', 0)))
         + f"## Terminal Output\n```\n{_fit(terminal_text, terminal_budget, 'Terminal output', tail=True)}\n```\n\n"
@@ -1889,7 +2012,8 @@ def _build_legal_prompt(config, strategy_guide, current_state, legal_list, actio
         f"## LEGAL ACTIONS (respond with action_type=\"legal_action\", value=<the NUMBER>)\n"
         f"{legal_lines}\n\n"
         f"## Recent Actions\n{recent_summary}\n\n"
-        + _noop_warning_block(noop_streaks, repeat_streak)
+        + _noop_warning_block(noop_streaks, repeat_streak,
+                              block_threshold=int(playtest_cfg.get('repeat_block_threshold', 3)))
         + _action_ledger_block(ledger)
         + f"## Strategy Guide\n{_fit(strategy_guide, guide_budget, 'Strategy guide')}\n\n"
         f"Respond JSON only. action_type=\"legal_action\", value=\"<index 0..{upper}>\"."
@@ -1934,7 +2058,8 @@ def _build_terminal_prompt(config, strategy_guide, current_state, terminal_text,
         + _key_values_line(playtest_cfg, current_state)
         + f"```json\n{_compact_state_block(_redact_state(current_state, redact), state_char_budget, 'Current State')}\n```\n\n"
         f"## Recent Actions\n{recent_summary}\n\n"
-        + _noop_warning_block(noop_streaks, repeat_streak)
+        + _noop_warning_block(noop_streaks, repeat_streak,
+                              block_threshold=int(playtest_cfg.get('repeat_block_threshold', 3)))
         + _action_ledger_block(ledger)
         + _terminal_recall_block(recall, int(playtest_cfg.get('terminal_recall_budget', 0)))
         + f"## Terminal Output\n```\n{_fit(terminal_text, terminal_budget, 'Terminal output', tail=True)}\n```\n\n"
