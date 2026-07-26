@@ -69,7 +69,7 @@ for T-003 onward per this file's task boundaries.
 Orchestration: graphify=none — no `graphify-out/graph.json` exists at the
 repo root or in `examples/dice/`, so there is no graph to query. · attempts=1/4.
 
-### T-003 · Round resolution + bonus-dice rules — `status: TODO` · `coder: opus` · `after: T-002`
+### T-003 · Round resolution + bonus-dice rules — `status: DONE` · `coder: opus` · `after: T-002`
 Implement the 7 allocation presets, the Morale surge / Dug in / Reinforcements
 bonus rules, and full round resolution (both sides act, damage applies, FS
 updates, round increments) per PRD.
@@ -78,6 +78,39 @@ surge triggers only when FS is strictly greater; Dug in triggers at FS ≤ 10;
 Reinforcements fires exactly once, at round 3, for each side independently,
 added to whichever pool that side allocated the most to that round (ties →
 Attack).
+
+**Delivered (2026-07-25):** Added the round-resolution layer to `src/engine.js`
+below T-002's RNG layer (T-002's exports untouched): the frozen `ALLOCATIONS`
+table of the 7 presets in `__SEND_ACTION__` id order, `createInitialState(seed)`,
+a single symmetric `sideBonuses()` helper both sides call (so player and enemy
+rules cannot drift), and `resolveRound(state, playerPresetIndex,
+enemyPresetIndex)` — which reads every bonus off the pre-damage round-start
+snapshot, rolls the four pools in a fixed order (player attack → player defense
+→ enemy attack → enemy defense, threading `roll_counter` one tick per die),
+applies `max(0, opponent attack hits − own defense hits)` to both sides
+simultaneously, floors FS at exactly 0, increments the round, and returns a
+brand-new state plus a structured `last_round` record appended to `log` (data
+only, no flavor strings — T-006 renders prose from it). Decisions pinned in
+comments so later tasks agree: `round_number` counts *completed* rounds so the
+round being resolved is `round_number + 1` (reinforcements fire when that equals
+3); reinforcement routing reads the side's **base** preset, `>=` sending the
+(3,3) tie to Attack, so a morale/dug-in die can never redirect it; `bonus_dice`
+is the total granted in the round just resolved. `src/round.test.js` adds 49
+tests covering each Accept clause — all-attack vs all-defense damage math with
+golden literals cross-checked against an independent `rollPool` computation,
+morale's strict-greater boundary (20/19, 19/20, ties), dug-in's 11/10/9
+boundary per side independently, and reinforcements firing exactly once at
+round 3 across a 12-round battle, routed per side by its own allocation —
+plus FS-clamp, no-heal, immutability, counter-advance, same-seed replay and
+`Math.random`-throws discipline checks. Every rule branch was mutation-checked
+(`>` → `>=`, `<=` → `<`, dropped `Math.max` floors, `===` → `>=` on the
+reinforcement round): all six mutants were killed by the suite, so nothing is
+vacuously green. Scope held to this layer — `battle_over`/`winner` are carried
+through unchanged with the entry guard deliberately left off (T-004), the enemy
+allocation is an explicit parameter with no placeholder AI (T-005), and no UI
+or `window.__*__` hook was touched (T-006/T-007). Gate: `npm test -- --run`
+70/70 green, `npm run build` and `npm run lint` both clean.
+Orchestration: graphify=none — no `graphify-out/graph.json` exists in the repo root (`examples/dice/game`) or anywhere above it; the task area is two files (`src/engine.js`, its test)  · attempts=1/4.
 
 ### T-004 · Battle end conditions — `status: TODO` · `coder: sonnet` · `after: T-003`
 Implement `battle_over` / `winner` per PRD (FS ≤ 0 decisive win/loss; round 12
