@@ -215,7 +215,7 @@ Orchestration: graphify=none — no `graphify-out/graph.json` in the game dir or
 
 ## M2 — Content
 
-### T-005 · Author 3 levels + prove them solvable — `status: TODO` · `coder: sonnet` · `after: T-004`
+### T-005 · Author 3 levels + prove them solvable — `status: DONE` · `coder: sonnet` · `after: T-004`
 Write `level_01.txt` (1 box), `level_02.txt` (2 boxes), `level_03.txt` (3
 boxes), increasing in grid size. For each, commit its solution as a move
 sequence in `levels/solutions.json` — a flat map of
@@ -226,6 +226,46 @@ and **replays its `solutions.json` sequence through `try_move()`**, asserting
 `level_solved: true` at the end of each, and `all_levels_solved: true` after
 the third. This is an executed check, not a hand-traced one — a wrong level
 or a wrong solution fails *this* task's gate, not a later task's.
+**Delivered (2026-07-25):** shipped `levels/level_01.txt` (7×5, 1 box),
+`level_02.txt` (9×7, 2 boxes) and `level_03.txt` (11×8, 3 boxes) — box count
+1→2→3 and grid area 35→63→88, both strictly increasing per the PRD — plus
+`levels/solutions.json`, a flat `{"level_01": [2,0,2,0,3,3], ...}` map of PRD
+action ids with sequences of 6 / 23 / 44 moves (73 total). Every committed
+sequence is BFS-**optimal**, contains zero no-op actions, and does not solve
+its level before its own final action; the tests pin all three properties, so
+a padded or wrong sequence cannot pass. `tests/test_shipped_levels.gd` adds 10
+cases (suite 37 → 47 passed, 0 failed): the solutions file parses to exactly
+the three shipped keys with whole-number ids in 0..3, `board.gd`'s
+`DEFAULT_LEVEL_PATHS` really are these files, each level loads through T-003's
+`level.gd` with an empty `error_code`, box count / area grow, **no level
+starts already solved** (the anti-vacuity guard — a level authored with `*` on
+its only target would otherwise "pass" its replay doing nothing), each level's
+committed sequence replayed through `try_move()` ends `level_solved: true`
+with `moves_taken == sequence length`, all three concatenated on ONE board end
+`all_levels_solved: true` at `level_index: 2` / `moves_taken: 73` (which also
+pins T-004's lazy level-advance: the next level's FIRST action is what
+triggers the advance and is then applied inside the new level — no filler move
+between sequences, exactly what T-008 replays over the wire), and a
+reset-then-replay reproduces an identical state dictionary. Unlike
+`test_board.gd`, this suite deliberately reads the real `res://levels/` files
+by path and embeds **no grid and no action list** of its own — level geometry
+stays data-only per the standing constraint, and `solutions.json` stays a flat
+`{name: [int, ...]}` map with no nesting or metadata because T-008 `json.load`s
+that exact file. Action ids are coerced with `int()` on read (Godot's JSON
+parser can return numbers as floats, and `try_move(direction: int)`'s bounds
+check must not be fed one) with the coercion asserted lossless, so a stray
+`2.5` is a red test rather than a silent floor. Verified the new tests are not
+vacuous with three mutations, each reverted byte-identically: flipping
+`level_01`'s last action `3`→`0` gave `44 passed, 3 failed`; turning the
+level_02 floor cell (4,3) into `#` on the solution path gave `45 passed, 2
+failed`; appending one wall-blocked no-op after `level_01`'s win gave `45
+passed, 2 failed` — each naming the offending level. Gate green (editor pass
+exit 0, suite exit 0, stderr empty), `tools/check_runner_reports_failure.sh`
+still exits 0, and `levels/.gitkeep` was removed now that the directory holds
+real content. Scope boundary held: no `ugt_bridge.gd`, no human input
+handling, no `tools/tcp_smoke_check.py`, and `scripts/board.gd` /
+`scripts/level.gd` were not touched — T-006/T-007/T-008 own those.
+Orchestration: graphify=none — no `graphify-out/graph.json` in the game dir or the git root (`_UGT Universal Game Tester/`), both checked; the task is also self-contained (3 data files · attempts=1/4.
 
 ## M3 — Front ends
 
