@@ -72,7 +72,7 @@ Run before spending anything, per P12. Findings below were all free.
 | P2 | Adapter passes through every PUBLIC field | **WAS BROKEN — FIXED.** See below |
 | P3 | Truncation is silent starvation | **FIXED** — guide is 4,345 chars against a 2,000 default; budget set to 6,000 |
 | P4 | Action channel sends what the LLM thinks | **PASS** — names map 1:1 to ids, asserted by the spike against the game's own table |
-| P5 | Prompt must not leak what the real client hides | **OPEN — decision needed before the paid run.** See below |
+| P5 | Prompt must not leak what the real client hides | **WAS LEAKING — CLOSED.** `flags` redacted; see below |
 | P6 | Guide teaches the RULES that create skill | **PASS** after rewrite — refusal-reading and the flag chain are now taught |
 | P7 | Verify competence from reasoning text | pending the run |
 | P8 | Never pool across an information fix | **boundary set here** — nothing before 2026-07-26 is poolable with anything after |
@@ -115,12 +115,27 @@ Reading `knows_hour` and `clock_set` in the opening cell tells you there is a
 clock to set from an hour you must learn, long before you find the ledger. That
 is a structural hint sheet, and it makes the pilot's job easier than the game's.
 
-**Left visible for the local channel check**, deliberately: that stage proves
-plumbing and produces no quotable number, and running with flags visible tells us
-whether the pilot even uses them. **It needs a decision before any paid run**,
-because it changes what is being measured. The knob exists —
-`playtest.redact_state_fields: ["flags"]` — and the guide would need its
-"flags are your progress bar" section rewritten to match.
+**Closed by redacting them** — `playtest.redact_state_fields: ["flags"]`. The
+pilot plays with player-facing information only, from the channel check onward.
+Redaction is prompt-only: `evaluation.victory_key`, the invariants, the episode
+records and the report all keep the full state. Verified against a prompt
+rendered after two flags had actually been set — **no flag name appears anywhere
+in it**, including in the recent-action deltas, which `_redact_delta` also
+strips.
+
+**Removing a signal is only safe if the replacement is really there**, so that is
+now asserted rather than assumed. A human learns a lock opened by reading the
+game's reply, and R1 gained a check that **every one of the 8 flag flips is
+announced in the narration** — proven able to fail by mutating the bridge's
+narration back out (8 silent flips, R1 red, reverted md5-identical). A future
+content edit that adds a flag whose flip is silent now fails R1 instead of being
+discovered mid-playtest.
+
+The guide was rewritten to match: it no longer calls `flags` a progress bar,
+because there isn't one. It says so plainly — *"The state will not tell you what
+you have unlocked… you find that out the way anyone in a prison would, by trying
+a door and reading what the game says back"* — which teaches the skill the game
+actually rewards (P6).
 
 ### Context budget
 

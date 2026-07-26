@@ -74,6 +74,7 @@ class Driver:
         self.terminated = False
         self.rooms_seen: set = set()
         self.flag_first_set: dict = {}
+        self.silent_flips: list = []
 
     def reset(self):
         self.state = self.ad.reset()
@@ -87,9 +88,18 @@ class Driver:
         self.terminated = term
         for v in SUITE.check_command(before, after, name, info or {}):
             self.violations.append(f"after {name} #{self.commands}: {v}")
+        narration = ((info or {}).get("message") or "").strip()
         for flag, now in (after.get("flags") or {}).items():
             if now and flag not in self.flag_first_set:
                 self.flag_first_set[flag] = (self.commands, name)
+                # The LLM tier plays with PLAYER-FACING INFO ONLY: `flags` is
+                # redacted from its prompt (P5), because a human sees those names
+                # exactly never. That is only safe while every flip is ANNOUNCED
+                # in the narration — otherwise redaction removes the pilot's
+                # progress signal instead of just its god-view. A new flag whose
+                # flip is silent must fail here, not be discovered mid-playtest.
+                if not narration:
+                    self.silent_flips.append(f"{flag} (set by {name}, no narration)")
         self.rooms_seen.add(after["current_room"])
         self.state = after
         return after
@@ -166,6 +176,11 @@ def main() -> int:
         check(len(order) == len(chain),
               "each flag was observed being set, in order",
               " -> ".join(f"{f}@{n}" for f, (n, _c) in order))
+        check(not d.silent_flips,
+              f"every one of the {len(chain)} flag flips is ANNOUNCED in the narration",
+              "so redacting `flags` from the LLM prompt removes a god-view, not the "
+              "pilot's only progress signal"
+              if not d.silent_flips else f"SILENT: {d.silent_flips}")
 
         # ── coverage ─────────────────────────────────────────────────────────
         print("\n  -- coverage --")

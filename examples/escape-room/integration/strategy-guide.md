@@ -58,12 +58,20 @@ The **state** is the structured summary, and it includes:
 
 - `current_room` — which room you are in
 - `inventory` — the objects you are carrying
-- `flags` — every flag in the game and whether it is set. **This is your
-  progress bar.** A flag flipping to `true` is the only reliable signal that you
-  advanced; if you take an action and no flag changed and you did not move, you
-  learned something but changed nothing.
 - `moves_taken`, `rooms_visited`
 - `escaped` — `true` only when you have won
+
+**The state will not tell you what you have unlocked.** There is no progress bar
+and no list of which locks are open — you find that out the way anyone in a
+prison would, by trying a door and reading what the game says back. So the game
+text is not flavour you can skim past; it is the only place progress is
+reported. When something changes in the world, the text is what tells you:
+
+> *The iron key grinds once in the banded door and snaps off in the ward. The
+> door swings open.*
+
+That sentence is the only notice you get that the way north is now open. If you
+skip it, you will not know.
 
 ## Winning
 
@@ -86,10 +94,12 @@ When a `use` is refused, read the refusal — it is written to tell you what is
 missing. "The wick is bone dry, without oil it will never catch" is the game
 saying *find oil*, not *this was the wrong idea*.
 
-When you get stuck, re-read your `flags`. The one still `false` that is blocking
-you names what you need, and some object you have already walked past is what
-sets it. Going back for it is normal — this prison is not long, and moves are
-the only thing you spend.
+When you get stuck, the thing that blocked you told you why. A locked door and a
+refused `use` both print a reason, and the reason names what you are missing —
+light, a key, a number, a tool. Recall which rooms you have been through and what
+you saw lying in them; the thing you need is almost always something you have
+already walked past. Going back for it is normal. This prison is not long, and
+moves are the only thing you spend.
 
 You do not need to re-examine something you have already read. You were told its
 description once and it does not change.

@@ -136,6 +136,27 @@ playtest:
   # budget that cannot bind is a budget that cannot warn.
   state_char_budget: 1500
 
+  # ── Fog of war (P5) — the pilot plays with PLAYER-FACING INFO ONLY ───────
+  # `flags` is internal machine state. Piping the same commands through
+  # `node ../game/src/cli.js` prints those names ZERO times: a human infers the
+  # chain from prose alone, and never learns a flag exists until the narration
+  # tells them a door opened.
+  #
+  # Leaving them visible hands the pilot the puzzle's skeleton in the opening
+  # cell — `knows_hour` + `clock_set` give away that there is a clock to set from
+  # an hour you must learn, long before the ledger is findable — and any
+  # competence figure measured that way is measuring a different, easier game.
+  #
+  # Redaction is PROMPT-ONLY: `evaluation.victory_key`, the invariant checks, the
+  # episode records and the report all keep the full state. It also strips the
+  # recent-action deltas, so a flag flip cannot leak through the history either.
+  #
+  # The progress signal the pilot is left with is the one a human has: the
+  # narration. "The iron key grinds once in the banded door and snaps off in the
+  # ward. The door swings open." That IS the flag flip, in player-facing form.
+  redact_state_fields:
+    - "flags"
+
   # ── Memory (P10) ─────────────────────────────────────────────────────────
   # The sliding window must be LONGER than the longest legitimate cycle or it can
   # never reveal one. Sweeping a room is look -> examine -> examine -> take (4-6
