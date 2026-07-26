@@ -1,0 +1,121 @@
+# Feature Map — Tiny Escape Room
+# Used by: ugt verify --config ugt.config.yaml --feature-map feature-map.yaml
+#
+# HOW THIS MAP IS STRUCTURED — read before editing.
+#
+# `ugt verify` does NOT navigate for you. Each turn it picks features whose
+# precondition holds, runs each one's action list in order, and asserts against
+# the state before/after that list. State CARRIES OVER between features, and
+# there is no reset between them. So this map is one continuous playthrough of
+# the game's real flag chain, partitioned into six assertions — each feature's
+# action list picks up exactly where the previous one stopped.
+#
+# Two mechanics of the runner this depends on, both verified in ugt/:
+#
+# 1. Features run sorted by (priority, definition order) — see
+#    ugt/utils/feature_map.py. Every feature here is therefore `critical`, so
+#    definition order is preserved. Giving one of them a different priority
+#    would reorder the playthrough and break every feature after it.
+# 2. MAX_TASKS_PER_TURN = 3 (ugt/core/verifier.py), so these six run three per
+#    turn over two turns. Eligibility is computed at the TOP of a turn, so no
+#    feature may carry a precondition that only an earlier feature in the SAME
+#    turn satisfies — it would be judged not-yet-eligible and skipped. That is
+#    why none of these declare a precondition: ordering alone sequences them.
+#
+# Assertion-language limits (ugt/utils/formula_evaluator.py): there is no `in`
+# operator and no `len()`, so neither list membership nor inventory size is
+# directly assertable. Both are reachable indirectly:
+#   - "do I have X" is modelled game-side as a boolean flag (take_sets_flag).
+#   - consumption is proven by a REFUSAL: the engine leaves state completely
+#     untouched (including moves_taken) when an action can't apply, so issuing
+#     `drop_<item>` after a consuming `use` and finding moves_taken advanced by
+#     only 1 across BOTH actions proves the item is no longer held. See F5.
+
+game: "TinyEscapeRoom"
+version: "1.0"
+
+features:
+  # ---- F1 ------------------------------------------------------------------
+  # Start: R01. `go_north` reaches R02; a second `go_north` targets R05, whose
+  # entry_requires_flag (iron_door_open) is still unset, so it must be refused.
+  - id: room.locked_entry_is_refused
+    description: "A room with an unmet entry_requires_flag refuses entry, and the refused move costs nothing"
+    action: ["go_north", "go_north"]
+    assertion:
+      - 'state.current_room == "R02"'
+      - "state.flags.iron_door_open == False"
+      # Two actions issued, one accepted: the blocked move mutated nothing.
+      - "state.moves_taken == before.moves_taken + 1"
+    priority: critical
+
+  # ---- F3 (before F2: it must run while has_oil is still unset) -------------
+  # R02 -> R03, pick up the lantern, then try to light it with no oil.
+  - id: object.use_refused_without_prerequisite
+    description: "`use` on an object whose use_requires_flag is unset fails, sets no flag, and costs nothing"
+    action: ["go_east", "take_lantern", "use_lantern"]
+    assertion:
+      - "state.flags.has_oil == False"
+      - "state.flags.lantern_lit == False"
+      # go_east + take_lantern counted; the refused `use` did not.
+      - "state.moves_taken == before.moves_taken + 2"
+    priority: critical
+
+  # ---- F2 ------------------------------------------------------------------
+  # R03 -> R02 -> R04 (iron key) -> R02, unlock the iron door, R05 -> R06,
+  # and take the oil flask, whose take_sets_flag is has_oil.
+  - id: object.take_sets_flag
+    description: "Taking an object with a take_sets_flag sets that flag"
+    action:
+      ["go_west", "go_west", "take_key_iron", "go_east", "use_key_iron",
+       "go_north", "go_west", "take_flask_oil"]
+    assertion:
+      - "before.flags.has_oil == False"
+      - "state.flags.has_oil == True"
+      - 'state.current_room == "R06"'
+      # The iron door really did open — this sequence walked through it.
+      - "state.flags.iron_door_open == True"
+    priority: critical
+
+  # ---- F4 ------------------------------------------------------------------
+  # The same `use_lantern` that F3 proved refused now succeeds, because has_oil
+  # is set. Then continue the chain up to the point F5 needs.
+  - id: object.use_succeeds_once_prerequisite_met
+    description: "The same `use` that failed in F3 succeeds once its prerequisite flag is set"
+    action:
+      ["go_east", "use_lantern", "take_valve_wheel", "use_valve_wheel",
+       "go_north", "take_cog_bronze", "go_east", "take_ledger", "use_ledger",
+       "take_key_skeleton", "go_west"]
+    assertion:
+      - "before.flags.lantern_lit == False"
+      - "state.flags.lantern_lit == True"
+      # The rest of the chain this sequence walks, so F5/F6 start in a known place.
+      - "state.flags.steam_vented == True"
+      - "state.flags.knows_hour == True"
+      - 'state.current_room == "R07"'
+    priority: critical
+
+  # ---- F5 ------------------------------------------------------------------
+  # cog_bronze has use_consumes: true. After a successful `use`, the item is
+  # gone, so `drop_cog_bronze` cannot apply and must mutate nothing at all.
+  - id: object.use_consumes_removes_item
+    description: "A use_consumes object is removed from inventory: a following drop of it is refused and costs nothing"
+    action: ["use_cog_bronze", "drop_cog_bronze"]
+    assertion:
+      - "before.flags.clock_set == False"
+      - "state.flags.clock_set == True"
+      # Two actions issued, exactly one counted. The drop was refused, which is
+      # only possible if the cog left the inventory when it was consumed.
+      - "state.moves_taken == before.moves_taken + 1"
+    priority: critical
+
+  # ---- F6 ------------------------------------------------------------------
+  # R07 -> R09 (needs clock_set) -> unlock the gate -> R10 latches `escaped`.
+  - id: game.reaching_r10_sets_escaped
+    description: "Completing the flag chain and entering R10 sets escaped"
+    action: ["go_north", "use_key_skeleton", "go_north"]
+    assertion:
+      - "before.escaped == False"
+      - "state.escaped == True"
+      - 'state.current_room == "R10"'
+      - "state.flags.gate_open == True"
+    priority: critical

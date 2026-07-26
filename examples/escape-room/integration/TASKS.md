@@ -25,27 +25,33 @@ Statuses: `TODO` | `IN-PROGRESS` | `DONE` | `BLOCKED(reason)`
 
 ## M0 — Wiring
 
-### T-001 · `ugt.config.yaml` — `status: TODO` · `coder: sonnet` · `after: —`
+### T-001 · `ugt.config.yaml` — `status: DONE` · `coder: sonnet` · `after: —`
 `engine.type: simulation`, `entry: ../game/src/bridge.js`, action_space
 enumerating the fixed action table, observation_space per PRD's numeric
 fields, `evaluation.victory_key: escaped`.
 **Accept:** `UgtConfig` loads it without error.
 
-### T-002 · `ugt smoke-test` passes — `status: TODO` · `coder: sonnet` · `after: T-001`
+**Delivered (2026-07-25):** `ugt.config.yaml`, generated from `node ../game/src/bridge.js --actions` so the 41 action ids come from the CSVs rather than transcription. Observation space maps `moves_taken`/`rooms_visited`/`inventory`(count)/`escaped` — NOT the PRD's `flags_set_count`, which is unmappable because `flags` is a dict and the `count` aggregator is list-only (see README Findings #2).
+
+### T-002 · `ugt smoke-test` passes — `status: DONE` · `coder: sonnet` · `after: T-001`
 Run smoke-test; fix any action_id / mapping mismatches against the real
 bridge.
 **Accept:** `ugt smoke-test` exits 0, 5/5 steps.
 
 ## M1 — Correctness (Tier 1)
 
-### T-003 · `feature-map.yaml` (F1-F6) — `status: TODO` · `coder: opus` · `after: T-002`
+**Delivered (2026-07-25):** `ugt smoke-test` passes, 5/5 steps, no action_id mismatches. All five random actions were context-invalid no-ops from R01 (which has only a north exit), each returning valid unchanged state — the refusal path the PRD asks for.
+
+### T-003 · `feature-map.yaml` (F1-F6) — `status: DONE` · `coder: opus` · `after: T-002`
 Author F1-F6 per PRD's coverage table, including the flag-based workaround
 noted for the SafeEvaluator's missing `in` operator.
 **Accept:** `ugt verify` exits 0, 6/6 PASSED, 0 FAILED, 0 NOT_REACHED.
 
 ## M2 — Robustness (Tier 2)
 
-### T-004 · Exploit-hunter invariants — `status: TODO` · `coder: opus` · `after: T-003`
+**Delivered (2026-07-25):** `feature-map.yaml` — **6/6 PASSED, 0 FAILED, 0 NOT_REACHED**. Written as one continuous playthrough of the real 7-link flag chain, because `ugt verify` does not navigate to satisfy preconditions. F5 asserts consumption through refusal semantics rather than the PRD's `inventory_count` (no `len()`/`in` in the assertion language). Proven non-vacuous: inverting F6 produces 1 FAILED. That negative control also surfaced README Finding #1 — `ugt verify` exits 0 even when features fail.
+
+### T-004 · Exploit-hunter invariants — `status: DONE` · `coder: opus` · `after: T-003`
 Invariants: `moves_taken`/`rooms_visited` monotonic non-decreasing,
 `current_room` always a known room_id, `escaped` never reverts to false. Run
 ≥150 random steps, two seeds; same-seed replay diff empty.
@@ -53,11 +59,15 @@ Invariants: `moves_taken`/`rooms_visited` monotonic non-decreasing,
 
 ## M3 — Balance (Tier 3)
 
-### T-005 · `strategy-guide.md` + playtest run — `status: TODO` · `coder: sonnet` · `after: T-003`
+**Delivered (2026-07-25):** `exploit_hunt.py` — **TIER 2 MET, 6/6 checks**. Two seeds x 160 random steps (>=150 required), 0 findings, against 6 invariants read from the game's own rooms.csv. Includes a negative control proving every invariant can fire and none fires on a legitimate transition, plus a non-vacuity check on the determinism proof. Random play reached only 9 distinct states in 61 steps — recorded as README Finding #4, not a defect.
+
+### T-005 · `strategy-guide.md` + playtest run — `status: BLOCKED(awaiting user approval to spend API credits)` · `coder: sonnet` · `after: T-003`
 Write the guide (verbs, inventory model, win condition, no assumed context).
 Run `ugt playtest --max-actions 40` once.
 **Accept:** exits 0; report shows either `escaped: true` or an honest
 "insufficient actions" outcome — not a silent stall.
+
+**Prepared (2026-07-25):** `strategy-guide.md` is written and the wiring is ready. The run itself is NOT done: `ugt playtest` bills a real Anthropic API call per action, and this was built unattended overnight — spending credits is the user's call, not the runner's. Trigger with `ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md --max-actions 40`, then flip this to DONE if the report shows `escaped: true` or an honest insufficient-actions outcome.
 
 ---
 
