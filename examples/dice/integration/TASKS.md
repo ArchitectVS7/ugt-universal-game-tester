@@ -70,10 +70,10 @@ feature-map.yaml` exits 0, `coverage-report.json` shows 6/6 PASSED, 0 FAILED,
 
 The map adds one feature of its own, `battle.concluded_battle_is_inert`, because the adapter never observes termination for this game (README Finding 2) and therefore keeps sending actions into a finished battle.
 
-### T-005 · Exploit-hunter invariants + same-seed replay — `status: DONE` · `coder: opus` · `after: T-004`
+### T-005 · Invariant-fuzzer invariants + same-seed replay — `status: DONE` · `coder: opus` · `after: T-004`
 Write an invariants module (`0 ≤ force_strength ≤ 20`, `round_number`
 monotonic, `winner` implies `battle_over`) and a script that runs the
-exploit-hunter for ≥100 steps across two seeds, then replays one seed twice
+invariant-fuzzer for ≥100 steps across two seeds, then replays one seed twice
 and diffs state.
 **Accept:** script exits 0; 0 invariant violations across both seeds; replay
 diff is empty (byte-identical).

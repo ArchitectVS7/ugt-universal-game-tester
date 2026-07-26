@@ -15,7 +15,7 @@ cd examples/escape-room/game && npm test && cd -      # game suite: 85/85
 cd examples/escape-room/integration
 ugt smoke-test --config ugt.config.yaml                                   # wiring
 ugt verify --config ugt.config.yaml --feature-map feature-map.yaml        # Tier 1 — 6/6
-python3 ../../../examples/escape-room/integration/exploit_hunt.py         # Tier 2 — 6/6
+python3 ../../../examples/escape-room/integration/fuzz_escape_room.py         # Tier 2 — 6/6
 ```
 
 Recorded results (2026-07-25, against the game at 85/85 green):
@@ -24,7 +24,7 @@ Recorded results (2026-07-25, against the game at 85/85 green):
 |---|---|---|
 | 0 | `ugt smoke-test` | PASSED, 5/5 steps |
 | 1 | `ugt verify` | **6/6 PASSED, 0 FAILED, 0 NOT_REACHED** |
-| 2 | `exploit_hunt.py` | **TIER 2 MET — 6/6 checks**, 2 seeds x 160 steps, 0 findings |
+| 2 | `fuzz_escape_room.py` | **TIER 2 MET — 6/6 checks**, 2 seeds x 160 steps, 0 findings |
 | 3 | `ugt playtest` | guide written, **run not yet performed** — see below |
 
 ## Files
@@ -33,7 +33,7 @@ Recorded results (2026-07-25, against the game at 85/85 green):
 |---|---|
 | `ugt.config.yaml` | `engine.type: simulation`; 41 actions, **generated** from `node ../game/src/bridge.js --actions` so ids cannot drift from the CSVs |
 | `feature-map.yaml` | Tier 1 — F1–F6 as one continuous playthrough of the real flag chain |
-| `exploit_hunt.py` | Tier 2 — random walks + invariants + negative control + determinism |
+| `fuzz_escape_room.py` | Tier 2 — random walks + invariants + negative control + determinism |
 | `strategy-guide.md` | Tier 3 — the briefing an LLM playtester reads |
 
 ## Tier 3 is written but not run

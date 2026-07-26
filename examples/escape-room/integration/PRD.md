@@ -26,7 +26,7 @@ examples — `ugt verify` / `ugt playtest` work immediately.
 - **Full raw state** (returned by every `step`/`reset`) — `current_room`,
   `inventory` (list), `flags` (dict), `moves_taken`, `rooms_visited`,
   `escaped`. This is what `ugt verify`'s feature-map assertions and the
-  exploit-hunter's invariants read directly.
+  invariant-fuzzer's invariants read directly.
 - **`observation_space` (box, numeric only, legacy RL path)** — the formula
   evaluator and Gym `Box` wrapper need scalars, so only derived numeric
   fields are mapped: `moves_taken (0-200)`, `inventory_count (0-12)`,
@@ -54,7 +54,7 @@ examples — `ugt verify` / `ugt playtest` work immediately.
 - `ugt smoke-test` — 5 random actions round-trip cleanly (a no-op for an
   invalid context still returns valid state, never crashes).
 - `ugt verify` — F1-F6 above.
-- Exploit-hunter (Tier 2) — random walk ≥150 steps; invariants: `moves_taken`
+- Invariant-fuzzer (Tier 2) — random walk ≥150 steps; invariants: `moves_taken`
   and `rooms_visited` never decrease, `current_room` is always a valid
   `room_id`, `escaped` never flips back to `false`. Same-seed replay is
   trivially deterministic here (no RNG in the game) — the replay check
@@ -68,4 +68,4 @@ examples — `ugt verify` / `ugt playtest` work immediately.
 
 - All ladder steps pass against `../game`.
 - `feature-map.yaml` scores 6/6 PASSED.
-- Exploit-hunter: 0 invariant violations over ≥150 steps, two seeds.
+- Invariant-fuzzer: 0 invariant violations over ≥150 steps, two seeds.

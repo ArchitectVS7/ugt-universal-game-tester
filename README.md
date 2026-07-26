@@ -14,7 +14,7 @@ story of why that rule exists.
 
 1. **`ugt verify`** — correctness. Drives an adapter directly against a `feature-map.yaml` (assertions on
    state deltas), producing `results/coverage-report.json`.
-2. **Exploit-hunter** — robustness. Drives random/heuristic *real* actions through an adapter and asserts
+2. **Invariant-fuzzer** — robustness. Drives random/heuristic *real* actions through an adapter and asserts
    game invariants after every step (no negative resources, no stuck screens, no soft-lock, no crash), plus
    same-seed replay determinism. No reward engineering needed — this is what random/heuristic search is
    actually good at.
@@ -24,7 +24,7 @@ story of why that rule exists.
 
 These three tiers are run in a standardized sequence per game integration — the **trial ladder**: spike
 (raw protocol round-trip) → smoke (same path through the framework's adapter contract) → R1 playability →
-R2 full content spine → R3 exploit-hunter + determinism. Each integration lives in its own
+R2 full content spine → R3 invariant-fuzzer + determinism. Each integration lives in its own
 `integrations/<game>/` directory (a self-contained set of ladder scripts + a findings log).
 
 **`examples/sokoban/` is a complete worked example of that whole ladder** — a small deterministic Godot
@@ -72,7 +72,7 @@ in your game's or integration's directory.
 
 | | One run | Several in flight |
 |---|---|---|
-| **Simple** | "Run a smoke test against this game and tell me if the adapter wiring is broken." | "Run the exploit-hunter three times with different seeds and tell me if any found an invariant violation." |
+| **Simple** | "Run a smoke test against this game and tell me if the adapter wiring is broken." | "Run the invariant-fuzzer three times with different seeds and tell me if any found an invariant violation." |
 | **Complex** | "Prepare UGT for this repository — scaffold `ugt.config.yaml` if one doesn't exist, write a `feature-map.yaml` from the game's design doc, then run the trial ladder through R2 and give me the coverage report." | "Playtest this game 5 times with claude-haiku-4-5 and 5 times with claude-opus-4-8, then tell me whether the two models actually disagree on whether the economy is balanced." |
 
 **Orchestrator — building or extending a game/integration**
@@ -99,7 +99,7 @@ fabricating behavior.
 - **`examples/`** — three worked examples, each pairing a game built from a PRD with the UGT integration that
   tests it, one per transport: `dice` (React → `browser`), `escape-room` (Node → `simulation`), and
   `sokoban` (Godot → a hand-written `custom` adapter). **`sokoban/integration/` is the fastest way to see the
-  full trial ladder** — all five rungs runnable in one command. R3 (the exploit-hunter) is qualitatively
+  full trial ladder** — all five rungs runnable in one command. R3 (the invariant-fuzzer) is qualitatively
   different from R1: it runs random walks and re-checks invariants after *every* step, catching states no
   scripted test can enumerate; the same-seed replay then certifies the engine is deterministic. Start here.
 - **`PLAN-FORWARD.md`** — current direction: what's been proven, what's next, links to full history.

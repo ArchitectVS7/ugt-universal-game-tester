@@ -95,13 +95,13 @@ failure.
 
 **Delivered (2026-07-26):** `verify_round2.py` — **ROUND 2 MET, 11/11**. All 3 shipped levels solved back to back over the wire (6 + 23 + 44 = 73 actions) to `all_levels_solved` with `terminated=True`; 83 commands, 0 invariant violations. No-op probes compare the WHOLE state rather than just position (README Finding 2).
 
-### T-006 · `verify_round3.py`: exploit-hunter + replay — `status: DONE` · `coder: opus` · `after: T-005`
-Random walk ≥100 steps per level via `ugt/core/exploit_hunter.py`, invariants
+### T-006 · `verify_round3.py`: invariant-fuzzer + replay — `status: DONE` · `coder: opus` · `after: T-005`
+Random walk ≥100 steps per level via `ugt/core/invariant_fuzzer.py`, invariants
 after every step; then replay one seed twice and diff state.
 **Accept:** 0 invariant violations across all 3 levels; replay diff empty;
 footer reports `ROUND 3 MET`.
 
-**Delivered (2026-07-26):** `verify_round3.py` — **ROUND 3 MET, 7/7**. UGT's real ExploitHunter, 120 uniform-random steps x 2 seeds = 240 steps, zero findings, using the same invariant suite as R1/R2. Illegal action ids (-1, 4, 99, 1e9) proven state-inert with the bridge still healthy afterwards; two fresh processes replay a fixed sequence byte-identically (14 distinct states over 16 steps, so non-vacuous).
+**Delivered (2026-07-26):** `verify_round3.py` — **ROUND 3 MET, 7/7**. UGT's real InvariantFuzzer, 120 uniform-random steps x 2 seeds = 240 steps, zero findings, using the same invariant suite as R1/R2. Illegal action ids (-1, 4, 99, 1e9) proven state-inert with the bridge still healthy afterwards; two fresh processes replay a fixed sequence byte-identically (14 distinct states over 16 steps, so non-vacuous).
 
 ---
 

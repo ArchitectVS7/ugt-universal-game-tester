@@ -69,7 +69,7 @@ def playtest_game(config, strategy_guide, max_actions=100, output_path=None, pro
     runs           — number of independent runs (adapter.reset() isolates each)
     invariants     — optional machine checks run after every executed action, kept fully
                      game-agnostic: either a list of objects with .name and
-                     .check(before, action_id, info, after, ctx) (the exploit-hunter
+                     .check(before, action_id, info, after, ctx) (the invariant-fuzzer
                      contract), or a callable (adapter) -> such a list. Violations are
                      recorded per run (separate from LLM-suspected potential_bugs) and
                      never abort the run — a failed check is data.
@@ -335,7 +335,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
     _consecutive_repeat = 0
     repeat_streak = {}  # {noop_key: current back-to-back run length}, single active entry
     ended_early = None
-    # Shared mutable context for stateful invariants (exploit-hunter semantics:
+    # Shared mutable context for stateful invariants (invariant-fuzzer semantics:
     # one ctx per episode — cleared whenever the game resets mid-run).
     inv_ctx = {}
     start_time = time.time()
@@ -592,7 +592,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
             print(f"  [Step {step_num}] Execution error: {exec_err}")
             # The game is being reset mid-step: invariants must not compare the
             # pre-error state against the post-reset state (false violations —
-            # same rule as exploit_hunter's crash path).
+            # same rule as invariant_fuzzer's crash path).
             executed_action_id = None
             pre_reset = current_state
             try:
@@ -608,7 +608,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
 
         action_counts[f"{action_type}:{value}"] = action_counts.get(f"{action_type}:{value}", 0) + 1
 
-        # Machine-checked invariants (exploit-hunter contract) — run on every executed action.
+        # Machine-checked invariants (invariant-fuzzer contract) — run on every executed action.
         if invariant_list and executed_action_id is not None:
             for inv in invariant_list:
                 try:

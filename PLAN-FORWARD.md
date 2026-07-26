@@ -63,7 +63,7 @@ Each new game climbs the same ladder; every rung is a fail-closed gate script in
    per-command invariants.
 4. **R2 — full spine** (`verify_round2.py`) — every major mode/system driven to a real outcome (e.g. a win),
    still under invariants.
-5. **R3 — exploit-hunter** (`verify_round3.py` / `ugt/core/exploit_hunter.py`) — random+heuristic walks with
+5. **R3 — invariant-fuzzer** (`verify_round3.py` / `ugt/core/invariant_fuzzer.py`) — random+heuristic walks with
    the same invariants asserted after every step, plus determinism checks (same-seed replay must be
    byte-identical). Findings are structured and read, not counted.
 
@@ -120,7 +120,7 @@ Revisit when an item actually blocks the current game, not on a schedule:
 | Cross-game lessons registry (methodology + LLM pre-flight audit + operational discipline) | `LESSONS.md` |
 | Onboard a new game + methodology | `UGT-USER-MANUAL.md` |
 | LLM playtest design spec (tier 3) | `PLAYTEST-DESIGN.md` |
-| Trial-ladder scaffold | `ugt/core/trial.py` (+ `ugt/core/exploit_hunter.py` for R3) |
+| Trial-ladder scaffold | `ugt/core/trial.py` (+ `ugt/core/invariant_fuzzer.py` for R3) |
 | Framework overview + install | `README.md` |
 | Per-game status ledger + game-specific next steps (**internal**) | `Dev/STATUS.md` |
 | Superseded / historical docs (**internal**; why + where content went) | `Dev/README.md` |

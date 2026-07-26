@@ -8,7 +8,7 @@ DEFAULT_CONFIG_TEMPLATE = """# UGT Configuration File
 #
 # Three-Tier Testing Model — run these in order:
 #   Tier 1:  ugt verify    -- is the game correct?     (requires feature-map.yaml)
-#   Tier 2:  exploit-hunter -- does it break?           (run via verify_round3.py in your integration)
+#   Tier 2:  invariant-fuzzer -- does it break?           (run via verify_round3.py in your integration)
 #   Tier 3:  ugt playtest  -- does it feel right?      (LLM balance/strategy judge, requires ANTHROPIC_API_KEY)
 #
 # Start with: ugt smoke-test   to verify bridge connectivity, then ugt verify.

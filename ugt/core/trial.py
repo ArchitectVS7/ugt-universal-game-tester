@@ -1,7 +1,7 @@
 """
 Trial-ladder scaffold — the game-agnostic skeleton shared by every per-game
 verify_round{1,2,3}.py script (the R1 "one loop" / R2 "full spine" / R3
-"exploit-hunter walk" ladder documented in UGT-USER-MANUAL.md).
+"invariant-fuzzer walk" ladder documented in UGT-USER-MANUAL.md).
 
 Extracted from the fourth game trial's ladder scripts, where the same three
 pieces were duplicated verbatim across rounds — and, before that, across the
@@ -12,7 +12,7 @@ two browser-game trials that preceded it:
   * InvariantSuite   — a registry of per-command predicates
                        (before, after, command, result) -> str | None, runnable
                        as a sweep after every command AND wrappable to the
-                       ExploitHunter's (before, action_id, info, after, ctx)
+                       InvariantFuzzer's (before, action_id, info, after, ctx)
                        invariant signature for the R3 tier.
   * first_divergence — the determinism-replay compare (index of the first
                        differing element between two same-length streams).
@@ -88,7 +88,7 @@ class InvariantSuite:
     """A game's per-command invariant predicates, runnable in both tiers.
 
     R1/R2 (scripted rounds) call `check_command` after every command; R3 hands
-    the same predicates to the ExploitHunter via `to_hunter_invariants` — one
+    the same predicates to the InvariantFuzzer via `to_hunter_invariants` — one
     definition, both signatures, so the tiers can never drift apart.
     """
 
@@ -107,10 +107,10 @@ class InvariantSuite:
         return violations
 
     def to_hunter_invariants(self) -> list:
-        """Wrap each predicate to the ExploitHunter's
+        """Wrap each predicate to the InvariantFuzzer's
         (before, action_id, info, after, ctx) signature, preserving its name
         and docstring for the hunter's finding reports."""
-        from ugt.core.exploit_hunter import Invariant  # avoid import cycles
+        from ugt.core.invariant_fuzzer import Invariant  # avoid import cycles
         return [Invariant(pred.__name__, _wrap_for_hunter(pred),
                           pred.__doc__ or "")
                 for pred in self.predicates]

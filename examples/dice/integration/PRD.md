@@ -60,7 +60,7 @@ exactly.
 - `ugt smoke-test` — 5 random actions round-trip through the adapter without
   error.
 - `ugt verify` — F1-F6 above via `feature-map.yaml`.
-- Exploit-hunter (Tier 2) — random allocation walk for 30+ rounds, asserting
+- Invariant-fuzzer (Tier 2) — random allocation walk for 30+ rounds, asserting
   invariants: `0 ≤ force_strength ≤ 20` always, `round_number` never
   decreases, `winner` only set once `battle_over` is true. Same-seed replay
   must match byte-for-byte (proves the game's RNG discipline from its PRD
@@ -73,5 +73,5 @@ exactly.
 
 - All ladder steps above pass against a built `../game` bundle.
 - `feature-map.yaml` covers F1-F6 with 100% PASSED on a clean run.
-- Exploit-hunter finds zero invariant violations across ≥100 random-action
+- Invariant-fuzzer finds zero invariant violations across ≥100 random-action
   steps, two seeds.

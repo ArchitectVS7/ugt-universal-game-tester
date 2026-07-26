@@ -29,7 +29,7 @@ Everything else found was documentation drift, stale claims, or scope
 questions — real but not blocking.
 
 **Current state:** CLI verified working end-to-end from a clean install. The
-three-tier model (verify / exploit-hunter / playtest) is intact and unaffected
+three-tier model (verify / invariant-fuzzer / playtest) is intact and unaffected
 by the RL removal. Three new planned examples added as PRD + TASKS.md only.
 
 ---
@@ -105,7 +105,7 @@ game, including ones that never trained); `training.*` validation.
 **Kept, adjusted:** `UniversalGameEnv` — still used by `ugt smoke-test`, now a
 thin state/action wrapper that always returns reward `0.0`.
 
-**Confirmed unaffected:** `verify`, exploit-hunter, and `playtest` all drive an
+**Confirmed unaffected:** `verify`, invariant-fuzzer, and `playtest` all drive an
 adapter directly and never touched `UniversalGameEnv` or `reward_profiles`. The
 three-tier model is fully intact.
 
@@ -199,7 +199,7 @@ Being explicit, since "verified" is doing real work in this report.
 - Grep sweeps for RL traces and internal codenames → zero remaining
 - **Full harness-game ladder, re-run after the RL removal** — all five rungs
   green: spike 13/13, smoke 10/10, R1 5/5, R2 4/4, R3 5/5 (including the
-  exploit-hunter's random-pressure pass and the byte-identical same-seed replay)
+  invariant-fuzzer's random-pressure pass and the byte-identical same-seed replay)
 
 **Read and reasoned about, not executed:**
 - `ugt playtest` was never executed (needs an API key and spend). Its code path

@@ -38,7 +38,7 @@ class UniversalGameEnv(gym.Env):
     Universal Gymnasium Environment dynamically driven by a ugt.config.yaml file.
     Translates raw JSON game state into a standard Gymnasium observation/action loop.
     Used by `ugt smoke-test` for a quick wiring check — reward is always 0.0 since
-    nothing in UGT's three testing tiers consumes it (verify/exploit-hunter/playtest
+    nothing in UGT's three testing tiers consumes it (verify/invariant-fuzzer/playtest
     all drive an adapter directly, not this env).
     """
     spec = None

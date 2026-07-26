@@ -28,7 +28,7 @@ The nine core rules, as one-line index entries only — **the full text and the 
   under real play.
 - **M6 · Reward realized outcomes, not activity** — express play styles as reward *weights*, not by hiding
   actions.
-- **M7 · Right tool per question** — correctness → verify; robustness → exploit-hunter; balance → LLM
+- **M7 · Right tool per question** — correctness → verify; robustness → invariant-fuzzer; balance → LLM
   playtester. Don't force one agent to answer all three.
 - **M8 · Test over the wire** — a green in-process suite cannot see serialization-boundary bugs.
 - **M9 · Audit your own findings** before citing them; record corrections rather than deleting them.
@@ -45,7 +45,7 @@ The nine core rules, as one-line index entries only — **the full text and the 
 | Tier | Command / mechanism | Question answered | Output file |
 |------|---------------------|--------------------|-------------|
 | **1. Verify** | `ugt verify` | Does each game feature work correctly? (correctness) | `results/coverage-report.json` |
-| **2. Exploit-hunter** | `ugt/core/exploit_hunter.py` — R3 of the trial ladder | Does the game break under random/heuristic pressure? (robustness) | printed `[FINDING]`s + the round's PASS/FAIL footer |
+| **2. Invariant-fuzzer** | `ugt/core/invariant_fuzzer.py` — R3 of the trial ladder | Does the game break under random/heuristic pressure? (robustness) | printed `[FINDING]`s + the round's PASS/FAIL footer |
 | **3. LLM playtest** | `ugt playtest` | Is the game *good*? Does it feel right to a reasoning player? (balance/judgment) | `results/playtest-report.json` |
 
 > **Why order matters:** tier 3 verdicts on a game that still crashes under tier 2 are noise, and tier 2 on a
@@ -65,11 +65,11 @@ fail-closed gate scripts rather than the bare CLI commands — five rungs, each 
 | **Smoke** | `smoke_<game>_adapter.py` | The same round-trip works through UGT's `BaseAdapter` contract | Same checks pass via `connect()`/`reset()`/`step()`/`close()`, not the raw protocol directly |
 | **R1 — playability** | `verify_round1.py` | One scripted full loop of the core game, invariants checked after every command | Every invariant holds across the whole loop; the loop reaches a real, meaningful state change (not a no-op); same-seed reproducible |
 | **R2 — full spine** | `verify_round2.py` | Every major mode/system driven to a real outcome (e.g. an actual win), still under invariants | Every mode reaches a genuine terminal outcome under the same invariants; the check count (denominator) is disclosed honestly — no vacuous passes, none silently narrowed or widened |
-| **R3 — exploit-hunter** | `verify_round3.py` | Random/heuristic walks (`ugt/core/exploit_hunter.py`) asserting the SAME invariants after every step, across multiple seeded episodes | Zero invariant violations/crashes across every episode and step; every action in the vocabulary exercised at least once; a same-seed replay is byte-identical (determinism) |
+| **R3 — invariant-fuzzer** | `verify_round3.py` | Random/heuristic walks (`ugt/core/invariant_fuzzer.py`) asserting the SAME invariants after every step, across multiple seeded episodes | Zero invariant violations/crashes across every episode and step; every action in the vocabulary exercised at least once; a same-seed replay is byte-identical (determinism) |
 
 The game-agnostic skeleton lives in `ugt/core/trial.py`: `GateRunner` (the `[PASS]`/`[FAIL]` accumulator,
 `[FINDING]` registry, and the fail-closed "ROUND N MET — p/t" footer), `InvariantSuite` (one predicate
-definition reused by both the scripted rounds and the exploit-hunter, so the tiers can't drift apart), and
+definition reused by both the scripted rounds and the invariant-fuzzer, so the tiers can't drift apart), and
 `first_divergence` (replay compare). Everything game-specific — predicates, probes, policies, state
 normalization — stays in the game's `integrations/<game>/` files. A failed check is DATA: findings print
 inline, fail the gate, and get fixed upstream in the game.
@@ -77,7 +77,7 @@ inline, fail the gate, and get fixed upstream in the game.
 > **Worked example:** `examples/sokoban/integration/` is a complete implementation of this whole ladder —
 > a small deterministic Godot game driven engine-first over a TCP socket through a transport-only adapter,
 > with all five rungs (`spike_sokoban.py` … `verify_round3.py`) runnable in one command. It is the fastest
-> way to see the ladder, the invariant-suite reuse across R1/R2/R3, and the exploit-hunter + determinism
+> way to see the ladder, the invariant-suite reuse across R1/R2/R3, and the invariant-fuzzer + determinism
 > check in action. Read its `README.md` first — including its "Corrections to this harness" section, which
 > records two assertions that were vacuous in the first version and how they were caught.
 
@@ -161,7 +161,7 @@ Testing Model" above for the full table and exit criteria):
 | Tier | Tool | Question answered | Time |
 |------|------|--------------------|------|
 | **1. Verify** | `ugt verify` | Does each feature work? (correctness) | ~minutes |
-| **2. Exploit-hunter** | R3 of the trial ladder | Does the game break under pressure? (robustness) | ~minutes |
+| **2. Invariant-fuzzer** | R3 of the trial ladder | Does the game break under pressure? (robustness) | ~minutes |
 | **3. Playtest** | `ugt playtest` | Does the game feel right to a reasoning agent? (balance) | ~30 min |
 
 All three tiers share the same `ugt.config.yaml` and bridge protocol. Once your bridge is written, all three
@@ -182,7 +182,7 @@ are available.
 │                     UGT Python Core                          │
 │                    cli.py (ugt command)                      │
 │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────┐ │
-│  │  verifier.py │  │ exploit_hunter│  │  playtester.py     │ │
+│  │  verifier.py │  │ invariant_fuzzer│  │  playtester.py     │ │
 │  └──────┬───────┘  └──────┬───────┘  └─────────┬──────────┘ │
 │         │                 │                     │            │
 │  ┌──────▼─────────────────▼─────────────────────▼──────────┐ │
@@ -783,8 +783,8 @@ The smoke test drives 5 random actions through the browser and confirms the hook
 
 **Step 4: Run a random-play UI stress test:**
 
-There is no dedicated "UI stress test" command — use the exploit-hunter (Tier 2 of the trial ladder,
-`ugt/core/exploit_hunter.py`) directly against your browser adapter. It drives random/heuristic actions
+There is no dedicated "UI stress test" command — use the invariant-fuzzer (Tier 2 of the trial ladder,
+`ugt/core/invariant_fuzzer.py`) directly against your browser adapter. It drives random/heuristic actions
 through the real UI and re-checks your invariants after every step, which is exactly what a UI stress pass
 needs: many different action sequences, not a single scripted path. See "The trial ladder" section above for
 how R3 wires this up (`verify_round3.py` in a real integration; `examples/sokoban/integration/verify_round3.py` for

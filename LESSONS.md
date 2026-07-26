@@ -45,7 +45,7 @@ taken, actions issued) — proxies get gamed. Express agent personalities as rew
 action set, never by hiding actions from the agent.
 
 **M7 · Right tool per question.** Correctness → `ugt verify`. Robustness / does-it-break → the
-exploit-hunter (no reward engineering needed). Balance / is-it-good → the LLM playtester (competent play
+invariant-fuzzer (no reward engineering needed). Balance / is-it-good → the LLM playtester (competent play
 beats volume). Do not force one agent to answer all three.
 
 **M8 · Test over the wire — a green in-process suite cannot see serialization-boundary bugs.** The game's own
@@ -59,6 +59,29 @@ kill vacuous greens; and when an invariant never fires, suspect your own invaria
 cumulative counters. Investigate before *confirming*, not only before dismissing. Record corrections in the
 integration's findings log rather than deleting the mistake.
 *(Two of the card game's own findings were later partly refuted; one Godot-game finding was fully self-refuted.)*
+
+**M10 · Know what a green tier PROVES, and name the tool accordingly.** A tier's name becomes what people
+believe it did. The robustness tier was called `ExploitHunter` for its whole life while containing exactly two
+detectors: crashes, and invariants a human had written for that game. It never searched for anything — the
+policy is random by default, with no notion of reward, score or progress, so it cannot go *looking* for a
+profitable loop. "Exploit hunter is green" was read as "nobody can game this"; it meant "no crash, and none of
+the properties we listed were violated". The worked example is in this repo: a browser dice game held that rung
+green at 11/11 for weeks while one allocation strictly dominated every other and the game's only decision was
+meaningless. Renamed to **invariant fuzzer** on 2026-07-26 (263 occurrences across 81 files — budget for the
+sweep). Two durable rules:
+- **State the negative in the tier's own docstring.** What it does *not* prove is more load-bearing than what
+  it does, because the name will keep over-promising after you stop reading.
+- **Give every game a framework-owned floor**, so the oracle is not 100% author-supplied
+  (`ugt/core/generic_checks.py`): monotone-growth (fields that only ever rise = farmable resource), state
+  cycles, dead actions, nondeterminism, state starvation. Zero configuration — they discover the fields from
+  the observed states. Make them **observations, not failures**: several are inherently dispositional ("is this
+  a counter or a resource?" is a question, not a verdict), and a channel that turns existing green ladders red
+  for unreviewed reasons gets disabled instead of read.
+*Corollary — measure at the right granularity or the check is silently vacuous.* The first monotone-growth
+implementation looked run-wide, so every episode reset registered as a fall and **nothing could ever flag**. It
+passed its own gate by being useless. Farming happens within one life; per-episode is the window. It was caught
+only because the rung asserted the channel could still SPEAK with the allowlist removed (O2 applied to a
+whole channel, not one assertion).
 
 ---
 

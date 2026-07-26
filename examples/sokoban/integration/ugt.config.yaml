@@ -8,7 +8,7 @@
 #   python3 smoke_sokoban_adapter.py   # BaseAdapter contract
 #   python3 verify_round1.py           # R1 — one level solved, F1-F5
 #   python3 verify_round2.py           # R2 — all 3 levels, no-op probes
-#   python3 verify_round3.py           # R3 — exploit hunter + replay
+#   python3 verify_round3.py           # R3 — invariant fuzzer + replay
 #
 # Godot has no built-in UGT engine type, and none of the built-ins fit: it is
 # not a web page (browser), and its frame-based _process() loop cannot do a

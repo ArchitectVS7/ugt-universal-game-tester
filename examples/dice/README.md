@@ -163,4 +163,20 @@ The player briefing needed rewriting too, and that one would have been expensive
 
 Suite back to 157/157, ladder green at 19 · 9 · 12 · 14 · 11, `ugt verify` 4/4.
 
+## The thing that keeps happening: testing the game keeps improving the tester
+
+I want to flag a pattern, because it's turned up in nearly every session and it wasn't something I planned for.
+
+Every time we point UGT at one of these games, we find something wrong with **UGT**, not just with the game. Not as a side effect either — the game is the thing that exposes it. This file alone has: a browser adapter that couldn't see a battle end, a feature-map entry that only passed because of that bug, a harness asserting a bound eight points too loose, a gate certifying a stale build, and a rung whose premise quietly expired. All of those are tester defects, surfaced by a dice game that fits in one file.
+
+The best example landed today. I asked a sanity-check question — *is the "exploit hunter" actually hunting exploits, or is it just checking the boxes we drew for it?* — and the answer was: just the boxes. It had exactly two detectors, crashes and whatever invariants a human had written for that specific game. It never searched for anything. And the proof was sitting right here: **dice passed that rung 11/11 for weeks while one allocation strictly dominated every other and the game's only decision was meaningless.** Green the whole time. That's not a subtle miss, that's the headline problem in the game, and the tier named after finding exploits didn't have a shape for it.
+
+So two things changed. It's now called an **invariant fuzzer**, which is what it actually is — random input against an oracle. The old name was quietly making promises. And every game now inherits a floor of framework-owned checks that need no configuration at all: fields that only ever go up (the farmable-resource smell), states the game can return to forever, actions that never do anything, same-input-different-output, and runs that barely move. They report rather than fail, because "is this a counter or a resource?" is a question for a person, not a verdict.
+
+Ran it against the card game as a second opinion and it immediately flagged three things, all correct: two graveyard counters that genuinely only go up (fine — cards don't come back), and two actions that never change state (also fine — they're deliberate illegal-input probes). No noise, and each one obvious to disposition. That's the bar I wanted.
+
+**And this is why I picked three games in three different genres on three different transports.** Dice is React in a browser, the escape room is Node over a subprocess, sokoban is Godot over TCP. It isn't variety for its own sake. Every one of them stresses a different part of the tester, and each keeps handing back a defect the others couldn't have shown me. A browser bug doesn't surface in a subprocess harness. The stale-build hole only exists because browser games ship a compiled bundle. If I'd built three versions of the same thing I'd have found roughly a third as much.
+
+The tests are getting better because the games are getting tested. I'd rather ship one genuinely strong UGT off the back of three small honest games than a big one that's never been argued with.
+
 More will land here as we keep going. The full technical write-up, including the findings that are only useful to Claude, stays in [`integration/README.md`](integration/README.md).

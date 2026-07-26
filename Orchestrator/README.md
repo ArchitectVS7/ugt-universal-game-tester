@@ -335,7 +335,7 @@ Orchestrator/
 **UGT**, the framework for finding out whether what you just built actually holds
 up. It asks three different questions. **Tier 1 — `ugt verify`** drives your game
 against a `feature-map.yaml` and asserts that each declared feature does what you
-said it does (correctness). **Tier 2 — the exploit-hunter** turns random and
+said it does (correctness). **Tier 2 — the invariant-fuzzer** turns random and
 heuristic walks loose on the game while re-checking your invariants after *every*
 step, hunting for the state the scripted tests never reach (robustness). **Tier 3 —
 `ugt playtest`** puts an LLM in the player's seat to judge balance, pacing, and
@@ -362,7 +362,7 @@ The suggested sequence:
 ugt init                                                                   # scaffolds ugt.config.yaml
 ugt smoke-test --config ugt.config.yaml                                   # bridge is alive
 ugt verify --config ugt.config.yaml --feature-map feature-map.yaml       # Tier 1 — correctness
-python verify_round3.py                                                  # Tier 2 — exploit-hunter (a ladder script, not a subcommand)
+python verify_round3.py                                                  # Tier 2 — invariant-fuzzer (a ladder script, not a subcommand)
 ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md # Tier 3 — LLM balance pass
 ```
 

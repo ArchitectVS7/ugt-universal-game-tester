@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rung 5 (R3) — robustness: UGT's real ExploitHunter against the live bridge.
+"""Rung 5 (R3) — robustness: UGT's real InvariantFuzzer against the live bridge.
 
     python3 examples/sokoban/integration/verify_round3.py
 
@@ -27,7 +27,7 @@ for _p in (HERE, REPO):
 from godot_tcp_adapter import GodotTcpAdapter  # noqa: E402
 from ugt.core.trial import GateRunner, first_divergence  # noqa: E402
 from invariants import SUITE  # noqa: E402
-from ugt.core.exploit_hunter import ExploitHunter  # noqa: E402
+from ugt.core.invariant_fuzzer import InvariantFuzzer  # noqa: E402
 
 ACTIONS = {0: "up", 1: "down", 2: "left", 3: "right"}
 STEPS = 120          # PRD asks for >= 100
@@ -57,7 +57,7 @@ def replay(seq, port_hint=None):
 
 
 def main() -> int:
-    print("Sokoban R3 — exploit hunter against the live bridge\n")
+    print("Sokoban R3 — invariant fuzzer against the live bridge\n")
     hunter_invariants = SUITE.to_hunter_invariants()
     print(f"  ({len(hunter_invariants)} invariants, shared with R1/R2)\n")
 
@@ -66,7 +66,7 @@ def main() -> int:
     total_steps = 0
     for seed in SEEDS:
         ad = GodotTcpAdapter()
-        hunter = ExploitHunter(ad, hunter_invariants, list(ACTIONS),
+        hunter = InvariantFuzzer(ad, hunter_invariants, list(ACTIONS),
                                action_names=ACTIONS, seed=seed)
         rep = hunter.run(episodes=1, steps_per_episode=STEPS, log=lambda m: None)
         try:
@@ -123,7 +123,7 @@ def main() -> int:
     check(bool(fired), "the shared invariant suite FIRES on a corrupted transition",
           f"{len(fired)} violation(s): {fired[:2]}")
 
-    return gate.finish("ROUND 3", f"UGT's real ExploitHunter drove the live Godot bridge for {total_steps} random steps "
+    return gate.finish("ROUND 3", f"UGT's real InvariantFuzzer drove the live Godot bridge for {total_steps} random steps "
         f"across {len(SEEDS)} seeds with zero findings, every illegal action id was proven "
         f"state-inert, two fresh processes replay byte-identically, and the invariant suite was "
         f"shown able to fail.")

@@ -121,7 +121,7 @@ class GodotTcpAdapter(BaseAdapter):
             reply.get("info", {}) or {},
         )
 
-    # ── crash-recovery hook used by ExploitHunter ────────────────────────────
+    # ── crash-recovery hook used by InvariantFuzzer ────────────────────────────
 
     def _read_state(self) -> dict:
         """Re-read state without applying an action.

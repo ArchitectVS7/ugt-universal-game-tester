@@ -51,7 +51,7 @@ noted for the SafeEvaluator's missing `in` operator.
 
 **Delivered (2026-07-25):** `feature-map.yaml` — **6/6 PASSED, 0 FAILED, 0 NOT_REACHED**. Written as one continuous playthrough of the real 7-link flag chain, because `ugt verify` does not navigate to satisfy preconditions. F5 asserts consumption through refusal semantics rather than the PRD's `inventory_count` (no `len()`/`in` in the assertion language). Proven non-vacuous: inverting F6 produces 1 FAILED. That negative control also surfaced README Finding #1 — `ugt verify` exits 0 even when features fail.
 
-### T-004 · Exploit-hunter invariants — `status: DONE` · `coder: opus` · `after: T-003`
+### T-004 · Invariant-fuzzer invariants — `status: DONE` · `coder: opus` · `after: T-003`
 Invariants: `moves_taken`/`rooms_visited` monotonic non-decreasing,
 `current_room` always a known room_id, `escaped` never reverts to false. Run
 ≥150 random steps, two seeds; same-seed replay diff empty.
@@ -59,7 +59,7 @@ Invariants: `moves_taken`/`rooms_visited` monotonic non-decreasing,
 
 ## M3 — Balance (Tier 3)
 
-**Delivered (2026-07-25):** `exploit_hunt.py` — **TIER 2 MET, 6/6 checks**. Two seeds x 160 random steps (>=150 required), 0 findings, against 6 invariants read from the game's own rooms.csv. Includes a negative control proving every invariant can fire and none fires on a legitimate transition, plus a non-vacuity check on the determinism proof. Random play reached only 9 distinct states in 61 steps — recorded as README Finding #4, not a defect.
+**Delivered (2026-07-25):** `fuzz_escape_room.py` — **TIER 2 MET, 6/6 checks**. Two seeds x 160 random steps (>=150 required), 0 findings, against 6 invariants read from the game's own rooms.csv. Includes a negative control proving every invariant can fire and none fires on a legitimate transition, plus a non-vacuity check on the determinism proof. Random play reached only 9 distinct states in 61 steps — recorded as README Finding #4, not a defect.
 
 ### T-005 · `strategy-guide.md` + playtest run — `status: BLOCKED(awaiting user approval to spend API credits)` · `coder: sonnet` · `after: T-003`
 Write the guide (verbs, inventory model, win condition, no assumed context).

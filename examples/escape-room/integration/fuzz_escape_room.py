@@ -2,7 +2,7 @@
 """Tier 2 — robustness. Random-walk the real Tiny Escape Room bridge and assert
 invariants after every single step, then prove the run is reproducible.
 
-Run from anywhere:  python3 examples/escape-room/integration/exploit_hunt.py
+Run from anywhere:  python3 examples/escape-room/integration/fuzz_escape_room.py
 
 What this does NOT do: re-implement a rule. Every action goes over the real
 JSON-lines wire to ../game/src/bridge.js, and every invariant is a statement
@@ -34,7 +34,7 @@ GAME = os.path.abspath(os.path.join(HERE, "..", "game"))
 sys.path.insert(0, REPO)
 
 from ugt.adapters.subprocess import SubprocessAdapter  # noqa: E402
-from ugt.core.exploit_hunter import ExploitHunter, Invariant  # noqa: E402
+from ugt.core.invariant_fuzzer import InvariantFuzzer, Invariant  # noqa: E402
 from ugt.utils.config_parser import UgtConfig  # noqa: E402
 
 STEPS_PER_EPISODE = 160  # T-004 requires >= 150
@@ -156,7 +156,7 @@ def main() -> int:
 
     for seed in SEEDS:
         adapter = make_adapter()
-        hunter = ExploitHunter(adapter, INVARIANTS, action_ids,
+        hunter = InvariantFuzzer(adapter, INVARIANTS, action_ids,
                                action_names=names, seed=seed)
         report = hunter.run(episodes=EPISODES, steps_per_episode=STEPS_PER_EPISODE,
                             log=lambda m: None)

@@ -85,7 +85,7 @@ asserted in-harness by the ladder rather than through `verifier.py`.)
   fixtures) to a real `level_solved`, asserting F1-F5 along the way.
 - **R2** — all 3 levels back-to-back to `all_levels_solved`, plus deliberate
   wall/box-blocked no-op checks (F1, F3).
-- **R3** — exploit-hunter random walk (uniform over the 4 actions) for ≥100
+- **R3** — invariant-fuzzer random walk (uniform over the 4 actions) for ≥100
   steps per level; invariants: `moves_taken` never decreases, `player_x`/
   `player_y` stay in-bounds, `boxes_on_target` never exceeds `boxes_total`.
   Same-seed replay — trivial here since Sokoban has no RNG, but still

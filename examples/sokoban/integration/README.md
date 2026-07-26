@@ -5,7 +5,7 @@ adapter over a local TCP socket** — the same "transport-only adapter,
 constructed directly by the ladder scripts" pattern that `engine.type: custom`
 names. This is the reference example for that type: UGT's
 built-in engines don't fit a Godot game, so you write a small `BaseAdapter`
-subclass and the framework's ladder, invariants, and exploit-hunter all work
+subclass and the framework's ladder, invariants, and invariant-fuzzer all work
 unchanged.
 
 ## Prerequisites
@@ -55,7 +55,7 @@ and `escape-room` already demonstrate that tier end to end.
 | `smoke_sokoban_adapter.py` | Rung 2 — the `BaseAdapter` contract. |
 | `verify_round1.py` | Rung 3 — level 1 solved, F1–F5. |
 | `verify_round2.py` | Rung 4 — all 3 levels to `all_levels_solved`, no-op probes. |
-| `verify_round3.py` | Rung 5 — exploit hunter, illegal ids, replay determinism. |
+| `verify_round3.py` | Rung 5 — invariant fuzzer, illegal ids, replay determinism. |
 | `ugt.config.yaml` | Documentary (`engine.type: custom` — env.py dispatches nothing). |
 
 ## Findings

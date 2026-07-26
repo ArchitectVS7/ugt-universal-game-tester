@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rung 5 (R3) — robustness: UGT's real ExploitHunter against the live page.
+"""Rung 5 (R3) — robustness: UGT's real InvariantFuzzer against the live page.
 
     python3 examples/dice/integration/verify_round3.py
 
@@ -28,7 +28,8 @@ for _p in (HERE, REPO):
 
 from invariants import SUITE  # noqa: E402
 from serve_process import adapter_for, served_bundle  # noqa: E402
-from ugt.core.exploit_hunter import ExploitHunter  # noqa: E402
+from ugt.core.invariant_fuzzer import InvariantFuzzer
+from ugt.core.generic_checks import run_generic_checks  # noqa: E402
 from ugt.core.trial import GateRunner, first_divergence  # noqa: E402
 
 PRESETS = {0: "a6_d0", 1: "a5_d1", 2: "a4_d2", 3: "a3_d3",
@@ -38,6 +39,12 @@ PRESETS = {0: "a6_d0", 1: "a5_d1", 2: "a4_d2", 3: "a3_d3",
 # what matters is how much of it is LIVE, which the rung measures below.
 EPISODES = 10
 STEPS = 20
+# State paths that legitimately only ever grow. Dispositioned, not assumed:
+# `round_number` counts resolved rounds and `roll_counter` counts dice consumed
+# (the RNG-in-state discipline R3's replay check depends on). Neither is a
+# resource a player could farm. Anything NEW that only grows will trip the
+# monotone-growth check and demand its own disposition.
+MONOTONE_COUNTERS = ("round_number", "roll_counter")
 SEEDS = (0, 1)
 MAX_ROUNDS = 12
 
@@ -45,7 +52,7 @@ gate = GateRunner()
 
 
 def main() -> int:
-    print("Dice R3 — exploit hunter against the live page\n")
+    print("Dice R3 — invariant fuzzer against the live page\n")
     hunter_invariants = SUITE.to_hunter_invariants()
     print(f"  ({len(hunter_invariants)} invariants, shared with R1/R2)\n")
 
@@ -53,20 +60,47 @@ def main() -> int:
         # ---- random walks --------------------------------------------------
         print("  -- random walks --")
         total = 0
+        last_report = None
         for seed in SEEDS:
             ad = adapter_for(port)
-            hunter = ExploitHunter(ad, hunter_invariants, list(PRESETS),
-                                   action_names=PRESETS, seed=seed)
+            hunter = InvariantFuzzer(ad, hunter_invariants, list(PRESETS),
+                                   action_names=PRESETS, seed=seed,
+                                   monotone_allowlist=MONOTONE_COUNTERS)
             rep = hunter.run(episodes=EPISODES, steps_per_episode=STEPS, log=lambda m: None)
             try:
                 ad.close()
             except Exception:
                 pass
             total += EPISODES * STEPS
+            last_report = rep
             n = len(rep.findings)
             gate.ck(f"seed {seed}: {EPISODES} episodes x up to {STEPS} allocations, 0 findings",
                     n == 0,
                     "" if n == 0 else "; ".join(f"{f.name}: {f.detail}" for f in rep.findings[:3]))
+
+        # ---- the framework's own generic checks -----------------------------
+        # These need no per-game configuration: the fuzzer discovers what to look
+        # at from the observed states. They are the floor every game inherits —
+        # the answer to "R3 only finds what we tell it to". They are reported,
+        # not fatal, so read them rather than trusting the count.
+        print("\n  -- framework generic checks (no game knowledge) --")
+        obs = last_report.observations
+        for ob in obs:
+            print(f"     {ob}")
+            for line in ob.evidence[:4]:
+                print(f"        - {line}")
+        if not obs:
+            print("     (all quiet)")
+        # Non-vacuity: this channel has to be able to SAY something, or its
+        # silence proves nothing. `round_number` and `roll_counter` really do
+        # only ever increase, so dropping the allowlist must make it speak.
+        loud = run_generic_checks(last_report.trace, monotone_allowlist=())
+        gate.ck("the generic-check channel is live (it fires when the allowlist is removed)",
+                any(o.check == "monotone-growth" for o in loud),
+                f"without the allowlist: {sorted({o.check for o in loud})}")
+        gate.ck("no UNDISPOSITIONED generic check tripped",
+                not obs,
+                "" if not obs else "; ".join(o.summary for o in obs))
 
         # ---- how much of the budget is actually live? -----------------------
         # This is the number the D14 envelope fix was made for. Before it, the
@@ -157,7 +191,7 @@ def main() -> int:
 
     return gate.finish(
         "ROUND 3",
-        f"UGT's real ExploitHunter drove the live page for {total} random allocations across "
+        f"UGT's real InvariantFuzzer drove the live page for {total} random allocations across "
         f"{len(SEEDS)} seeds with zero findings, illegal ids were proven rejected without "
         f"corrupting state, replays are byte-identical and seed-sensitive, and the invariant "
         f"suite was shown able to fail.",

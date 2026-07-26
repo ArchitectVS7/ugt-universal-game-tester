@@ -4,7 +4,7 @@
 > written before the RL/LLM pivot and got the division of labor backwards (it cast the LLM as a correctness/
 > coverage tool and RL as the balance judge). Current direction, per `PLAN-FORWARD.md`: **the LLM playtester is
 > the balance tier** (competent play, N runs with confidence intervals — "is the game good?"); the
-> **exploit-hunter (RL/random) is the robustness tier** (crashes, soft-locks, invariant violations — "does the
+> **invariant-fuzzer (RL/random) is the robustness tier** (crashes, soft-locks, invariant violations — "does the
 > game break?"). This doc keeps only the design content that still applies to that role, ported to how the
 > project actually works today: Python, driving the **real** running game as a client (a live server, a real
 > browser, or the game's own subprocess harness), never a bridge reimplementation.

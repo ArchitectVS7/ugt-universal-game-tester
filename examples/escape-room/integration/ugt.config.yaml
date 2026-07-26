@@ -5,7 +5,7 @@
 # Regenerate with that command if the content files change.
 #
 # Tier 1: ugt verify --config ugt.config.yaml --feature-map feature-map.yaml
-# Tier 2: python3 exploit_hunt.py
+# Tier 2: python3 fuzz_escape_room.py
 # Tier 3: ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md
 
 project:

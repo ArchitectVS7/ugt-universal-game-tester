@@ -4,7 +4,7 @@ Written once, consumed twice, courtesy of `ugt.core.trial.InvariantSuite`:
 
   * R1/R2 (scripted rounds) call `SUITE.check_command(before, after, cmd, result)`
     after every command they issue.
-  * R3 (exploit-hunter) calls `SUITE.to_hunter_invariants()` for the SAME
+  * R3 (invariant-fuzzer) calls `SUITE.to_hunter_invariants()` for the SAME
     predicates wrapped to the hunter's signature.
 
 One definition, both tiers — the scripted ladder and the random walk can never
