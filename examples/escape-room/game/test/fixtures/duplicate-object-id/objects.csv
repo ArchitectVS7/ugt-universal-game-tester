@@ -1,0 +1,4 @@
+object_id,name,start_room,description,takeable,take_sets_flag,use_verb,use_requires_flag,use_sets_flag,use_consumes,use_success_text,use_fail_text
+key_brass,brass key,R01,"A small brass key, green with age.",true,has_brass_key,,,,false,,
+lantern,lantern,INV,An oil lantern.,true,,light,has_brass_key,lantern_lit,false,"The wick catches, and light spills out.",Nothing happens.
+lantern,spare lantern,R02,A second oil lantern.,true,,,,,false,,

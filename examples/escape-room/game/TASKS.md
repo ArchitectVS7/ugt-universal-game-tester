@@ -47,13 +47,28 @@ the deliberate scope boundary for this task. No CSV content, no engine
 behavior, and no bridge protocol implementation are in this commit.
 Orchestration: graphify=none — no graphify-out/graph.json in this repo; task is a self-contained project scaffold · attempts=1/4.
 
-### T-002 · CSV loader + validation — `status: TODO` · `coder: opus` · `after: T-001`
+### T-002 · CSV loader + validation — `status: DONE` · `coder: opus` · `after: T-001`
 Parse both CSVs into in-memory room/object maps. Validate at load time: every
 `exit_*` target room_id exists; every `entry_requires_flag` is set by *some*
 object's `take_sets_flag`/`use_sets_flag`; no duplicate `room_id`/`object_id`.
 **Accept:** unit tests cover a valid fixture CSV pair (loads clean) and at
 least 3 invalid fixtures (dangling exit, unreachable flag, duplicate id) —
 each throws a descriptive error.
+
+**Delivered (2026-07-25):** Implemented `parseContent()`/`loadContent()` in
+`src/engine.js`: a small hand-rolled CSV parser (quoted-field support, `""`
+escaping, BOM/CRLF tolerance), strict header-shape checks against the
+`ROOM_COLUMNS`/`OBJECT_COLUMNS` schema, and a `validate()` pass that collects
+every violation before throwing a single descriptive `ContentError` — dangling
+`exit_*` targets, `entry_requires_flag`/`use_requires_flag` values no object's
+`take_sets_flag`/`use_sets_flag` ever sets, and duplicate `room_id`/
+`object_id`. `test/loader.test.js` covers a valid fixture pair plus four
+invalid fixtures (dangling exit, unreachable flag, duplicate room id,
+duplicate object id) — one more than Accept's floor of three. Scope boundary:
+no engine state/movement/command logic (`createGame`/`executeCommand` remain
+T-004's stubs) and no real adventure content — only the loader and its
+fixtures landed here.
+Orchestration: graphify=none — no graphify-out/graph.json in this repo (checked repo root); orientation came from PRD.md, TASKS.md, and the T-001 scaffold in src/. · attempts=1/4.
 
 ## M1 — Content authoring
 
