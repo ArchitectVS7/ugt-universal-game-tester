@@ -114,10 +114,13 @@ describe('Accept 1 — decisive win (enemy FS reaches 0)', () => {
     expect(final.round_number).toBeLessThan(MAX_ROUNDS)
   })
 
-  it('golden: seed "vanguard", all-attack mirror → player wins round 8 at FS 7', () => {
-    expect(final.round_number).toBe(8)
-    expect(final.player.force_strength).toBe(7)
-    expect(final.log).toHaveLength(8)
+  // Golden values RECOMPUTED for the 2026-07-26 retune (STARTING_FS 20 -> 12).
+  // A golden test is supposed to break when balance changes — that is what makes
+  // it a golden test — so these are restated, not loosened.
+  it('golden: seed "vanguard", all-attack mirror → player wins round 6 at FS 3', () => {
+    expect(final.round_number).toBe(6)
+    expect(final.player.force_strength).toBe(3)
+    expect(final.log).toHaveLength(6)
     // The knockout is recorded in the round that dealt it.
     expect(final.last_round.enemy.force_strength_after).toBe(0)
   })
@@ -147,10 +150,10 @@ describe('Accept 2 — decisive loss (player FS reaches 0)', () => {
     expect(final.round_number).toBeLessThan(MAX_ROUNDS)
   })
 
-  it('golden: seed "bastion", all-attack mirror → enemy wins round 6 at FS 10', () => {
-    expect(final.round_number).toBe(6)
-    expect(final.enemy.force_strength).toBe(10)
-    expect(final.log).toHaveLength(6)
+  it('golden: seed "bastion", all-attack mirror → enemy wins round 4 at FS 6', () => {
+    expect(final.round_number).toBe(4)
+    expect(final.enemy.force_strength).toBe(6)
+    expect(final.log).toHaveLength(4)
     expect(final.last_round.player.force_strength_after).toBe(0)
   })
 
@@ -240,8 +243,12 @@ describe('Accept 4 — winner is null exactly while battle_over is false', () =>
 })
 
 describe('D9 — mutual destruction end to end', () => {
-  it('seed "assault", all-attack mirror: both sides hit 0 in the same round → draw', () => {
-    const { final } = playUntilOver(createInitialState('assault'), ALL_ATTACK, ALL_ATTACK)
+  // Seed changed 'assault' -> 'breach' for the retune. 'assault' no longer
+  // produces mutual destruction at STARTING_FS = 12, so keeping it would have
+  // meant this case silently stopped testing what its name says. 'breach' was
+  // found by sweeping seeds for one that still ends with BOTH sides at 0.
+  it('seed "breach", all-attack mirror: both sides hit 0 in the same round → draw', () => {
+    const { final } = playUntilOver(createInitialState('breach'), ALL_ATTACK, ALL_ATTACK)
     expect(final.player.force_strength).toBe(0)
     expect(final.enemy.force_strength).toBe(0)
     expect(final.battle_over).toBe(true)
@@ -250,7 +257,7 @@ describe('D9 — mutual destruction end to end', () => {
     // simultaneous damage, not two sequential deaths.
     expect(final.last_round.player.force_strength_after).toBe(0)
     expect(final.last_round.enemy.force_strength_after).toBe(0)
-    expect(final.round_number).toBe(9)
+    expect(final.round_number).toBe(6)
   })
 
   it('also fires from a forced 1-vs-1 state', () => {

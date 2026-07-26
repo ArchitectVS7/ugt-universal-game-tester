@@ -19,7 +19,9 @@ for _p in (HERE, REPO):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from invariants import SUITE  # noqa: E402
+from invariants import MAX_ROUNDS, STARTING_FS, SUITE, _const  # noqa: E402
+
+DUG_IN = _const("DUG_IN_THRESHOLD")  # read from the game, like the rest
 from serve_process import adapter_for, served_bundle  # noqa: E402
 from ugt.core.trial import GateRunner  # noqa: E402
 
@@ -67,10 +69,10 @@ def main() -> int:
         drv = Driver(ad)
         try:
             s0 = drv.seed(DEFAULT_SEED)
-            gate.ck("fresh battle: round 0, 20 v 20, undecided",
+            gate.ck(f"fresh battle: round 0, {STARTING_FS} v {STARTING_FS}, undecided",
                     s0["round_number"] == 0 and s0["battle_over"] is False
-                    and s0["player"]["force_strength"] == 20
-                    and s0["enemy"]["force_strength"] == 20)
+                    and s0["player"]["force_strength"] == STARTING_FS
+                    and s0["enemy"]["force_strength"] == STARTING_FS)
 
             # ---- round 1: attack damages -------------------------------------
             print("\n  -- combat --")
@@ -78,7 +80,7 @@ def main() -> int:
             gate.ck("an all-attack round reduces the enemy's force strength",
                     r1["enemy"]["force_strength"] < s0["enemy"]["force_strength"],
                     f"enemy {s0['enemy']['force_strength']} -> {r1['enemy']['force_strength']}")
-            gate.ck("no bonus dice in round 1 (tied at 20, both above half, not round 3)",
+            gate.ck("no bonus dice in round 1 (tied, both above half, not round 3)",
                     r1["player"]["bonus_dice"] == 0 and r1["enemy"]["bonus_dice"] == 0)
 
             # ---- round 3: reinforcements, isolated ----------------------------
@@ -106,16 +108,16 @@ def main() -> int:
             leader = "player" if pre4["player"]["force_strength"] > pre4["enemy"]["force_strength"] else "enemy"
             gate.ck(f"round 4, {leader} leads and is above half: exactly +1 for Morale",
                     r4[leader]["bonus_dice"] == 1,
-                    "Reinforcements is spent, Dug in needs FS <= 10")
+                    f"Reinforcements is spent, Dug in needs FS <= {DUG_IN}")
 
             # ---- run the battle out ------------------------------------------
             print("\n  -- to a terminal outcome --")
             dug_in_seen = False
-            while not drv.state["battle_over"] and drv.state["round_number"] < 12:
+            while not drv.state["battle_over"] and drv.state["round_number"] < MAX_ROUNDS:
                 pre = drv.state
                 cur = drv.step(ALL_ATTACK)
                 for side in ("player", "enemy"):
-                    if pre[side]["force_strength"] <= 10 and cur[side]["bonus_dice"] >= 1:
+                    if pre[side]["force_strength"] <= DUG_IN and cur[side]["bonus_dice"] >= 1:
                         dug_in_seen = True
             final = drv.state
             gate.ck("the battle reached a real terminal state",

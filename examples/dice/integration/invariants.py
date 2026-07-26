@@ -28,11 +28,35 @@ if REPO not in sys.path:
 
 from ugt.core.trial import InvariantSuite  # noqa: E402
 
-# Mirrors of the game's exported balance constants (engine.js). Read, never
-# enforced — if the game retunes, these are what the harness must be told about,
-# and a mismatch shows up as an invariant failure rather than a silent pass.
-STARTING_FS = 20
-MAX_ROUNDS = 12
+# The game's balance constants, READ FROM THE GAME rather than copied here.
+#
+# These were hardcoded (STARTING_FS = 20, MAX_ROUNDS = 12) until the 2026-07-26
+# retune, which moved STARTING_FS to 12 and left the harness asserting a bound
+# that was silently 8 too loose — an invariant that cannot fail is worth nothing.
+# Parsing the game's own exported constants means a retune needs no edit here,
+# and a renamed constant fails loudly instead of quietly.
+#
+# This is a READ of a published bound, not a re-implementation of a rule: the
+# harness still never decides what damage a die should do.
+import re
+
+_ENGINE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "..", "game", "src", "engine.js")
+
+
+def _const(name: str) -> int:
+    src = open(_ENGINE).read()
+    m = re.search(rf"^export const {name} = (\d+)", src, re.M)
+    if not m:
+        raise RuntimeError(
+            f"{name} not found in {_ENGINE}. If the game renamed or removed it, this "
+            f"harness needs updating — failing loudly rather than guessing a bound."
+        )
+    return int(m.group(1))
+
+
+STARTING_FS = _const("STARTING_FS")
+MAX_ROUNDS = _const("MAX_ROUNDS")
 LEGAL_WINNERS = (None, "player", "enemy", "draw")
 
 
@@ -88,10 +112,10 @@ def winner_is_legal(before: dict, after: dict, command: str, result: dict) -> Op
 def concluded_battle_is_inert(before: dict, after: dict, command: str, result: dict) -> Optional[str]:
     """battle_over latches, and a finished battle ignores everything.
 
-    Load-bearing rather than incidental: the browser adapter never observes
-    termination for this game (it reads a `terminated` key the hooks do not
-    send), so UGT keeps issuing actions into a concluded battle. That being
-    harmless is a property the whole harness leans on, so it is asserted.
+    Still asserted after the D14 envelope fix let the adapter see termination:
+    an episode-driven tier stops at the end now, but a scripted rung can still
+    push past it deliberately (R1 and R2 both do), and "a finished battle is
+    inert" is a real property of the game rather than an artefact of the wire.
     """
     if before["battle_over"] and not after["battle_over"]:
         return "battle_over reverted to False"

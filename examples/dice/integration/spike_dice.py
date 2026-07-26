@@ -22,6 +22,7 @@ for _p in (HERE, REPO):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+from invariants import STARTING_FS  # noqa: E402  (read from the game, not hardcoded)
 from serve_process import served_bundle  # noqa: E402
 from ugt.core.trial import GateRunner  # noqa: E402
 
@@ -60,11 +61,11 @@ def main() -> int:
             gate.ck("each side carries exactly force_strength and bonus_dice",
                     set(s0["player"]) == SIDE_KEYS and set(s0["enemy"]) == SIDE_KEYS,
                     f"player={sorted(s0['player'])}")
-            gate.ck("a fresh page starts at round 0, 20/20, undecided",
+            gate.ck(f"a fresh page starts at round 0, {STARTING_FS}/{STARTING_FS}, undecided",
                     s0["round_number"] == 0 and s0["battle_over"] is False
                     and s0["winner"] is None
-                    and s0["player"]["force_strength"] == 20
-                    and s0["enemy"]["force_strength"] == 20,
+                    and s0["player"]["force_strength"] == STARTING_FS
+                    and s0["enemy"]["force_strength"] == STARTING_FS,
                     json.dumps(s0["player"]) + " vs " + json.dumps(s0["enemy"]))
             gate.ck("__GET_STATE__ is a pure read (calling it twice changes nothing)",
                     page.evaluate("window.__GET_STATE__()") == s0)

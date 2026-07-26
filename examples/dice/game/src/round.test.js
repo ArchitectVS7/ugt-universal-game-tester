@@ -133,13 +133,17 @@ describe('Accept 1 — all-attack vs all-defense damage math', () => {
     expect(next.player.force_strength).toBe(STARTING_FS)
   })
 
-  it('golden values: seed "redoubt", (6,0) vs (0,6) → FS 20 / 16 after round 1', () => {
+  it('golden values: seed "redoubt", (6,0) vs (0,6) → FS 12 / 8 after round 1', () => {
     // Literals below are cross-checked against an independent rollPool
     // computation, not pasted from the implementation's output.
     expect(next.last_round.player.attack_rolls).toEqual([2, 6, 5, 6, 5, 4])
     expect(next.last_round.enemy.defense_rolls).toEqual([4, 2, 3, 3, 4, 3])
-    expect(next.player.force_strength).toBe(20)
-    expect(next.enemy.force_strength).toBe(16)
+    // FS values restated for the 2026-07-26 retune (STARTING_FS 20 -> 12). The
+    // ROLLS above are unchanged: they are a function of (seed, roll_counter),
+    // which the retune does not touch — a useful check that the retune moved
+    // only what it was supposed to.
+    expect(next.player.force_strength).toBe(STARTING_FS)
+    expect(next.enemy.force_strength).toBe(STARTING_FS - 4)
     const e = expectedRound(seed, 0, 6, 0, 0, 6)
     expect(e.playerAttack.hits).toBe(4) // 6,5,6,5
     expect(e.enemyDefense.hits).toBe(0) // 4,2,3,3,4,3
@@ -250,18 +254,21 @@ describe('Accept 2 — Morale surge triggers only when FS is strictly greater', 
   })
 })
 
-describe('Accept 3 — Dug in triggers at FS ≤ 10', () => {
+describe(`Accept 3 — Dug in triggers at FS <= ${DUG_IN_THRESHOLD}`, () => {
+  // Every value here is an EXPRESSION over the constants, not a literal. The
+  // 2026-07-26 retune (STARTING_FS 20 -> 12, DUG_IN 10 -> 6) broke the literal
+  // version of this table; written this way it needs no edit on the next one.
   const boundary = [
-    { fs: 20, dug: 0 },
-    { fs: 11, dug: 0 },
+    { fs: STARTING_FS, dug: 0 },
+    { fs: DUG_IN_THRESHOLD + 1, dug: 0 },
     { fs: DUG_IN_THRESHOLD, dug: 1 },
-    { fs: 9, dug: 1 },
+    { fs: DUG_IN_THRESHOLD - 1, dug: 1 },
     { fs: 1, dug: 1 },
   ]
 
   for (const { fs, dug } of boundary) {
-    it(`player FS ${fs} → dug_in ${dug} (enemy at 20 stays undug)`, () => {
-      const s = resolveRound(withFS('dug', fs, 20), EVEN, EVEN)
+    it(`player FS ${fs} → dug_in ${dug} (enemy at full strength stays undug)`, () => {
+      const s = resolveRound(withFS('dug', fs, STARTING_FS), EVEN, EVEN)
       expect(s.last_round.player.bonuses.dug_in).toBe(dug)
       expect(s.last_round.enemy.bonuses.dug_in).toBe(0)
       expect(s.last_round.player.defense_dice).toBe(ALLOCATIONS[EVEN].defense + dug)
@@ -269,15 +276,17 @@ describe('Accept 3 — Dug in triggers at FS ≤ 10', () => {
     })
 
     it(`enemy FS ${fs} → dug_in ${dug} (independently of the player)`, () => {
-      const s = resolveRound(withFS('dug', 20, fs), EVEN, EVEN)
+      const s = resolveRound(withFS('dug', STARTING_FS, fs), EVEN, EVEN)
       expect(s.last_round.enemy.bonuses.dug_in).toBe(dug)
       expect(s.last_round.player.bonuses.dug_in).toBe(0)
       expect(s.last_round.enemy.defense_dice).toBe(ALLOCATIONS[EVEN].defense + dug)
     })
   }
 
-  it('stacks with morale: FS 10 vs 5 → (3,3) becomes 4 attack / 4 defense', () => {
-    const s = resolveRound(withFS('stack', 10, 5), EVEN, EVEN)
+  it('stacks with morale: dug-in AND ahead → (3,3) becomes 4 attack / 4 defense', () => {
+    // Player at the threshold (dug in) and one ahead of the enemy (morale);
+    // enemy below the threshold (dug in) but behind (no morale).
+    const s = resolveRound(withFS('stack', DUG_IN_THRESHOLD, DUG_IN_THRESHOLD - 1), EVEN, EVEN)
     expect(s.last_round.player.bonuses).toMatchObject({ morale: 1, dug_in: 1, reinforcements: 0 })
     expect(s.last_round.player.attack_dice).toBe(4)
     expect(s.last_round.player.defense_dice).toBe(4)
@@ -288,7 +297,7 @@ describe('Accept 3 — Dug in triggers at FS ≤ 10', () => {
   })
 
   it('adds the dug-in die even to an all-attack allocation (0 defense → 1)', () => {
-    const s = resolveRound(withFS('dug-atk', 8, 20), ALL_ATTACK, EVEN)
+    const s = resolveRound(withFS('dug-atk', DUG_IN_THRESHOLD - 1, STARTING_FS), ALL_ATTACK, EVEN)
     expect(s.last_round.player.defense_dice).toBe(1)
     expect(s.last_round.player.defense_rolls).toHaveLength(1)
   })
@@ -366,14 +375,18 @@ describe('Accept 4 — Reinforcements: once, at round 3, per side, routed by own
   it('routes on the base preset, so a morale/dug-in die cannot redirect it', () => {
     // (3,3) + morale would be 4 attack / 3 defense; (3,3) + dug-in would be
     // 3/4. Either way the tie-break reads the preset and sends 2 to attack.
-    const dugIn = resolveRound(withFS('base', 8, 20, { round_number: 2 }), EVEN, EVEN)
+    const dugIn = resolveRound(
+      withFS('base', DUG_IN_THRESHOLD - 1, STARTING_FS, { round_number: 2 }), EVEN, EVEN,
+    )
     expect(dugIn.last_round.player.bonuses).toMatchObject({ dug_in: 1, target: 'attack' })
     expect(dugIn.last_round.player.attack_dice).toBe(5)
     expect(dugIn.last_round.player.defense_dice).toBe(4)
   })
 
   it('sets bonus_dice to morale + dug_in + reinforcements for the round just resolved', () => {
-    const s = resolveRound(withFS('bd', 8, 20, { round_number: 2 }), EVEN, EVEN)
+    const s = resolveRound(
+      withFS('bd', DUG_IN_THRESHOLD - 1, STARTING_FS, { round_number: 2 }), EVEN, EVEN,
+    )
     const b = s.last_round.player.bonuses
     expect(b).toMatchObject({ morale: 0, dug_in: 1, reinforcements: 2 })
     expect(s.player.bonus_dice).toBe(3)

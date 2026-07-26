@@ -151,10 +151,10 @@ export const ALLOCATIONS = Object.freeze([
 export const POOL_SIZE = 6
 
 /** Both sides open the battle at this Force Strength. */
-export const STARTING_FS = 20
+export const STARTING_FS = 12
 
 /** FS at or below this ("half") grants the Dug in defense die. */
-export const DUG_IN_THRESHOLD = 10
+export const DUG_IN_THRESHOLD = 6
 
 /** Reinforcements are worth this many dice, all to one pool. */
 export const REINFORCEMENT_DICE = 2

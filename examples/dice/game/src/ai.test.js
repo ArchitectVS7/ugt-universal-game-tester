@@ -111,10 +111,14 @@ describe('AI choice is a pure function of its own Force Strength', () => {
 
 describe('the allocation heuristic', () => {
   it('matches the full FS → preset table', () => {
-    // Index = FS. Computed by hand from round(6 * (20 - fs) / 20) and checked
-    // against the implementation; if these disagree the implementation is what
-    // is wrong, not this table.
-    const expected = [6, 6, 5, 5, 5, 5, 4, 4, 4, 3, 3, 3, 2, 2, 2, 2, 1, 1, 1, 0, 0]
+    // Index = FS. Computed by hand from round(POOL_SIZE * (STARTING_FS - fs) /
+    // STARTING_FS) and checked against the implementation; if these disagree the
+    // implementation is what is wrong, not this table.
+    //
+    // RETUNED 2026-07-26 with STARTING_FS 20 -> 12. The old 21-entry table is
+    // what made this test fail on the retune, correctly: a full FS -> preset
+    // table is inherently a function of STARTING_FS and has to be restated.
+    const expected = [6, 6, 5, 5, 4, 4, 3, 3, 2, 2, 1, 1, 0]
     expect(expected).toHaveLength(STARTING_FS + 1)
     expect(ALL_FS.map(presetForForceStrength)).toEqual(expected)
   })
@@ -131,11 +135,15 @@ describe('the allocation heuristic', () => {
   })
 
   it('breaks the two half-way ties toward defense (D11)', () => {
-    // fs = 15 → 6 * 5 / 20 = 1.5 and fs = 5 → 6 * 15 / 20 = 4.5 are the only
-    // exact half-way values in [0, 20]. Math.round is half-up, so both round to
-    // the MORE defensive preset. That is the decision, not a rounding accident.
-    expect(presetForForceStrength(15)).toBe(2)
-    expect(presetForForceStrength(5)).toBe(5)
+    // With STARTING_FS = 12 and POOL_SIZE = 6 the ratio is exactly fs/2, so
+    // every ODD fs is a half-way value: e.g. fs = 9 → 6 * 3 / 12 = 1.5 and
+    // fs = 3 → 6 * 9 / 12 = 4.5. Math.round is half-up, so each rounds to the
+    // MORE defensive preset. That is the decision, not a rounding accident.
+    // (Under the old STARTING_FS = 20 only fs = 15 and fs = 5 were half-way;
+    // the retune made the tie the common case rather than the exception, which
+    // is worth knowing — it means D11's tie-break now decides half the table.)
+    expect(presetForForceStrength(9)).toBe(2)
+    expect(presetForForceStrength(3)).toBe(5)
   })
 
   it('never asks for more defense as its strength rises', () => {

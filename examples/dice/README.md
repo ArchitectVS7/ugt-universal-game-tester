@@ -83,4 +83,38 @@ That's still a small change. But it landed on seven of the game's own tests, bec
 
 The payoff, measured rather than assumed: robustness coverage went from **9% of the step budget landing on a live battle to 60%, with zero wasted steps**, because episodes now end when the battle does and start a fresh one. Ten complete battles per seed instead of one battle and a hundred-odd swings at a corpse.
 
+## Fix #2 — the rebalance
+
+Held the twelve rounds, as promised, and moved the combat instead.
+
+First I had Claude build a little measuring instrument — `game/tools/balance_sweep.mjs` — that plays the same battle across a pile of seeds with four different player strategies and reports how games actually *end*. It talks straight to the engine rather than through a browser, because a retune means running it dozens of times. Baseline came back at **13% decisive, 87% draws**. Even all-out attack only converted 30%.
+
+Then we swept candidate values rather than picking one and hoping. Seven combinations. Lowering starting strength helped steadily; making dice hit more often helped too but ended battles around round 7, which makes the twelve-round structure nearly pointless in the *other* direction. Landed on **starting strength 20 → 12** (and the "dug in" threshold 10 → 6, since it's meant to be half). That leaves the "a die showing 5 or 6 is a hit" rule alone, which matters because that one's written into the PRD as a rule players read, where starting strength is just a number.
+
+Result: **13% decisive → 50%**, and an aggressive player now converts about 90% of the time. Two constants changed, `MAX_ROUNDS` untouched.
+
+### What the rebalance cost, which is the bit worth reading
+
+**Sixteen of the game's own tests broke.** Not a surprise, and mostly not a problem — a golden-value test is *supposed* to break when you change balance, that's the entire job. But the sixteen split into two very different groups, and the split is the lesson.
+
+Some were tests that genuinely encode balance: "seed *vanguard*, all-out attack, player wins round 8 at strength 7". Those have to be recomputed by hand every time, and that's fine — that's the price of having them, and they're the reason I know the retune did what I meant rather than something else.
+
+The rest were tests that had simply *hardcoded* the number. A table of "at strength 20 the AI does this, at 11 it does that", written as literals, when the AI's actual rule is a formula over the starting strength. Those didn't need rethinking, just rewriting in terms of the constant — and now they'll survive the next retune untouched. **Same lesson as before, one level down: it isn't enough for the game to keep its tuning knobs in one place if the tests reach past them and grab the raw number.**
+
+One test needed more than a new number. The "both sides destroy each other simultaneously" case used a seed that no longer produces that outcome — so it would have kept passing while quietly testing something else entirely. Swept for a seed that still does, and swapped it. Another one was checking a player victory on a seed that now resolves the other way; same treatment. Those two are the dangerous kind, because nothing goes red, the test just stops meaning what its name says.
+
+The good news I wasn't expecting: **the AI's difficulty formula scaled correctly on its own.** It computes defense from the starting strength rather than a baked-in 20, so it retuned itself. That's the earlier "all the balance numbers are real constants" claim actually being *tested*, which is different from being true on inspection.
+
+### Then the test harness broke too, in a useful way
+
+Three rungs went red. The spike and R1 were asserting "the battle starts 20 v 20" — hardcoded, exactly the sin I'd just finished pointing at in the game's tests. Fixed properly: the harness now reads the constants out of the game's own source, so the next retune needs no edit on this side either. And one invariant had been checking strength stays within 0–20 while the real ceiling was now 12 — a bound eight points too loose, which is a check that had quietly stopped being able to fail.
+
+R2 broke for a much better reason. Its "this battle ends in a draw at the round cap" case used the default seed — **and the retune worked well enough that the default seed doesn't draw any more.** It resolves on round 8 now. Had to go find a seed that still reaches the cap so that arm keeps getting tested. A test failing because your fix succeeded is a good day.
+
+### What's still wrong, filed not fixed
+
+The retune fixed draws. It did **not** fix strategic depth, and running the sweep made that obvious in a way I hadn't seen before: all-out attack wins 35 games out of 60, a balanced allocation wins **1**. So the choice you make every round isn't really a trade-off, it's just a question with a right answer, and the right answer is always "attack".
+
+That's a deeper problem than the draw rate and it isn't a constant you can turn. It comes from the damage model — your defense hits subtract from their attack hits — which means two cautious players converge on nothing happening. Fixing it properly means changing how damage works, which is a design decision and a different day's work. Logged in the integration notes and in R2's output so it can't get quietly forgotten.
+
 More will land here as we keep going. The full technical write-up, including the findings that are only useful to Claude, stays in [`integration/README.md`](integration/README.md).

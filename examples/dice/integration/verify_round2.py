@@ -31,8 +31,13 @@ from ugt.core.trial import GateRunner  # noqa: E402
 
 ALL_ATTACK, ALL_DEFENSE = 0, 6
 PRESETS = list(range(7))
-DEFAULT_SEED = "dice-duel"
-KNOCKOUT_SEED = 0          # verified reachable in the spike; see README
+# RETUNED 2026-07-26: "dice-duel" used to end as a round-12 draw and was the
+# draw fixture here. After STARTING_FS 20 -> 12 it resolves for the player on
+# round 8, so the draw arm needs a seed that still reaches the cap. That the
+# old fixture stopped drawing is the retune working, not a regression.
+DEFAULT_SEED = "dice-duel"     # used where a representative battle is wanted
+DRAW_SEED = "stalemate"        # still reaches the round cap under all-attack
+KNOCKOUT_SEED = 0              # still knocks out; see the spike
 MAX_ROUNDS = 12
 
 gate = GateRunner()
@@ -105,8 +110,8 @@ def main() -> int:
 
             # ---- terminal arm 1: the round cap -----------------------------
             print("\n  -- terminal arm 1: round-12 draw --")
-            drawn = drv.play_out(ALL_ATTACK, DEFAULT_SEED)
-            gate.ck("the default seed ends as a draw at the round cap",
+            drawn = drv.play_out(ALL_ATTACK, DRAW_SEED)
+            gate.ck(f"seed {DRAW_SEED!r} ends as a draw at the round cap",
                     drawn["battle_over"] and drawn["winner"] == "draw"
                     and drawn["round_number"] == MAX_ROUNDS,
                     f"round {drawn['round_number']}, "
@@ -146,16 +151,18 @@ def main() -> int:
             gate.ck("the invariant suite FIRES on a corrupted transition (non-vacuous)",
                     bool(fired), f"{len(fired)} violation(s)")
 
-            # ---- the balance observation, recorded as a finding ---------------
+            # ---- what is left after the retune, recorded as a finding --------
             gate.finding(
-                f"The round cap decides most matches. Playing pure all-attack — the most "
-                f"aggressive line available — the shipped seed still ends "
-                f"{drawn['player']['force_strength']} v {drawn['enemy']['force_strength']} as a "
-                f"DRAW at round {MAX_ROUNDS}, and an earlier sweep found only 2 of 12 seeds "
-                f"produce a knockout that way. A knockout is reachable (seed "
-                f"{KNOCKOUT_SEED}, round {ko['round_number']}) but is the exception. Either "
-                f"MAX_ROUNDS is too tight or damage is too low for a 12-round game; both are "
-                f"single exported constants in engine.js."
+                "Retune 2026-07-26 (STARTING_FS 20 -> 12, DUG_IN 10 -> 6) fixed the "
+                "draw problem: the engine-level sweep went from 13% decisive to 50%, and "
+                "an aggressive line now converts about 90% of the time. MAX_ROUNDS stayed "
+                "at 12 deliberately. What it did NOT fix is strategic depth — allocation "
+                "still barely matters. In that same sweep all-attack won 35 of 60 while a "
+                "balanced allocation won 1 of 60, so aggression is not a trade-off, it is "
+                "just the right answer. That is a deeper problem than the draw rate (the "
+                "damage model subtracts defense hits from attack hits, so mutual turtling "
+                "converges on zero damage) and it is a DESIGN question, not a constant to "
+                "tune. Filed rather than fixed."
             )
         finally:
             ad.close()

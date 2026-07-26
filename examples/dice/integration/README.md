@@ -91,18 +91,25 @@ the effective exploration budget is a tenth of the nominal step count. Adding
 R3's useful coverage. This generalises: ANY browser game whose terminal flag
 is not literally named `terminated` has the same blind spot.
 
-**3. A knockout is unreachable on the game's default seed — and draws dominate
-generally.** This is a balance observation, not a bug, but it is the most
-interesting thing this integration found. On the shipped default seed
-(`'dice-duel'`), **205 action sequences** — 5 fixed policies plus 200
-aggression-biased random ones — could not get the enemy below **1** force
-strength inside the 12-round cap. Every single one ended `winner: "draw"`.
-Widening to numeric seeds under pure all-attack, only **2 of 12** produced a
-knockout. So even maximal aggression usually cannot finish a battle, and the
-round cap, not the combat, decides most games. If the intended feel is
-"decisive battles", either damage is too low or 12 rounds is too few. The
-strategy guide tells the pilot this explicitly, so a Tier-3 playtest measures
-skill rather than rediscovering the cap.
+**3. Draws dominated — RETUNED 2026-07-26, and what is left is worse.** The
+original finding: 205 sequences on the shipped seed never got the enemy below
+1 force strength inside the 12-round cap, and only 2 of 12 seeds produced a
+knockout under pure all-attack. `game/tools/balance_sweep.mjs` put a number on
+it — **13% decisive, 87% draws** across four player strategies x 40 seeds.
+
+Fixed by holding `MAX_ROUNDS` at 12 (a deliberate design call — the short fixed
+match is the intent) and moving `STARTING_FS` 20 -> 12 with `DUG_IN_THRESHOLD`
+10 -> 6. `HIT_THRESHOLD` was left alone on purpose: "a die showing 5 or 6 is a
+hit" is a rule players read in the PRD, where starting strength is just a
+number. Sweep after: **50% decisive**, and an aggressive line converts ~90%.
+
+**What the retune did NOT fix, and this is the bigger problem:** allocation
+barely matters. In the same sweep all-attack wins 35 of 60 and a balanced
+allocation wins **1 of 60**. The round-by-round choice is not a trade-off, it
+is a question with one right answer. That follows from the damage model —
+`damage = max(0, attack hits - defense hits)`, so two cautious sides converge
+on zero damage and the AI turtles harder as it drops. Changing that is a design
+decision, not a constant, so it is FILED (R2 prints it every run) not fixed.
 
 **4. `engine.reset_command` is silently ignored whenever `__RESET_GAME__`
 exists.** In `PlaywrightAdapter.reset()`, the soft-reset branch runs first and

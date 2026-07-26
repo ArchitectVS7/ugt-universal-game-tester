@@ -219,15 +219,25 @@ describe('UGT hooks — a full battle by hook only', () => {
       expect(returned, `round ${i + 1} vs engine`).toEqual(expectedProjection(oracle))
       // The round counter advances exactly one per action.
       expect(returned.round_number).toBe(i + 1)
+      // RETUNE 2026-07-26: this seed used to survive all 12 scripted actions.
+      // At STARTING_FS = 12 it is decided on round 10, so the loop stops at the
+      // real end instead of asserting a round count that balance now owns.
+      if (returned.battle_over) break
     }
 
-    // Verified fixture for DEFAULT_SEED + SCRIPT: survives the full 12 rounds.
+    // Verified fixture for DEFAULT_SEED + SCRIPT, RETUNED 2026-07-26: this used
+    // to run the full 12 rounds to a draw with both sides alive. At
+    // STARTING_FS = 12 the same script decides on round 10 for the player.
+    // What this test is actually for is the round-by-round agreement between
+    // the hook return, a fresh read, and an engine oracle computed outside the
+    // UI — all of which is asserted in the loop above and is unaffected by
+    // balance. The end-state assertions are restated rather than dropped.
     const final = window.__GET_STATE__()
-    expect(final.round_number).toBe(MAX_ROUNDS)
+    expect(final.round_number).toBe(10)
     expect(final.battle_over).toBe(true)
-    expect(final.winner).toBe('draw')
+    expect(final.winner).toBe('player')
+    expect(final.enemy.force_strength).toBe(0)
     expect(final.player.force_strength).toBeGreaterThan(0)
-    expect(final.enemy.force_strength).toBeGreaterThan(0)
 
     expectQuietConsole()
   })
@@ -292,7 +302,7 @@ describe('UGT hooks — decisive outcomes', () => {
     }
 
     expect(decided).not.toBeNull()
-    expect(decided.round_number).toBe(6)
+    expect(decided.round_number).toBe(3)
     expect(decided.winner).toBe('enemy')
     expect(decided.player.force_strength).toBe(0)
 
@@ -307,8 +317,11 @@ describe('UGT hooks — decisive outcomes', () => {
   })
 
   it('resolves a win, so all three winner values are exercised over the wire', async () => {
-    // Verified fixture: seed-a, all-attack, decides for the player on round 11.
-    await hook(() => window.__RESET__('seed-a'))
+    // Verified fixture: 'crown', all-attack, decides for the player on round 8.
+    // Was seed-a/round 11; after the 2026-07-26 retune seed-a resolves for the
+    // ENEMY, so keeping it would have quietly turned this into a second copy of
+    // the loss case while still claiming to cover a win.
+    await hook(() => window.__RESET__('crown'))
 
     let decided = null
     for (let i = 0; i < MAX_ROUNDS; i += 1) {
@@ -320,7 +333,7 @@ describe('UGT hooks — decisive outcomes', () => {
     }
 
     expect(decided).not.toBeNull()
-    expect(decided.round_number).toBe(11)
+    expect(decided.round_number).toBe(8)
     expect(decided.winner).toBe('player')
     expect(decided.enemy.force_strength).toBe(0)
   })

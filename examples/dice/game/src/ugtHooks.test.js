@@ -85,8 +85,10 @@ describe('toContractState — values', () => {
     expect(live.battle_over).toBe(false)
     expect(live.winner).toBeNull()
 
-    // Verified fixture: seed-a, all-attack, decides for the player on round 11.
-    const decided = play('seed-a', Array(11).fill(0))
+    // Verified fixture: 'crown', all-attack, decides for the player on round 8.
+    // Was seed-a/round 11; after the 2026-07-26 retune seed-a resolves for the
+    // ENEMY, so keeping it would have quietly stopped exercising a player win.
+    const decided = play('crown', Array(8).fill(0))
     expect(decided.battle_over).toBe(true)
     const projection = toContractState(decided)
     expect(projection.winner).toBe('player')

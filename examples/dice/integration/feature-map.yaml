@@ -61,7 +61,7 @@ features:
       - "before.round_number == 2"
       # Conditions that isolate the enemy's bonus to Reinforcements alone:
       - "before.enemy.force_strength < before.player.force_strength"
-      - "before.enemy.force_strength > 10"
+      - "before.enemy.force_strength > 6"
       - "state.round_number == 3"
       - "state.enemy.bonus_dice == 2"
       # Player is ahead and above 10: Reinforcements (+2) + Morale (+1).
@@ -77,25 +77,35 @@ features:
     assertion:
       - "before.round_number == 3"
       - "before.player.force_strength > before.enemy.force_strength"
-      - "before.player.force_strength > 10"
+      - "before.player.force_strength > 6"
       - "state.round_number == 4"
       # +1 Morale and nothing else: Reinforcements is spent, Dug in needs FS <= 10.
       - "state.player.bonus_dice == 1"
     priority: critical
 
-  # ---- The round cap ends the battle ------------------------------------
-  # Eight more rounds carries this battle from round 4 to the round-12 cap.
-  - id: battle.round_twelve_cap_forces_draw
-    description: "Reaching round 12 with both sides alive ends the battle as a draw"
-    action: ["a6_d0", "a6_d0", "a6_d0", "a6_d0", "a6_d0", "a6_d0", "a6_d0", "a6_d0"]
+  # ---- A knockout ends the battle ---------------------------------------
+  # RETUNED 2026-07-26 (STARTING_FS 20 -> 12). This slot used to hold
+  # `battle.round_twelve_cap_forces_draw`, and the swap is a neat inversion:
+  # BEFORE the retune the default seed always drew, so the round cap was the only
+  # terminal arm a feature map could reach and the knockout had to live in R2 on
+  # a hand-picked seed. AFTER it, the default seed resolves decisively on round 8,
+  # so the knockout is the reachable one and the DRAW now needs a chosen seed —
+  # which a feature map cannot do (`engine.reset_command` is ignored for any game
+  # exposing __RESET_GAME__). R2 covers the draw arm on seed "stalemate".
+  #
+  # Four more all-attack rounds from round 4 finish it.
+  - id: battle.knockout_sets_decisive_winner
+    description: "Reducing a side to 0 force strength ends the battle with a decisive winner"
+    action: ["a6_d0", "a6_d0", "a6_d0", "a6_d0"]
     assertion:
       - "before.battle_over == False"
-      - "state.round_number == 12"
       - "state.battle_over == True"
-      - 'state.winner == "draw"'
-      # It really was the cap and not a knockout — both sides are still standing.
+      - 'state.winner == "player"'
+      - "state.enemy.force_strength == 0"
+      # A real decision, not the cap relabelled: it landed before round 12 and
+      # the winner is still standing.
+      - "state.round_number < 12"
       - "state.player.force_strength > 0"
-      - "state.enemy.force_strength > 0"
     priority: critical
 
   # ---- REMOVED 2026-07-26: battle.concluded_battle_is_inert ---------------
