@@ -130,7 +130,7 @@ Orchestration: graphify=none — no `graphify-out/graph.json` in the repo root o
 
 ## M1 — Rules engine
 
-### T-003 · Level file format + loader — `status: TODO` · `coder: opus` · `after: T-002`
+### T-003 · Level file format + loader — `status: DONE` · `coder: opus` · `after: T-002`
 Parse the ASCII grid legend (PRD "Core mechanics") into a 2D tile grid
 (walls/floor/targets), the player start position, and box positions.
 Structural validation only — no move logic here.
@@ -138,6 +138,51 @@ Structural validation only — no move logic here.
 wall/target/box counts, and each of these malformed fixtures raising a clear,
 distinct error: unequal row lengths, no player start, two player starts,
 `boxes_total != targets_total`.
+
+**Delivered (2026-07-25):** New `scripts/level.gd` (a `RefCounted`, no
+`class_name` — consumers `preload` it, same discipline as `tests/assertions.gd`)
+parses the PRD legend into `grid` (`Tile.FLOOR/WALL/TARGET` as
+`PackedByteArray` rows), `player_start`, `boxes`, plus `width`/`height`/
+`wall_count`/`target_count`, and exposes `load_from_text`/`load_from_file`/
+`is_valid`/`boxes_total`/`tile_at`. **Kept deliberately separate from
+`board.gd`** so the standing constraint stays trivially auditable: `level.gd` is
+immutable parsed geometry with zero direction/push/collision/win code, and
+T-004's `board.gd::try_move()` remains the only place a rule can live (`tile_at`
+returning `WALL` off-grid is a bounds convenience, documented as such, not the
+"walls block" rule). Seven distinct, stable string error codes —
+`EMPTY_LEVEL`, `UNEQUAL_ROW_LENGTHS`, `UNKNOWN_CHARACTER`, `NO_PLAYER_START`,
+`MULTIPLE_PLAYER_STARTS`, `BOX_TARGET_MISMATCH`, `FILE_NOT_FOUND` — returned as
+data with a `source:line: detail` message; never `assert()`/`push_error()`
+(stderr must stay clean per T-001's Accept, and returned data is the only form
+the tests can assert on). A failed load wipes all partially-parsed state, so a
+caller cannot half-use a broken level. Parser decisions that matter to T-005:
+CRLF/lone-CR normalised and **trailing** blank lines dropped (a file ending in a
+newline gains no zero-width row) while **interior** blank lines stay a genuine
+row-length error; rows are never `strip_edges()`ed because trailing spaces are
+significant floor cells; an out-of-legend character is a loud error, never a
+silent floor; `boxes` is appended in row-major order so the box list is
+deterministic for the PRD's determinism criterion.
+`tests/test_level_loader.gd` adds 14 cases (suite 1 → 15 passed, 0 failed):
+counts/tiles/row-major box order on a 7×5 fixture covering every legend
+character, `+` counting as a target, all four required malformations, plus
+unknown-char, empty/blank-only, no-partial-state-after-failure, CRLF +
+trailing-newline equivalence, reload-clears-state, and missing-file. Each
+malformed fixture is malformed in **exactly one way** (otherwise the "distinct
+error" claim would be testing validation *order*, not detection), and
+`test_error_codes_are_distinct` dedupes the four codes to prove they really are
+four. Fixtures are `const` arrays of row strings joined by a helper, not
+triple-quoted literals — GDScript keeps a multi-line string's indentation tabs,
+which would inject tabs into the grid. Verified the new tests are not vacuous by
+mutating `wall_count += 1` → `+= 2` in the loader and watching the suite go
+`14 passed, 1 failed`, then restoring. Gate green (editor pass exit 0, suite
+exit 0), `tools/check_runner_reports_failure.sh` still exits 0, and the two
+generated `.uid` sidecars are included (this repo tracks them). `test_sanity.gd`
+doc comment corrected — it claimed the Gate pins the line `1 passed, 0 failed`,
+which stopped being true the moment a real suite landed; the Gate is exit 0
+(`M == 0 and N > 0`). Scope boundary: no `board.gd`, no `try_move`, no level
+`.txt` files and no `levels/solutions.json` (T-004/T-005 own those), and
+`levels/.gitkeep` left in place.
+Orchestration: graphify=none — no `graphify-out/graph.json` in either the git root (`_UGT Universal Game Tester/`) or `examples/sokoban/game/` (both checked); the task is also self-con · attempts=1/4.
 
 ### T-004 · `try_move` push/collision logic — `status: TODO` · `coder: opus` · `after: T-003`
 Implement the single move/push function per PRD: wall blocks; box pushes only
