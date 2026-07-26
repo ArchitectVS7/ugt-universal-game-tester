@@ -109,13 +109,60 @@ Orchestration: graphify=none — no `graphify-out/graph.json` in the repo (check
 
 ## M2 — Engine
 
-### T-004 · `executeCommand` core — `status: TODO` · `coder: opus` · `after: T-003`
+### T-004 · `executeCommand` core — `status: DONE` · `coder: opus` · `after: T-003`
 Implement movement, `take`/`drop`/`examine`/`use`/`look`/`inventory` against
 loaded content, flag state, and the `escaped` transition on entering `R10`.
 **Accept:** unit tests cover: locked-room entry refusal, `use` prerequisite
 enforcement, `use_consumes` removing an item, and running T-003's
 `content/walkthrough.json` fixture through `executeCommand()` end-to-end
 reaches `escaped: true`.
+
+**Delivered (2026-07-25):** Replaced T-001's two stubs with the real engine core
+in `src/engine.js` — `createGame()` (mutable game: current room, inventory Set,
+object→room location Map, a flag Map seeded with the *whole* flag universe as
+`false` so the `flags` key set is stable for a run, visited Set, move counter,
+`escaped`), `getState()` (a fresh, deep-copied snapshot in PRD's exact six-key
+wire shape, with `inventory` serialized in objects.csv file order so a held set
+always serializes identically), `resolveObject()` (exact `object_id`, then a
+case-insensitive id/name match — object resolution is content-model work, so the
+front ends never read the CSVs), and `executeCommand(game, verb, arg)` returning
+`{ok, message, state}`. Rules implemented: movement with `exit_*`/
+`entry_requires_flag` enforcement and a **latching** `escaped` on entering the
+exit room; `take` (room-presence + `takeable`, sets `take_sets_flag`); `drop`
+(flags stay monotonic — dropping never un-sets what taking taught you);
+`examine` (CSV `description`, held or in-room); `use` (must be held, needs
+`use_verb`, `use_requires_flag` refusal returns the object's authored
+`use_fail_text`, success sets `use_sets_flag`, `use_consumes` *destroys* the item
+rather than dropping it, non-consuming uses are idempotent); plus `look` /
+`inventory` (`inv`/`i`), direction shorthands, and a generic refusal for unknown
+verbs/objects. Two semantics are pinned because T-006 depends on them: a refusal
+(`ok: false`) changes **nothing at all, including `moves_taken`** (PRD: an
+inapplicable action "consumes no state" — this is what makes the bridge's
+invalid-`action_id` a true no-op that still returns state), and there is no
+randomness anywhere. **No content is hardcoded in the engine:** the start room is
+the first row of `rooms.csv` and the escape room is the last (documented as the
+authoring convention, overridable via `createGame(content, {startRoom,
+escapeRoom})` and exposed as `game.startRoom`/`game.escapeRoom`), and every
+world-specific string comes from a CSV column — the engine's own refusals name
+no room, object or puzzle. New `test/engine.test.js` (27 tests; suite 26 → 53)
+covers all four Accept clauses: locked-room entry refusal (gated fixture room,
+asserting the refusal moves nothing), `use` prerequisite enforcement (asserting
+the exact `use_fail_text`/`use_success_text` from the CSV), `use_consumes`
+removing an item (inline `parseContent()` content, proving the item is gone from
+inventory *and* not left in the room, plus the real content's consuming keys in
+the walkthrough run), and the real `content/walkthrough.json` driven step-by-step
+through `executeCommand()` to `escaped: true` in `game.escapeRoom` with
+`moves_taken === walkthrough.length` — with wire-shape, snapshot-isolation and
+same-sequence determinism guards for T-006. Scope boundary: no free-text CLI
+parser or output rendering (T-005) and no action table / JSON-lines loop (T-006);
+`src/bridge.js` is untouched and `src/cli.js` deliberately left as-is — its stub
+`executeCommand(null, …)` call now prints the new TypeError message inside its
+existing try/catch, so T-001's Accept (starts, refuses input without crashing,
+exits 0 on Ctrl+D) still holds and T-005 owns the rewrite. No CSV content
+changed.
+Orchestration: graphify=none — no `graphify-out/graph.json` in the repo (checked
+repo root); orientation came from PRD.md, TASKS.md, the T-002 loader in
+`src/engine.js`, the authored CSVs and `test/content.test.js`. · attempts=1/4.
 
 ## M3 — Front ends
 

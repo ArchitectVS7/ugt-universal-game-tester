@@ -10,8 +10,9 @@
  * All room/object/puzzle content comes from `content/rooms.csv` and
  * `content/objects.csv` — no room or object data is hardcoded in this file.
  *
- * T-002 implements loadContent(); T-004 implements
- * createGame()/executeCommand().
+ * Layout: T-002's content loader (parseContent/loadContent) first, then T-004's
+ * game state and command rules (createGame/getState/resolveObject/
+ * executeCommand) below the marked divider.
  */
 
 import { readFileSync } from 'node:fs';
@@ -396,21 +397,309 @@ export function loadContent(contentDir = CONTENT_DIR) {
   return parseContent(roomsText, objectsText);
 }
 
+/* -------------------------------------------------------------------------
+ * T-004 — game state + the single command entry point.
+ *
+ * Everything below is rules. No room, object, flag or puzzle *content* appears
+ * here: the start room and the escape room are derived from rooms.csv file
+ * order (see createGame), every gate/effect is read off the loaded records, and
+ * every object-specific string comes from the CSV columns. The engine's own
+ * strings are deliberately generic refusals that name nothing in the world.
+ * ---------------------------------------------------------------------- */
+
+/** Free-text synonyms the front ends may pass straight through. */
+const VERB_ALIASES = { inv: 'inventory', i: 'inventory' };
+const DIRECTION_ALIASES = { n: 'north', s: 'south', e: 'east', w: 'west' };
+
+/** Generic refusals — never name a specific room, object or puzzle. */
+const REFUSALS = {
+  unknownVerb: "I don't understand that.",
+  noSuchObject: "You don't see that here.",
+  noSuchDirection: 'That is not a direction.',
+  noExit: "You can't go that way.",
+  locked: "The way is shut. You are missing something you'd need to pass.",
+  notHere: "You don't see that here.",
+  notTakeable: "It won't budge.",
+  alreadyHeld: 'You are already carrying it.',
+  notHeld: "You aren't carrying that.",
+  notUsable: "You can't use that.",
+  nothingHappens: 'Nothing happens.',
+  emptyInventory: 'You are carrying nothing.',
+};
+
 /**
- * Build a fresh game state from loaded content.
+ * Build a fresh, mutable game from loaded content.
+ *
+ * Authoring convention (PRD § Scope: "a single linear-with-branches flag chain
+ * ending in one exit room"): the **first** row of `rooms.csv` is the start room
+ * and the **last** row is the escape room. Deriving both from file order is
+ * what keeps this file free of hardcoded room ids; an author moves the start or
+ * the exit by reordering the CSV, not by editing code. Both can still be pinned
+ * explicitly via `options` (used by tests/tools that need to be exact).
+ *
+ * @param {{rooms: Map, objects: Map, flags: Set<string>}} [content]
+ * @param {{startRoom?: string, escapeRoom?: string}} [options]
+ * @returns {object} the mutable game (pass it to executeCommand/getState)
+ * @throws {ContentError} if an override names a room that doesn't exist
  */
-export function createGame(...args) {
-  void args;
-  throw new Error('engine.createGame not implemented yet (T-004)');
+export function createGame(content = loadContent(), options = {}) {
+  const roomIds = [...content.rooms.keys()];
+  if (roomIds.length === 0) throw new ContentError('Content defines no rooms');
+
+  const pick = (override, fallback, label) => {
+    if (override === undefined || override === null) return fallback;
+    if (!content.rooms.has(override)) {
+      throw new ContentError(`${label} ${JSON.stringify(override)} is not a known room_id`);
+    }
+    return override;
+  };
+
+  const startRoom = pick(options.startRoom, roomIds[0], 'startRoom');
+  const escapeRoom = pick(options.escapeRoom, roomIds[roomIds.length - 1], 'escapeRoom');
+
+  const inventory = new Set();
+  const locations = new Map();
+  for (const obj of content.objects.values()) {
+    if (obj.startRoom === INVENTORY_START) inventory.add(obj.id);
+    else locations.set(obj.id, obj.startRoom);
+  }
+
+  // Seed every flag in the universe as false so the flags key set is stable for
+  // the whole run (UGT's observation mapping depends on that).
+  const flags = new Map();
+  for (const flag of content.flags) flags.set(flag, false);
+
+  return {
+    content,
+    startRoom,
+    escapeRoom,
+    currentRoom: startRoom,
+    inventory,
+    locations,
+    flags,
+    visited: new Set([startRoom]),
+    movesTaken: 0,
+    escaped: false,
+  };
 }
 
 /**
- * Apply one command to the game state and return the result.
- * The only entry point through which state may change.
+ * Snapshot the game in PRD.md's exact wire shape (§ "UGT hooks required").
+ *
+ * Freshly built and fully JSON-serializable on every call, so a caller can
+ * mutate or stringify the result without touching the game. `inventory` is
+ * serialized in objects.csv file order (not pickup order), so the same held set
+ * always produces the same array.
+ *
+ * @param {object} game
+ * @returns {{current_room: string, inventory: string[], flags: Object<string, boolean>,
+ *   moves_taken: number, rooms_visited: number, escaped: boolean}}
  */
-export function executeCommand(state, verb, arg) {
-  void state;
-  void verb;
-  void arg;
-  throw new Error('engine.executeCommand not implemented yet (T-004)');
+export function getState(game) {
+  const inventory = [];
+  for (const id of game.content.objects.keys()) {
+    if (game.inventory.has(id)) inventory.push(id);
+  }
+
+  const flags = {};
+  for (const [name, value] of game.flags) flags[name] = value;
+
+  return {
+    current_room: game.currentRoom,
+    inventory,
+    flags,
+    moves_taken: game.movesTaken,
+    rooms_visited: game.visited.size,
+    escaped: game.escaped,
+  };
+}
+
+/**
+ * Resolve free text to an object record: exact `object_id` first, then a
+ * case-insensitive match on `object_id` or display `name` (PRD § Content
+ * format). Resolution is content-model work, so it lives here and the front
+ * ends never need to read the CSVs themselves.
+ *
+ * @returns {object|null} the object record, or null if nothing matches
+ */
+export function resolveObject(game, text) {
+  if (typeof text !== 'string') return null;
+  const needle = text.trim();
+  if (needle === '') return null;
+  if (game.content.objects.has(needle)) return game.content.objects.get(needle);
+
+  const lower = needle.toLowerCase();
+  for (const obj of game.content.objects.values()) {
+    if (obj.id.toLowerCase() === lower || obj.name.toLowerCase() === lower) return obj;
+  }
+  return null;
+}
+
+/** True when the object is in the current room (i.e. lying there, not held). */
+function inRoom(game, obj) {
+  return game.locations.get(obj.id) === game.currentRoom;
+}
+
+/** Objects lying in the current room, in objects.csv file order. */
+function roomObjects(game) {
+  const here = [];
+  for (const obj of game.content.objects.values()) {
+    if (inRoom(game, obj)) here.push(obj);
+  }
+  return here;
+}
+
+function describeRoom(game) {
+  const room = game.content.rooms.get(game.currentRoom);
+  const lines = [room.name, room.description];
+
+  const exits = DIRECTIONS.filter((d) => room.exits[d] !== null);
+  lines.push(exits.length ? `Exits: ${exits.join(', ')}.` : 'There are no exits.');
+
+  const here = roomObjects(game);
+  if (here.length) lines.push(`You can see: ${here.map((o) => o.name).join(', ')}.`);
+  return lines.join('\n');
+}
+
+function describeInventory(game) {
+  const held = [];
+  for (const obj of game.content.objects.values()) {
+    if (game.inventory.has(obj.id)) held.push(obj.name);
+  }
+  return held.length ? `You are carrying: ${held.join(', ')}.` : REFUSALS.emptyInventory;
+}
+
+/* -- per-verb rules -------------------------------------------------------
+ * Each handler returns {ok, message} and mutates the game ONLY when ok is
+ * true. executeCommand owns the move counter and the state snapshot.
+ * ---------------------------------------------------------------------- */
+
+function doGo(game, arg) {
+  const raw = typeof arg === 'string' ? arg.trim().toLowerCase() : '';
+  const dir = DIRECTION_ALIASES[raw] ?? raw;
+  if (!DIRECTIONS.includes(dir)) return { ok: false, message: REFUSALS.noSuchDirection };
+
+  const target = game.content.rooms.get(game.currentRoom).exits[dir];
+  if (target === null) return { ok: false, message: REFUSALS.noExit };
+
+  const next = game.content.rooms.get(target);
+  if (next.entryRequiresFlag !== null && game.flags.get(next.entryRequiresFlag) !== true) {
+    return { ok: false, message: REFUSALS.locked };
+  }
+
+  game.currentRoom = target;
+  game.visited.add(target);
+  // Latching: once escaped, always escaped (the bridge mirrors it into
+  // `terminated`; leaving the exit room afterwards never un-escapes you).
+  if (target === game.escapeRoom) game.escaped = true;
+
+  return { ok: true, message: describeRoom(game) };
+}
+
+function doTake(game, arg) {
+  const obj = resolveObject(game, arg);
+  if (obj === null) return { ok: false, message: REFUSALS.noSuchObject };
+  if (game.inventory.has(obj.id)) return { ok: false, message: REFUSALS.alreadyHeld };
+  if (!inRoom(game, obj)) return { ok: false, message: REFUSALS.notHere };
+  if (!obj.takeable) return { ok: false, message: REFUSALS.notTakeable };
+
+  game.locations.delete(obj.id);
+  game.inventory.add(obj.id);
+  if (obj.takeSetsFlag !== null) game.flags.set(obj.takeSetsFlag, true);
+
+  return { ok: true, message: `Taken: ${obj.name}.` };
+}
+
+function doDrop(game, arg) {
+  const obj = resolveObject(game, arg);
+  if (obj === null) return { ok: false, message: REFUSALS.noSuchObject };
+  if (!game.inventory.has(obj.id)) return { ok: false, message: REFUSALS.notHeld };
+
+  game.inventory.delete(obj.id);
+  game.locations.set(obj.id, game.currentRoom);
+  // Flags are monotonic: dropping never clears a take_sets_flag. What you
+  // learned by picking something up stays learned.
+
+  return { ok: true, message: `Dropped: ${obj.name}.` };
+}
+
+function doExamine(game, arg) {
+  const obj = resolveObject(game, arg);
+  if (obj === null) return { ok: false, message: REFUSALS.noSuchObject };
+  if (!game.inventory.has(obj.id) && !inRoom(game, obj)) {
+    return { ok: false, message: REFUSALS.notHere };
+  }
+  return { ok: true, message: obj.description };
+}
+
+function doUse(game, arg) {
+  const obj = resolveObject(game, arg);
+  if (obj === null) return { ok: false, message: REFUSALS.noSuchObject };
+  if (!game.inventory.has(obj.id)) return { ok: false, message: REFUSALS.notHeld };
+  if (obj.useVerb === null) return { ok: false, message: REFUSALS.notUsable };
+
+  if (obj.useRequiresFlag !== null && game.flags.get(obj.useRequiresFlag) !== true) {
+    // The refusal flavor is authored content, not an engine string.
+    return { ok: false, message: obj.useFailText || REFUSALS.nothingHappens };
+  }
+
+  if (obj.useSetsFlag !== null) game.flags.set(obj.useSetsFlag, true);
+  // use_consumes destroys the object: it leaves the inventory without landing
+  // in the room, so it can never be taken again.
+  if (obj.useConsumes) game.inventory.delete(obj.id);
+
+  // A non-consuming object may be re-used freely; the effect is idempotent
+  // (the same flag is simply set true again).
+  return { ok: true, message: obj.useSuccessText || REFUSALS.nothingHappens };
+}
+
+const HANDLERS = {
+  look: (game) => ({ ok: true, message: describeRoom(game) }),
+  inventory: (game) => ({ ok: true, message: describeInventory(game) }),
+  go: doGo,
+  take: doTake,
+  drop: doDrop,
+  examine: doExamine,
+  use: doUse,
+};
+
+/**
+ * Apply one command to the game. The ONLY entry point through which state may
+ * change — `cli.js` and `bridge.js` translate their input into a call here and
+ * render what comes back.
+ *
+ * Semantics:
+ * - A refusal (`ok: false`) changes nothing at all, including `moves_taken`
+ *   (PRD § Parser verbs: an inapplicable action "consumes no state"). This is
+ *   what makes the bridge's invalid-action_id case a true no-op that still
+ *   returns state.
+ * - `moves_taken` increments on every successful command, movement or not.
+ * - No randomness anywhere: the same command sequence from a fresh game always
+ *   produces identical state (PRD § Acceptance criteria).
+ *
+ * @param {object} game a game from createGame()
+ * @param {string} verb one of the PRD verbs (`inv`/`i` alias `inventory`)
+ * @param {string} [arg] a direction (`n`/`s`/`e`/`w` accepted) or an object
+ *   id / display name, matched case-insensitively
+ * @returns {{ok: boolean, message: string, state: object}} `state` is a fresh
+ *   snapshot in PRD's exact wire shape
+ */
+export function executeCommand(game, verb, arg) {
+  if (game === null || typeof game !== 'object' || !(game.flags instanceof Map)) {
+    throw new TypeError('executeCommand(game, verb, arg): game must come from createGame()');
+  }
+
+  const raw = typeof verb === 'string' ? verb.trim().toLowerCase() : '';
+  const name = VERB_ALIASES[raw] ?? raw;
+  const handler = Object.prototype.hasOwnProperty.call(HANDLERS, name)
+    ? HANDLERS[name]
+    : null;
+
+  const result = handler === null
+    ? { ok: false, message: REFUSALS.unknownVerb }
+    : handler(game, arg);
+
+  if (result.ok) game.movesTaken += 1;
+
+  return { ok: result.ok, message: result.message, state: getState(game) };
 }
