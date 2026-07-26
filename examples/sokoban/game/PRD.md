@@ -81,11 +81,30 @@ State shape:
 
 `terminated` mirrors `all_levels_solved`.
 
+## Verification
+
+Two layers, both runnable headless with nothing installed but Godot itself:
+
+- **`tests/run_tests.gd`** — a ~40-line GDScript test runner (discovers
+  `res://tests/test_*.gd`, runs `test_*` methods, prints PASS/FAIL per case,
+  exits non-zero if any failed or if it discovered no tests). Deliberately
+  **not** GUT or any other third-party addon: this example ships inside UGT's
+  own repo to demonstrate UGT's methodology, and vendoring ~100 files of
+  someone else's test framework to check a three-level demo would be a
+  heavier dependency than the game. A runner this small is only trustworthy
+  with a negative control, so `tools/check_runner_reports_failure.sh` proves
+  it can actually fail — a suite that cannot go red is worse than no suite.
+- **`tools/tcp_smoke_check.py`** — drives the finished game over the real TCP
+  bridge and replays the committed solutions for all 3 levels. This is the
+  layer that checks the acceptance criteria below, and it is the same shape
+  as what UGT's own ladder does.
+
 ## Non-goals
 
 No undo/redo, no level editor, no animation beyond snapping sprite
 positions, no sound, no save/load between sessions, more than 3 levels,
-diagonal movement, or any scoring beyond `moves_taken`.
+diagonal movement, or any scoring beyond `moves_taken`. No third-party Godot
+addons.
 
 ## Acceptance criteria
 
