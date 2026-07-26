@@ -171,7 +171,18 @@ def main() -> int:
               f"keys={sorted(r) if isinstance(r, dict) else r}")
         check(isinstance(r.get("terminated"), bool) and isinstance(r.get("truncated"), bool),
               "terminated/truncated are booleans")
-        check(r.get("info") == {}, "info is exactly {}", f"info={r.get('info')}")
+        # This assertion used to read `info == {}`, and it was PINNING A BUG.
+        # The engine narrates every command — room descriptions, examine text,
+        # authored refusals — and the bridge dropped all of it, so a wire client
+        # played a text adventure with no text. Found by the LLM-tier pre-flight
+        # on 2026-07-26 and fixed game-side; the spike now asserts the channel
+        # carries rather than asserting it is empty.
+        info = r.get("info") or {}
+        check(set(info) == {"message"}, "info carries exactly the narration key",
+              f"keys={sorted(info)}")
+        check(isinstance(info.get("message"), str) and len(info["message"]) > 0,
+              "a real move narrates what happened (the pilot's only prose channel)",
+              f"{len(info.get('message') or '')} chars")
         check(r["state"]["moves_taken"] == 1 and r["state"]["current_room"] != s0["current_room"],
               "a legal move advances moves_taken and changes room",
               f"{s0['current_room']} -> {r['state']['current_room']}")

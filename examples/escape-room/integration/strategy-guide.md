@@ -43,7 +43,18 @@ be reused. That is never a mistake; nothing needs to be used twice.
 
 ## What you can see
 
-Your state each turn includes:
+**Two channels, and they say different things.**
+
+The **game text** is the prose the game prints back at you — the room you just
+entered and its exits, what is lying there, an object's description when you
+examine it, and the line it prints when a `use` succeeds or is refused. This is
+where the puzzle actually lives. A refusal usually tells you *why* it was
+refused, and that sentence names what you are missing. Read it.
+
+You see the last few lines of that text, newest at the bottom. It scrolls, so
+anything you want to keep, you have to act on.
+
+The **state** is the structured summary, and it includes:
 
 - `current_room` — which room you are in
 - `inventory` — the objects you are carrying
@@ -67,7 +78,18 @@ objective.
 
 ## A note on how to play well
 
-Sweep each new area before moving on: `look`, then `examine` and `take` what is
-portable. When you get stuck, re-read your `flags` — the one that is still
-`false` and blocking you names what you are missing, and some object you have
-already seen is what sets it.
+Sweep each new area before moving on: `look` to see what is here, then `examine`
+and `take` what is portable. The room text lists both the exits and the objects
+present, so one `look` usually tells you everything the room has.
+
+When a `use` is refused, read the refusal — it is written to tell you what is
+missing. "The wick is bone dry, without oil it will never catch" is the game
+saying *find oil*, not *this was the wrong idea*.
+
+When you get stuck, re-read your `flags`. The one still `false` that is blocking
+you names what you need, and some object you have already walked past is what
+sets it. Going back for it is normal — this prison is not long, and moves are
+the only thing you spend.
+
+You do not need to re-examine something you have already read. You were told its
+description once and it does not change.

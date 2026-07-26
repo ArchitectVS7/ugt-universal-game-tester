@@ -102,3 +102,54 @@ playtest:
   # matched" would be vacuously true. Action 0 (`go_north`) would also work here;
   # 4 is chosen because it can never be gated by content edits.
   probe_action: 4
+
+  # ── What the pilot is told it is doing (P10) ─────────────────────────────
+  # Rendered ABOVE the state dump. The guide says this too, but from the bottom
+  # of the prompt behind everything else.
+  objective: >-
+    Escape the prison: reach the courtyard, which sets escaped=true. The world is
+    a chain of flag-gated locks — each room or object you unlock is what makes the
+    next one reachable. Nothing is timed, nothing can kill you, and no action can
+    make the game unwinnable, so exploring only costs moves.
+
+  # ── The narration channel (found missing by the pre-flight, 2026-07-26) ──
+  # The engine writes room descriptions, examine text and authored success/refusal
+  # lines; `src/bridge.js` used to drop all of it, so a wire client played a text
+  # adventure with NO TEXT. This names the field that carries it.
+  narration_field: "info.message"
+
+  # ── Context budgets — sized for THIS game, not copied ────────────────────
+  # A comparable RPG integration runs ~20,000 chars per call because it has an
+  # 8-mission story, a 35-verb surface and four revealed-content groups. This
+  # game has 41 fixed actions, 10 rooms and 8 flags; the same budget would be
+  # padding, and padding costs latency on a local model without adding knowledge.
+  # Measured, not guessed — re-measure with `wc -c` when the guide changes:
+  #   strategy-guide.md   3,206 chars  (budget 6,000 leaves room to edit)
+  #   one state dump      ~450 chars   (6 keys, 8 flags, <= 9 inventory items)
+  #   one narration line  ~120-260 chars
+  # Total per call lands around 8,000 chars / ~2,000 tokens.
+  guide_char_budget: 6000
+  # ~6-9 recent narration lines: enough to hold a room description plus the
+  # examines that followed it, which is what a human has on screen.
+  terminal_char_budget: 1400
+  # The state dump is tiny here; 4,000 (the default) would never bind, and a
+  # budget that cannot bind is a budget that cannot warn.
+  state_char_budget: 1500
+
+  # ── Memory (P10) ─────────────────────────────────────────────────────────
+  # The sliding window must be LONGER than the longest legitimate cycle or it can
+  # never reveal one. Sweeping a room is look -> examine -> examine -> take (4-6
+  # steps); walking back for a forgotten item is 6-10. 12 covers both. The
+  # optimal solve is 26 moves, so this is roughly half a perfect run.
+  history_window: 12
+  # THE key setting for this game. The cumulative ledger is keyed by
+  # (action, context), and here the context is the room you are standing in:
+  # `examine ledger` in the Records Room is a real observation, and doing it
+  # twice in the same room is a stuck signal. Without this, sweeping ten rooms
+  # would read as ten repetitions of the same six verbs.
+  action_context_path: "current_room"
+  # P10 part 2 — retain the read layer. Object descriptions are printed ONCE into
+  # the narration tail and are where the puzzle hints live; without recall the
+  # pilot is structurally forced to re-examine things it already read, and
+  # re-examining is a move it cannot get back.
+  terminal_recall_budget: 1500

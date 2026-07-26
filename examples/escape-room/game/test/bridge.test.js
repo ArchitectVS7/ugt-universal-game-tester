@@ -242,7 +242,14 @@ describe('bridge protocol (spawned process, piped JSON lines)', () => {
         `step ${i} response shape`,
       );
       assert.equal(resp.truncated, false);
-      assert.deepEqual(resp.info, {});
+      // The engine's narration rides in info.message. Asserted as NON-EMPTY
+      // rather than as a literal: every accepted command in this walkthrough
+      // produces authored text, and the bridge used to drop all of it.
+      assert.equal(typeof resp.info.message, 'string');
+      assert.ok(
+        resp.info.message.length > 0,
+        `step ${i} carried no narration`,
+      );
       assert.equal(
         resp.terminated,
         i === steps.length - 1,
@@ -289,7 +296,9 @@ describe('bridge protocol (spawned process, piped JSON lines)', () => {
         `bogus action ${JSON.stringify(bogus[i])} changed state`,
       );
       assert.equal(resp.terminated, false);
-      assert.deepEqual(resp.info, {});
+      // Never dispatched, so there is no engine narration to report — but the
+      // key is still present, so a client never has to branch on its absence.
+      assert.deepEqual(resp.info, { message: '' });
     }
 
     // The loop never desynced: a valid action still lands afterwards.
@@ -482,7 +491,7 @@ describe('handleCommand (in process)', () => {
     assert.deepEqual(response.state, before);
     assert.equal(response.terminated, false);
     assert.equal(response.truncated, false);
-    assert.deepEqual(response.info, {});
+    assert.deepEqual(response.info, { message: '' });
   });
 
   it('replaces the game on reset but never rebuilds the action table', () => {
@@ -499,5 +508,67 @@ describe('handleCommand (in process)', () => {
   it('signals close with no response line', () => {
     const session = { content, actions, game: createGame(content) };
     assert.deepEqual(handleCommand(CLOSE, session), { response: null, close: true });
+  });
+});
+
+describe('bridge narration (info.message)', () => {
+  // Regression guard for a wire-only defect found 2026-07-26 by the LLM-tier
+  // pre-flight audit: `handleCommand` called `executeCommand(...).state` and
+  // discarded `.message`, so the engine's room descriptions, examine text and
+  // authored success/refusal lines never crossed the wire. `src/cli.js` prints
+  // them, so the human front end looked fine and the in-process suite was green
+  // — a black-box client played a text adventure with no text.
+  //
+  // These assert the CHANNEL, not the prose. Wording lives in the CSVs and is
+  // free to change; what must not change is that it arrives.
+
+  it('carries the room description when you move', () => {
+    const content = loadContent(CONTENT_DIR);
+    const actions = buildActionTable(content);
+    const session = { content, actions, game: createGame(content) };
+    const north = actions.findIndex((a) => a.verb === 'go' && a.arg === 'north');
+
+    const { response } = handleCommand({ command: 'step', action_id: north }, session);
+    assert.ok(
+      response.info.message.length > 20,
+      'a successful move should narrate the room it arrived in',
+    );
+    assert.equal(
+      response.info.message.includes(content.rooms.get(response.state.current_room).name),
+      true,
+      'the narration should name the room the state says we are in',
+    );
+  });
+
+  it('carries an object description when you examine it', () => {
+    const content = loadContent(CONTENT_DIR);
+    const actions = buildActionTable(content);
+    const session = { content, actions, game: createGame(content) };
+    // Any object that starts in the opening room is examinable from the off.
+    const start = createGame(content).startRoom;
+    const here = [...content.objects.values()].find((o) => o.startRoom === start);
+    const idx = actions.findIndex((a) => a.verb === 'examine' && a.arg === here.id);
+
+    const { response } = handleCommand({ command: 'step', action_id: idx }, session);
+    assert.equal(
+      response.info.message,
+      here.description,
+      'examine should return the CSV description verbatim — this is where the hints live',
+    );
+  });
+
+  it('carries the authored refusal text when a use is gated', () => {
+    const content = loadContent(CONTENT_DIR);
+    const actions = buildActionTable(content);
+    const session = { content, actions, game: createGame(content) };
+    // A gated object, used without its prerequisite and without holding it.
+    const gated = [...content.objects.values()].find((o) => o.useVerb && o.useFailText);
+    const idx = actions.findIndex((a) => a.verb === 'use' && a.arg === gated.id);
+
+    const { response } = handleCommand({ command: 'step', action_id: idx }, session);
+    assert.ok(
+      response.info.message.length > 0,
+      'a refused use should still say why — a silent refusal teaches nothing',
+    );
   });
 });

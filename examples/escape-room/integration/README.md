@@ -62,6 +62,74 @@ six predicates that R1/R2 had no way to share; keeping both would have been the
 exact drift `InvariantSuite` exists to prevent. Its three good ideas were kept:
 the negative control, same-seed replay, and the non-vacuity guard.
 
+## Tier 3 pre-flight — the `LESSONS.md` §B audit (2026-07-26)
+
+Run before spending anything, per P12. Findings below were all free.
+
+| # | Check | Verdict |
+|---|---|---|
+| P1 | Entities have identities, not handles | **PASS** — the prompt lists `take_lantern`, never `14` |
+| P2 | Adapter passes through every PUBLIC field | **WAS BROKEN — FIXED.** See below |
+| P3 | Truncation is silent starvation | **FIXED** — guide is 4,345 chars against a 2,000 default; budget set to 6,000 |
+| P4 | Action channel sends what the LLM thinks | **PASS** — names map 1:1 to ids, asserted by the spike against the game's own table |
+| P5 | Prompt must not leak what the real client hides | **OPEN — decision needed before the paid run.** See below |
+| P6 | Guide teaches the RULES that create skill | **PASS** after rewrite — refusal-reading and the flag chain are now taught |
+| P7 | Verify competence from reasoning text | pending the run |
+| P8 | Never pool across an information fix | **boundary set here** — nothing before 2026-07-26 is poolable with anything after |
+| P9/P13 | Episodes: samples or replays? | **declared `deterministic` and probed live** |
+| P10 | Pilot needs memory, not just state | **configured** — `history_window: 12`, ledger keyed on `current_room`, narration recall on |
+| P11 | Hard loop ceiling needs code | default threshold retained; repetition is not correct play here |
+| P12 | Local model first | this audit is the local stage; `gemma4:26b` confirmed available |
+
+### P2 — the pilot was going to play a text adventure with no text
+
+`src/bridge.js` called `executeCommand(...).state` and **discarded `.message`**.
+The engine narrates every command — room descriptions, exits, what is visible,
+object descriptions on `examine`, and the authored success/refusal lines — and
+`src/cli.js` prints all of it. None of it crossed the wire. `BaseAdapter`'s
+`get_terminal_text()` returns `""` for adapters that cannot expose text, so the
+tier would have rendered an empty Terminal panel, silently, forever.
+
+For this genre that is total: the guide's own advice — *"`examine` everything,
+descriptions tell you what an object is for"* — would have been unfollowable, and
+`examine` would have been a pure move-waster. The refusal *"The wick is bone dry.
+Without oil it will never catch"* is the game telling you the next objective, and
+the pilot would have seen `use_lantern` change nothing, with no idea why.
+
+Fixed on both sides: the bridge now carries narration in `info.message` (response
+shape unchanged), and `SubprocessAdapter` gained a **configured** narration
+channel (`playtest.narration_field`, default `info.message`) plus
+`narration_is_live()` so a pre-flight can assert the channel really carries
+rather than trusting it was wired. 3 game tests added, mutation-checked (removing
+the fix fails 6). The spike's old `info == {}` assertion was **pinning the bug**
+and now asserts the channel instead.
+
+### P5 — the pilot sees the puzzle's skeleton; a human does not
+
+The state dump lists all 8 flags **by name**: `iron_door_open`, `has_oil`,
+`steam_vented`, `has_cog`, `knows_hour`, `clock_set`, `gate_open`. Piping the
+same six commands through `node src/cli.js` prints those names **zero** times —
+they are internal machine state, and a human infers the chain from prose alone.
+
+Reading `knows_hour` and `clock_set` in the opening cell tells you there is a
+clock to set from an hour you must learn, long before you find the ledger. That
+is a structural hint sheet, and it makes the pilot's job easier than the game's.
+
+**Left visible for the local channel check**, deliberately: that stage proves
+plumbing and produces no quotable number, and running with flags visible tells us
+whether the pilot even uses them. **It needs a decision before any paid run**,
+because it changes what is being measured. The knob exists —
+`playtest.redact_state_fields: ["flags"]` — and the guide would need its
+"flags are your progress bar" section rewritten to match.
+
+### Context budget
+
+The rendered prompt is **7,237 chars (~1,800 tokens)**: objective, state, 12
+recent actions with deltas, the narration tail, then the guide. Sized for this
+game rather than copied — a comparable RPG integration runs ~20,000 chars because
+it has an 8-mission story and a 35-verb surface; here that would be padding, and
+padding costs local-model latency without adding knowledge.
+
 ## Tier 3 is written but not run
 
 `ugt playtest` bills a real Anthropic API call per action. The guide is

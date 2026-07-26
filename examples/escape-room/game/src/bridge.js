@@ -91,16 +91,27 @@ export function handleCommand(message, session) {
     const known = Number.isInteger(id) && id >= 0 && id < session.actions.length;
     // An unknown / ill-typed / missing id is never dispatched: no engine call,
     // no move consumed, current state returned unchanged.
-    const state = known
-      ? executeCommand(session.game, session.actions[id].verb, session.actions[id].arg).state
-      : getState(session.game);
+    const result = known
+      ? executeCommand(session.game, session.actions[id].verb, session.actions[id].arg)
+      : { ok: false, message: '', state: getState(session.game) };
+    const state = result.state;
 
     return {
       response: {
         state,
         terminated: state.escaped, // mirrors the engine's latching flag
         truncated: false, // no timers or step caps in this game (PRD non-goals)
-        info: {}, // frozen by PRD: nothing is smuggled in here
+        // The engine's own narration — room descriptions, examine text, and the
+        // authored success/refusal lines. `src/cli.js` prints this verbatim; the
+        // bridge used to take `.state` and drop `.message` on the floor, so every
+        // wire client played a TEXT ADVENTURE WITH NO TEXT while the in-process
+        // suite stayed green. Added 2026-07-26 after a pre-flight audit found it.
+        //
+        // It goes in `info` because that is the auxiliary-data slot in the
+        // {state, terminated, truncated, info} envelope: the response SHAPE is
+        // unchanged, so nothing that reads the four keys has to care, and a
+        // client that ignores narration is unaffected.
+        info: { message: result.message || '' },
       },
       close: false,
     };
