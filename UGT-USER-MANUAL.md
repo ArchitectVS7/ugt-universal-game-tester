@@ -668,7 +668,34 @@ whether game features behave correctly — use `ugt verify` for that.
 
 ## 8. Phase 2 — Playtest (LLM Player)
 
-`ugt playtest` runs an Anthropic-powered agent through your game. Unlike the scripted verifier, the LLM player reads the game state and reasons about what to do next — it can find bugs that no scripted test would look for, because it plays like a real player would.
+`ugt playtest` runs an LLM agent through your game. Unlike the scripted verifier, the LLM player reads the game state and reasons about what to do next — it can find bugs that no scripted test would look for, because it plays like a real player would.
+
+### Run this tier in TWO STAGES — local first, paid second
+
+**Never spend an API call proving the plumbing works.** The local stage costs nothing, so it is where you iterate; the paid stage is where you measure. Full rule and its evidence: `LESSONS.md` §B **P12**.
+
+**Stage 1 — local, free, iterate hard.** Point the playtester at a local Ollama model:
+
+```bash
+# requires ollama running at localhost:11434 — no API key
+ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md \
+  --provider ollama --model gemma4:26b --max-actions 30
+```
+
+Drive a few basic game actions first, then a **30-action smoke test** (up to 100 if the loop is long). This is where you write and rewrite the strategy guide and the prompting *for this specific game*: run → read the logged `reasoning` → fix the guide → run again. Keep going until the pilot cleanly processes the basic game loop. Work the whole §B audit here — P1–P8 are all findable for free, because they are defects in what the pilot can **see**, not in how well it thinks.
+
+**Stop at ~100 actions.** Past roughly 200 local calls the run is not merely slow — the decisions get measurably worse than Haiku's. **Bad decisions do not equate to good tests.** A long local run buys degraded play, not more evidence, and any balance number read off it is noise. Local proves the *channel*; never quote it as a result.
+
+> One asymmetry worth knowing: on a local model the P7 competence grep is a **positive signal only**. If the reasoning names your core mechanics, the channel is proven. If it does not, that is ambiguous — starvation and a weak model look identical from outside. Re-check on the paid run before closing any P1/P2/P6 finding.
+
+**Stage 2 — paid, measure.** Once stage 1 loops cleanly, switch to Anthropic. **Haiku is the working default**: fast and cheap enough to re-run after every fix.
+
+```bash
+ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md \
+  --provider anthropic --model claude-haiku-4-5-20251001 --max-actions 100
+```
+
+**Then expect to iterate on the game as often as on the harness.** That loop turns around far faster than human testing, and that is the point: **the goal is for the first human UAT to be already relatively bug-free**, so a person's time goes on feel, readability and onboarding — the things no automated tier can see — instead of on defects a free 30-action local run would have caught.
 
 ### 8a. Writing a Strategy Guide
 

@@ -101,6 +101,10 @@ The unifying failure mode has a name: **information starvation** — the game ex
 needs, and the harness or the guide drops it on the floor. It is invisible in the run output: the loop reports
 `PLAYTEST MET`, zero invariant violations, zero bugs, and a confident-sounding win rate.
 
+> **Start with P12.** It is last by number and first in practice: run the whole audit against a LOCAL model
+> (`--provider ollama`) before spending a single API call. P1–P8 are all findable for free, because they are
+> defects in what the pilot can SEE rather than in how well it thinks.
+
 ### P1 · The LLM must see entity **identities**, not opaque handles
 Counts and integer ids are not a choice. A card game's playtester picked among `instanceId` ints for 800
 actions and said so mid-run: *"the current state shows no specific cards in hand are visible to me via the
@@ -266,6 +270,35 @@ downstream starts reading as spuriously "surprising." Found on a terminal-hackin
 in a 300-action run pushed `rngCounter`'s ratio to just under 80%, flipping `unexpected_delta_steps` from a
 routine single-digit reading to 238/238. Fix: compute the frequency/threshold over only the steps that could
 have produced a real delta, not over every step the loop consumed.
+
+### P12 · Validate the harness on a LOCAL model first — never spend an API call proving the plumbing
+**Stage the tier: local model proves the CHANNEL, paid model measures the GAME.** They are different jobs and
+the same run cannot do both.
+
+**Stage 1 — local (`--provider ollama`, e.g. `gemma4:26b`). Free, so iterate hard.** Drive basic game actions,
+then a **30-action smoke test**, sometimes up to 100. This is where the strategy guide and the prompting get
+written and rewritten *for that specific game* — the loop is edit-guide → re-run → read the reasoning → edit
+again. Iterate until the pilot cleanly processes the basic game loop. Everything §B asks for is cheaper to
+discover here, and P1–P8 are all findable on a local model because they are defects in what the pilot can SEE,
+not in how well it thinks.
+
+**There is a hard ceiling on stage 1, and it is lower than it looks: ~100 actions.** Beyond ~200 local calls
+the run is not just slow, the decisions get measurably worse than Haiku's. **Bad decisions do not equate to
+good tests** — a long local run buys degraded play, not more evidence, and any balance number read off it is
+noise. Local is a harness check. Never quote it as a result.
+
+*One asymmetry to hold onto, because it cuts against P7:* on a local model the competence grep is a **positive
+signal only**. If the reasoning names the game's core mechanics, the channel is proven. If it does not, that
+is **ambiguous** — starvation and a weak model look identical from the outside. Do not close a P1/P2/P6 finding
+on local silence; re-check it on the paid run.
+
+**Stage 2 — paid (Haiku is the working default: fast and cheap enough to re-run after every fix).** Only once
+stage 1 loops cleanly. This is the run that produces numbers anyone is allowed to cite.
+
+**Then iterate, and expect to change the game as often as the harness.** The stage-1/stage-2 loop turns
+around far faster than human testing, and that is the whole point: **the target is that the first human UAT is
+already relatively bug-free**, so a person's time is spent on feel, readability and onboarding — the things no
+tier can see — instead of on defects a 30-action local run would have caught for nothing.
 
 ---
 

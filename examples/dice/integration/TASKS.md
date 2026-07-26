@@ -84,18 +84,35 @@ diff is empty (byte-identical).
 
 **Superseded (2026-07-26):** `exploit_hunt.py` has been replaced by the full trial ladder — `spike_dice.py`, `smoke_dice_adapter.py`, `verify_round1.py`, `verify_round2.py`, `verify_round3.py`. Everything it did is still covered and then some: its random walks and determinism check are now R3, its defense-vs-attack A/B and its knockout drive are now R2 (where they belong, since both are content-spine claims). Invariants moved into a shared `invariants.py` built on `InvariantSuite`, so R1/R2 and R3 assert the identical predicates instead of two hand-maintained copies.
 
-### T-008 · LESSONS §B pre-flight audit — `status: TODO` · `coder: opus` · `after: T-007`
+### T-008 · LESSONS §B pre-flight, driven on a LOCAL model — `status: TODO` · `coder: opus` · `after: T-007`
 **This is the prep, and it must happen BEFORE T-006 spends a single credit.** It
-costs no API calls, so it is not blocked by anything.
+runs entirely on local Ollama, so it costs nothing and is not blocked by
+anything.
 
-`LESSONS.md` §B (P1–P11) is the mandatory information-integrity audit. Skipping
+**This is not a paper audit — it is a real playtest loop against a free model**
+(`LESSONS.md` §B P12). Drive a few basic allocations first, then a **30-action
+smoke test**, and iterate: run → read the logged `reasoning` → fix the guide or
+the prompt → run again, until the pilot cleanly processes the basic battle loop.
+
+```bash
+# ollama running at localhost:11434, no API key
+cd examples/dice/integration && python3 serve.py --port 8080 &
+ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md \
+  --provider ollama --model gemma4:26b --max-actions 30
+```
+
+Stop at ~100 actions. Past ~200 local calls the decisions degrade below Haiku's,
+and a longer run buys worse play rather than more evidence. **Local proves the
+channel; it never produces a balance number for this game.**
+
+`LESSONS.md` §B (P1–P12) is the mandatory information-integrity audit. Skipping
 it cost two multi-hour balance batches on another game that measured the wrong
 thing — both permanently unpoolable with anything measured afterwards. The
 failure mode is invisible in the output: the loop reports `PLAYTEST MET`, zero
 violations, and a confident-sounding win rate, while the pilot was playing
 blind.
 
-**Write a cited disposition for every check P1–P11.** The ones most likely to
+**Write a cited disposition for every check P1–P12.** The ones most likely to
 bite this game, based on what the D18 work already turned up:
 
 - **P6 (the guide must teach the RULES that create the skill)** — the live risk
@@ -119,13 +136,21 @@ bite this game, based on what the D18 work already turned up:
   out-of-range ids by THROWING (spike finding), unlike the other two examples.
   Confirm the playtest loop survives that rather than counting it as a turn.
 
-**Accept:** a written disposition per check, each citing the specific file/line
+**Accept:** a clean 30-action local run that reaches a real battle outcome, PLUS
+a written disposition per check P1–P12, each citing the specific file/line
 compared — "looks fine" is not a disposition (O7). Any gap fixed before T-006
 runs.
 
-### T-006 · `ugt playtest` run — `status: BLOCKED(awaiting user approval to spend API credits)` · `coder: sonnet` · `after: T-008`
-Run `ugt playtest` once with `--max-actions 30` to confirm the LLM can play a
-full battle.
+*Reading the local run (§B P12): the P7 competence grep is a POSITIVE signal
+only. If gemma's reasoning names the two-for-one block or the points decision,
+the channel is proven. If it does not, that is ambiguous — starvation and a weak
+model look identical from outside — so re-check on T-006 rather than closing a
+P1/P2/P6 finding here.*
+
+### T-006 · `ugt playtest` run on Haiku — `status: BLOCKED(awaiting user approval to spend API credits)` · `coder: sonnet` · `after: T-008`
+Once T-008's local loop is clean, run the paid tier — Haiku, the working default
+for speed and cost — with `--max-actions 30` to confirm the LLM can play a full
+battle. This is the run that is allowed to produce a number.
 **Accept:** `ugt playtest` exits 0 and produces `results/playtest-report.json`
 with at least one completed battle (`battle_over: true` reached, or
 max-actions budget honestly reported as insufficient).
@@ -141,10 +166,18 @@ points so surviving one point ahead is a full win.
 > change by four commits. **This is exactly the P6 drift T-008 exists to catch,
 > and it is recorded rather than quietly edited away.**
 
-The run itself is NOT done: `ugt playtest` bills a real Anthropic API call per
-action. After T-008 passes, trigger with
-`ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md --max-actions 30`,
-then flip to DONE.
+The run itself is NOT done: this stage bills a real Anthropic API call per
+action. After T-008 passes, trigger with:
+
+```bash
+ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md \
+  --provider anthropic --model claude-haiku-4-5-20251001 --max-actions 30
+```
+
+then flip to DONE. Expect to iterate afterwards — on the harness or on the game
+— and to re-run. That loop is faster than human testing, and the target is that
+the **first human UAT is already relatively bug-free**, so a person's time goes
+on feel and readability rather than on defects a free local run would catch.
 
 ---
 

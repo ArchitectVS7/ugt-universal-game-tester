@@ -12,10 +12,16 @@
 > **Status:** This document describes implemented behavior unless a section is explicitly marked as future work; where it diverges from the code, the code is authoritative.
 
 > **Before running this tier against any game, work through `LESSONS.md` §B — the pre-flight
-> information-integrity audit (P1–P11).** It is the accumulated cost of two real balance rounds: a playtest can
+> information-integrity audit (P1–P12).** It is the accumulated cost of two real balance rounds: a playtest can
 > report `PLAYTEST MET`, zero violations and a confident win rate while the pilot is blind to entity
 > identities, to the game's public read layer, or to the rules that create its skill. Every check there needs
 > a written, cited disposition before a batch is worth running.
+>
+> **And run that audit on a LOCAL model (§B P12).** The tier is staged: `--provider ollama` for a 30-action
+> smoke test (up to 100) where the strategy guide and prompting get iterated for free, then Anthropic (Haiku
+> by default) for the run that actually produces numbers. **The local stage proves the CHANNEL, the paid stage
+> measures the GAME** — do not mix them up, and do not push local past ~100 actions, where its decisions
+> degrade below Haiku's and the run buys degraded play rather than more evidence.
 
 ## Where this fits today
 
