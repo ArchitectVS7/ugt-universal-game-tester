@@ -184,7 +184,7 @@ which stopped being true the moment a real suite landed; the Gate is exit 0
 `levels/.gitkeep` left in place.
 Orchestration: graphify=none — no `graphify-out/graph.json` in either the git root (`_UGT Universal Game Tester/`) or `examples/sokoban/game/` (both checked); the task is also self-con · attempts=1/4.
 
-### T-004 · `try_move` push/collision logic — `status: TODO` · `coder: opus` · `after: T-003`
+### T-004 · `try_move` push/collision logic — `status: DONE` · `coder: opus` · `after: T-003`
 Implement the single move/push function per PRD: wall blocks; box pushes only
 into floor or empty target; `boxes_on_target`/`level_solved` tracking;
 `moves_taken` increments only on a move that actually changes a position;
@@ -195,6 +195,23 @@ shipped levels — those are authored in T-005.
 blocked by a wall behind it; box push blocked by another box behind it; a
 no-op move does **not** increment `moves_taken`; a real move does; putting the
 last box on a target sets `level_solved: true`.
+**Delivered (2026-07-25):** shipped `scripts/board.gd` as the single rules
+engine (`try_move()`, `reset_level()`, `boxes_on_target()`/`is_solved()`,
+`get_state()` in the PRD's exact shape) built on top of T-003's `level.gd`
+parser, with lazy level-advance (a solved level only advances at the start of
+the next `try_move()` call, so `level_solved: true` stays observable in the
+solving move's own state before the next level's grid replaces it) and
+out-of-range/unknown direction ids treated as a silent no-op so the future
+wire bridge can pass an `action_id` straight through with zero rule content of
+its own. `tests/test_board.gd` adds 21 cases against small inline fixture
+grids (wall block, push into floor, push blocked by a wall/box behind it,
+no-op vs. real move increment, last-box-on-target solve, level advance +
+`moves_taken` surviving it, `all_levels_solved` after the third level, reset
+semantics, state-shape/determinism, and bad/empty/missing-level load
+failures) — none of the shipped `level_01/02/03.txt` levels exist yet, so
+proving those specific levels solvable is explicitly left to T-005, not this
+task's gate.
+Orchestration: graphify=none — no `graphify-out/graph.json` in the game dir or the git root (both checked); the task is also self-contained (one new script + one new test file against  · attempts=1/4.
 
 ## M2 — Content
 
