@@ -72,7 +72,21 @@ class SubprocessAdapter(BaseAdapter):
             self.connect()
 
         response = self._send_command({"command": "reset"})
-        return response.get("state", {})
+        state = response.get("state", {})
+
+        # A reset starts a NEW episode, so the previous one's narration must not
+        # survive into it — otherwise the first prompt of episode 2 shows the
+        # last thing that happened in episode 1, which reads as the present.
+        self._narration.clear()
+
+        # A game is allowed to narrate its opening position on reset, and one
+        # that does was being thrown away here: only `step` recorded narration,
+        # so the tier's FIRST decision was always made with an empty terminal
+        # panel however much prose the game had sent. For a game whose opening
+        # screen IS its room description, that cost the player character a move
+        # to re-read something it should already have been holding.
+        self._record_narration(response.get("info", {}), state)
+        return state
 
     def step(self, action_id):
         # Send action to simulator
