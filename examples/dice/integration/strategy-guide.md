@@ -51,10 +51,45 @@ full win, identical to a knockout.
 ## What you can see
 
 - `player.force_strength` / `enemy.force_strength` — 0 to 8
-- `player.bonus_dice` / `enemy.bonus_dice` — the bonus dice granted this round
-- `round_number` — 0 to 12
+- `player.bonus_dice` / `enemy.bonus_dice` — **the bonus dice that side received
+  in the round that just resolved.** It is a report, not a forecast. Nothing
+  tells you next round's grant directly — work it out yourself from the three
+  rules above, which are fully deterministic given the force strengths you can
+  already see.
+- `round_number` — 0 to 12, counting *completed* rounds. At `round_number: 2`
+  the round you are about to choose for is round 3, the reinforcement round.
 - `battle_over`, `winner` — `null` until it ends, then `"player"`, `"enemy"` or
   `"draw"`
+
+### The field dispatches
+
+The terminal output is the battle log, oldest round first — the same dispatches
+a human reads on the page. Each round tells you:
+
+- the posture both sides took (`charge forward` / `advances and holds` /
+  `brace behind the earthworks` — aggressive, balanced, defensive);
+- which bonus dice fired, for whom;
+- **the exchange: `Your volley: N hit(s) against M blocked`** — how many attack
+  hits you landed and how many the enemy's defense dice cancelled — then the
+  same line from the enemy's side, and the damage each took.
+
+Read it. `4 hits against 1 blocked` and `4 hits against 2 blocked` are the
+difference between two damage and none, and the exchange lines are the only
+place the game tells you how your last allocation actually performed.
+
+## Your opponent
+
+The enemy is a deterministic heuristic with no memory and no randomness in its
+decision. It reacts to **one thing only: its own force strength.** At full
+strength it comes at you all-out; the more damage it has taken, the more of its
+six dice it puts into defense, until at the brink it is doing nothing but
+blocking. It never reacts to your force strength, your last allocation, or the
+round number.
+
+That is exactly what the postures in the dispatch log are showing you, and it is
+predictable a round ahead: you already know the enemy's strength before you
+choose. A wounded enemy is a wall — feeding it attack dice is how you waste the
+back half of a battle.
 
 ## How to play well
 

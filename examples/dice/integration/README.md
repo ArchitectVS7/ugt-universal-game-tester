@@ -30,17 +30,19 @@ cd examples/dice/integration && python3 serve.py &
 ugt verify --config ugt.config.yaml --feature-map feature-map.yaml
 ```
 
-Recorded results (2026-07-26, game suite 156/156 green):
+Recorded results (2026-07-26, after D19 — game suite 162/162 green):
 
 | Rung | Script | Result |
 |---|---|---|
-| 1 | `spike_dice.py` | **SPIKE MET — 17/17** (+1 finding) |
-| 2 | `smoke_dice_adapter.py` | **SMOKE MET — 8/8** (+1 finding) |
+| 1 | `spike_dice.py` | **SPIKE MET — 19/19** (+1 finding) |
+| 2 | `smoke_dice_adapter.py` | **SMOKE MET — 9/9** |
 | 3 | `verify_round1.py` | **ROUND 1 MET — 12/12** |
-| 4 | `verify_round2.py` | **ROUND 2 MET — 10/10** (+1 finding) |
-| 5 | `verify_round3.py` | **ROUND 3 MET — 10/10** (+1 finding) |
-| — | `ugt verify` (Tier 1, CLI) | 5/5 PASSED, 0 FAILED |
-| — | `ugt playtest` (Tier 3) | guide written, **not run** (bills API credits) |
+| 4 | `verify_round2.py` | **ROUND 2 MET — 14/14** |
+| 5 | `verify_round3.py` | **ROUND 3 MET — 13/13** |
+| — | `ugt verify` (Tier 1, CLI) | 4/4 PASSED, 0 FAILED (was 5/5 — the `concluded_battle_is_inert` entry was deleted when the D14 termination fix made it pass for the wrong reason; the property is still covered by R1, R2 and the invariant suite) |
+| — | `playtest_dice.py --provider ollama --seeds 1` (stage 1a) | **channel proven** — 1 battle, 0 violations |
+| — | `playtest_dice.py --provider ollama` (stage 1b) | **rotation proven** — 8/8 distinct seeds, 9 battles, 96 actions, 0 violations |
+| — | `playtest_dice.py --provider anthropic` (stage 2a/2b) | **not run** (bills API credits) |
 
 `exploit_hunt.py` is gone: R3 absorbed its random walks and determinism check,
 and R2 took its defense-vs-attack A/B and its knockout drive, which are
@@ -65,6 +67,109 @@ expressible in that model, so they are asserted in `exploit_hunt.py` instead.
 The feature map adds a sixth of its own — `battle.concluded_battle_is_inert` —
 because the adapter cannot see termination (Finding 2), so UGT keeps sending
 actions into a finished battle and the harness depends on that being harmless.
+
+## Tier 3 pre-flight — the `LESSONS.md` §B audit (T-008, 2026-07-26)
+
+Run with `playtest_dice.py`, which owns the server lifecycle and the bundle
+freshness check the way every other rung does, and passes the shared invariant
+suite into the LLM loop so a defect the pilot does not notice is still caught.
+
+**Stage 1 (local, free) result:** `gemma4:26b`, 30 actions, two runs (225s and
+213s). Each played two complete battles to a real `winner: "player"` with a
+third in progress at the budget; **0 invariant violations across all 60 actions**
+in both, 0 forced repeat-blocks, `ended_early: null`. The channel works.
+
+Run 2 is the same harness after the finding-8 fix, and the fix is visible in the
+play: false-prohibition beliefs in the pilot's own reasoning went **2 → 0**, and
+its longest run of one allocation went **3 → 7** — it stopped switching away
+from the allocation the guide calls correct because the prompt had told it it
+must.
+
+Run 2 also flagged 2 potential bugs, both from the contradiction detector, and
+**both are correct readings rather than defects**: `a3_d3` three rounds running
+with nothing moving but the clock. That is the game's real mid-battle stall — a
+balanced player against a wounded, turtling AI trades zero damage for a few
+rounds — and it is visible only because this integration puts `round_number` in
+`ignore_delta_fields`. Without that the detector could never fire for this game
+at all, since the round counter ticks on every resolved round. Whether those
+stalls are good pacing is a stage-2 question.
+
+**Stage 1b — the seeded rotation (96 actions, 710s).** After finding 7 was fixed:
+`distinct_episode_seeds: 8` of 8, **9 completed battles**, 10 episodes recorded,
+0 invariant violations, 0 forced repeat-blocks. The rotation wrapped back to
+`dice-s01` for the ninth battle and reproduced its first battle's result exactly
+(margin −3, paired −0.714), which is the determinism contract holding across the
+whole loop rather than only in R3.
+
+Its paired score was **+1.65, 95% CI ±1.91 (n=9)** — reported as *not
+distinguishable from the average reference policy*. That is the correct reading
+at n=9 on a local model, and per §B P12 it is a channel check, **not** a result:
+no stage-1 number may be quoted. Stage 2 (Haiku) is T-006 and remains
+credit-gated.
+
+### Disposition per check
+
+| # | Check | Disposition |
+|---|---|---|
+| P1 | LLM sees identities, not handles | **PASS, no change.** The 7 actions are named `a6_d0`…`a0_d6` — the allocation *is* the name. A sample prompt was dumped and read end to end (`_build_prompt` with real engine state); a human could play from it. |
+| P2 | Adapter passes through every PUBLIC field | **FAILED → FIXED (D19).** See finding 6. |
+| P3 | Truncation is silent starvation | **FAILED → FIXED.** Guide is 5,649 chars; the default `guide_char_budget` is 2,000, which would have cut everything from "What you can see" on — i.e. the entire skill half. Budget set to 8,000 and `playtest_dice.py::assert_guide_fits` now fails the run before contacting any model. Terminal budget sized from measurement too: a full 12-round dispatch log is ~3,900 chars (~323/round), the default 400 would show ~one round; set to 4,400. |
+| P4 | The action channel sends what the LLM thinks | **PASS.** `action_id` mode maps `value` through `name_to_id` — one name, one id, no arguments to fill. An unknown name is skipped with a printed message, never coerced into a neighbouring id. |
+| P5 | Prompt must not leak what the client hides | **PASS, verified field by field.** All 7 projected fields are on screen for a human (`App.jsx:36-49` both ForceBars, `:123` the round track, `:127-131` the outcome banner), so `redact_state_fields` is deliberately empty. D19's text hook was written to the same bound and a test pins it: no preset indices, no raw die faces, no seed, no `roll_counter`. |
+| P6 | The guide teaches the RULES that create the skill | **PASS after two fixes.** The two-for-one block, the points decision and "all-out attack loses" were already there (rewritten for D18). Two defects found and fixed here: (a) the guide described `bonus_dice` as "granted this round" when it reports the round that just **resolved** (`engine.js:362` writes it from that round's `bonuses`; the UI labels it "last round" at `App.jsx:49`) — a pilot planning off it would be a round out; (b) the guide said nothing at all about the opponent, so the newly-visible dispatch log had no rule to attach to. Added: the enemy is deterministic and reacts to *its own* strength only (`engine.js::chooseEnemyPreset` D13). The closed-form is deliberately withheld — teaching the formula would measure exploitation of a leaked policy rather than the game. |
+| P7 | Competence from the reasoning, not the exit code | **PASS (positive signal).** Grep over all 30 reasonings: `defense` 23, `lead` 23, `attack` 25, `round 12` 8, `bonus` 8, `morale` 7, `points` 6, `margin` 5, `cap` 4, `round 3`/`reinforce` 3, `half strength` 3. Step 26 inferred the opponent unprompted — *"the enemy's behavior is deterministic and they attack aggressively when at full strength"* — and step 15 quoted the guide's own 58% figure back. `two-for-one` scored 0/30, but `block` 9/30; per P12 local silence is **ambiguous**, so that one re-checks on Haiku rather than closing here. |
+| P8 | Never pool across an information fix | **Boundary declared.** Everything before D19 + the P3 budget fix measured a pilot that could not see the dispatch log. Nothing from before 2026-07-26 is poolable with anything after, and no pre-stage-2 run is poolable with anything at all. |
+| P9 | One clean run proves the channel, not the balance | **FAILED → FIXED (finding 7), and the metric changed with it — see "Sampling design" below.** Every episode used to replay one seed. Now `playtest.episode_seeds` rotates 8 declared seeds per episode via `BaseAdapter.reset_seeded`, and `assert_seed_rotation_works` proves the rotation is real before every run. |
+| P10 | The pilot needs memory | **PASS by configuration.** `history_window` raised 5 → 12 so the whole battle's decisions stay in view; a 5-step window hides the first half of every match including the round-3 swing. `action_context_path` is unset on purpose: there is no "where you are" in this game, so plain per-action keying is correct. |
+| P11 | A prompt warning is advice, not a guarantee | **FAILED → FIXED in UGT core.** See finding 8. Separately: the spike's `RangeError` divergence (finding 1) is unreachable from this tier — a hallucinated action name never reaches the adapter, it is dropped by `name_to_id.get(value) is None`. |
+| P12 | Validate on a LOCAL model first | **DONE — that is this whole section.** Two 30-action `gemma4:26b` runs, zero API calls spent. `playtest_dice.py` refuses `--max-actions > 100` on `--provider ollama` rather than leaving the ceiling to discipline. Ollama 0.32.3 serves `gemma4:26b` at a runtime `context_length` of 32,768 against a ~2,980-token prompt (`/api/ps`), so there is no second, quieter truncation underneath P3. |
+
+### Sampling design — 8 seeds, scored paired
+
+Once seeding worked, the question became how many seeds and scored how. Both were
+settled off the engine before any paid call, because a deterministic engine plays
+every reference policy on any seed in milliseconds (`game/tools/paired_baseline.mjs`,
+§D3 applied to a measurement instrument rather than a design change).
+
+**Characterisation over 200 seeds, 7 reference policies:**
+
+| | |
+|---|---|
+| mean best-vs-worst policy spread within one seed | **7.6** force-strength points |
+| sd of a fixed policy's raw final margin | **3.53** |
+| sd of the same margin **minus that seed's own mean** | **2.16** |
+| seeds no policy can win | **31 / 200 (15.5%)** |
+| seeds that fail to discriminate between policies | 17 / 200 |
+
+**So the win rate is not the headline, at any budget we would spend.** Its 95% CI
+is ±34 points at 8 battles and ±30 at 10; reaching ±12 needs ~60 battles. It is
+also largely reporting which seeds were drawn — with 8 seeds you expect ~1.2 of
+them to be unwinnable no matter how well the pilot plays.
+
+**The headline is the paired margin:** the pilot's final force-strength margin
+minus that seed's mean margin across the reference policies. Removing seed
+difficulty is worth **2.7×** the battles ((3.53/2.16)²), giving ±1.49 at n=8
+against a 7.6-point spread — enough to answer "does the pilot play at least as
+well as the average sensible line", which is the question the tier is for. The
+win rate is still printed, with a **Wilson** interval so it can express doubt at
+0/N and N/N where the normal approximation collapses to ±0.0.
+
+**The seed set is 8, fixed by rule (`dice-s01…s08`), not screened on outcome.**
+Screening would bias the set toward "the game is winnable"; the characterisation
+says a rule-based set already discriminates. The chosen set comes out neutral —
+mean baseline margin **+0.05**, mean spread **8.25**, exactly **1** unwinnable
+seed (s08), matching the 15.5% base rate. Eight also fits ~90 actions, just under
+§B P12's ~100-action local ceiling, so the whole rotation runs free in stage 1.
+**Changing the list re-baselines the tier (P8) — extend the tail, never renumber.**
+
+The staging is therefore four steps, not two:
+
+| Stage | Provider | Shape | Question |
+|---|---|---|---|
+| 1a | ollama | 1 seed, ~14 actions | does the loop work on one battle? |
+| 1b | ollama | 8 seeds, ~96 actions | does the rotation actually rotate? |
+| 2a | anthropic | 1 seed, ~14 actions | is the data good before committing spend? |
+| 2b | anthropic | 8 seeds × 2 runs = 16 battles | the measurement (paired CI ±1.06) |
 
 ## Findings
 
@@ -123,6 +228,97 @@ produces no error and no effect.
 `examples/escape-room/integration/README.md` — `handle_verify` only exits
 non-zero on an exception. Gate on the `failed` count in
 `results/coverage-report.json`, not on `$?`.
+
+**6. The pilot was reading strictly less than a human — the whole battle log was
+on the floor.** Found by the §B P2 pre-flight, before any model was contacted.
+`App.jsx:151` renders `state.log` through `flavorLines()` into the "Field
+dispatches" panel, so a human reads every round how many attack hits each side
+landed, how many were blocked, which bonus dice fired and what posture the enemy
+took. D15's seven-field projection drops `log` and `last_round`, and
+`PlaywrightAdapter.get_terminal_text` (playwright.py:160-167) found neither a
+`__GET_TERMINAL_TEXT__` hook nor a `.xterm-rows`/`#terminal` element, so it
+returned `""`. The pilot could watch force strength move and never learn *why* —
+and the exchange line is the only place the game says how the last allocation
+actually performed.
+
+Fixed game-side as **D19**: `__GET_TERMINAL_TEXT__` serializes the same
+`flavorLines()` output on the same `state.log`, read through the same seam as
+`__GET_STATE__`, emitting nothing the panel withholds (a test pins the absence
+of preset indices, raw rolls and the seed — §B P5). Order is oldest-round-first,
+opposite the UI's scroll, because the consumer keeps `text[-chars:]` and
+newest-first would truncate away exactly the recent rounds. Contract hooks
+untouched; game suite 157 → 162.
+
+Non-vacuity, proven rather than assumed (O2): deleting the hook from a live page
+mid-session drops the channel straight back to `''`. `playtest_dice.py::
+assert_terminal_channel_is_live` now asserts two resolved rounds and an exchange
+line are both in view before any run starts.
+
+*Generalises:* a browser game's richest player-facing information is often in
+rendered prose that no state projection carries. The `__GET_TERMINAL_TEXT__`
+hook is the intended channel for it and is trivially easy to simply never
+implement — at which point the tier reports `PLAYTEST MET` on a starved pilot.
+
+**7. EVERY EPISODE REPLAYED THE SAME SEED — found 2026-07-26, FIXED the same
+day.** `PlaywrightAdapter.reset()` calls `window.__RESET_GAME__()`
+with **no arguments** (playwright.py:50); `__RESET_GAME__` aliases `__RESET__`
+(D18); `useBattle.js:73` is `reset = (seed = stateRef.current.seed)` — i.e. the
+default replays the current seed. Measured, not inferred: in the 30-action run,
+**10 of the first 12 (action, state-delta) pairs of battle 2 are identical to
+battle 1's**.
+
+So a playtest "batch" of N episodes is one battle sampled N times. A balance
+figure computed over it would carry an N-sized denominator and a 1-sized
+sample — the §B P9 / O8 failure shape, and invisible in the output. This is
+**not dice-specific**: any game following the documented soft-reset contract
+gets a parameterless reset, so the playtest tier has no seed variety anywhere.
+
+**Fixed in UGT core, because the blind spot is generic.** `playtest.episode_seeds`
+rotates a declared seed list one seed per *episode*; `BaseAdapter.reset_seeded()`
+is the new optional capability, and it **raises** for adapters that cannot seed
+rather than ignoring the argument. `PlaywrightAdapter.reset_seeded()` forwards to
+`window.__RESET_GAME__(seed)` — which dice already honoured, so the game needed
+**zero changes**; the adapter had simply never passed an argument. The report now
+carries a per-episode record (`{seed, first_step, last_step, actions, end_reason,
+outcome, final_state}`) plus `distinct_episode_seeds` in the summary, so "N
+episodes, 1 seed" is visible in the output instead of having to be discovered.
+
+**The raise is necessary and not sufficient, which is the part worth carrying to
+other games.** JavaScript discards extra arguments in silence, so forwarding a
+seed to a game that never implemented seeding returns a normal state and throws
+nothing anywhere — the original bug would have survived the fix while showing a
+green light. So `assert_seed_rotation_works` runs before every playtest: two
+seeds must produce different battles AND one seed must reproduce itself exactly
+(a hook returning random state would pass the first test and be equally broken).
+That probe was itself proven able to fail (O2) by patching a live page so
+`__RESET_GAME__` drops its argument — it catches it, naming both seeds.
+
+**8. UGT core told the pilot a rule that was not true, and the pilot obeyed it.**
+`_noop_warning_block` printed *"Picking it again will be REJECTED and forced to
+'wait' instead — this is a hard rule, not a suggestion"* whenever an action
+repeated twice back-to-back. That text was written when the hard ceiling was
+always its default of 3. This integration sets `repeat_block_threshold: 13`,
+because repeating an allocation is legitimate — often correct — play here, and
+`wait` does not resolve a round, so an override would burn budget *and* corrupt
+the measurement.
+
+The result: at step 15 of 30 the pilot wrote *"I cannot use a3_d3 because I have
+used it 3 times in a row, which would be rejected"* and switched away from the
+allocation its own strategy guide calls correct. `forced_repeat_blocks` for that
+run was **0** — nothing was ever blocked. The prompt was not reporting a
+constraint, it was inventing one, and it steered the exact behaviour under test.
+
+Fixed in `ugt/core/playtester.py`: the threshold is threaded into the warning
+from `playtest.repeat_block_threshold`, and the hard-rule sentence is emitted
+only when the next repeat would genuinely be rejected. Otherwise the warning
+reports the streak and says the repeat is allowed. Games on the default
+threshold are unaffected (verified: dice is the only config in the repo that
+sets the knob, and at the default the same branch still fires).
+
+This is `LESSONS.md` P10's own correction resurfacing in a second code path —
+"the ledger was written to nudge the agent away from repeating itself; that is
+actively harmful" — this time in the warning block rather than the ledger.
+**Report; do not instruct.**
 
 ## Notes
 

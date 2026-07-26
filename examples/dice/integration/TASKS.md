@@ -84,15 +84,18 @@ diff is empty (byte-identical).
 
 **Superseded (2026-07-26):** `exploit_hunt.py` has been replaced by the full trial ladder — `spike_dice.py`, `smoke_dice_adapter.py`, `verify_round1.py`, `verify_round2.py`, `verify_round3.py`. Everything it did is still covered and then some: its random walks and determinism check are now R3, its defense-vs-attack A/B and its knockout drive are now R2 (where they belong, since both are content-spine claims). Invariants moved into a shared `invariants.py` built on `InvariantSuite`, so R1/R2 and R3 assert the identical predicates instead of two hand-maintained copies.
 
-### T-008 · LESSONS §B pre-flight, driven on a LOCAL model — `status: TODO` · `coder: opus` · `after: T-007`
+### T-008 · LESSONS §B pre-flight, driven on a LOCAL model — `status: DONE` · `coder: opus` · `after: T-007`
 **This is the prep, and it must happen BEFORE T-006 spends a single credit.** It
 runs entirely on local Ollama, so it costs nothing and is not blocked by
 anything.
 
 **This is not a paper audit — it is a real playtest loop against a free model**
 (`LESSONS.md` §B P12). Drive a few basic allocations first, then a **30-action
-smoke test**, and iterate: run → read the logged `reasoning` → fix the guide or
-the prompt → run again, until the pilot cleanly processes the basic battle loop.
+channel check**, and iterate: run → read the logged `reasoning` → fix the guide
+or the prompt → run again, until the pilot cleanly processes the basic battle
+loop. *Not to be called a "smoke test" — rung 2 of this integration's own ladder
+is `smoke_dice_adapter.py` and proves something entirely different (§B P12's
+disambiguation table).*
 
 ```bash
 # ollama running at localhost:11434, no API key
@@ -147,18 +150,76 @@ the channel is proven. If it does not, that is ambiguous — starvation and a we
 model look identical from outside — so re-check on T-006 rather than closing a
 P1/P2/P6 finding here.*
 
-### T-006 · `ugt playtest` run on Haiku — `status: BLOCKED(awaiting user approval to spend API credits)` · `coder: sonnet` · `after: T-008`
-Once T-008's local loop is clean, run the paid tier — Haiku, the working default
-for speed and cost — with `--max-actions 30` to confirm the LLM can play a full
-battle. This is the run that is allowed to produce a number.
-**Accept:** `ugt playtest` exits 0 and produces `results/playtest-report.json`
-with at least one completed battle (`battle_over: true` reached, or
-max-actions budget honestly reported as insufficient).
+**Delivered (2026-07-26).** `playtest_dice.py` (owns server lifecycle + bundle
+freshness like every other rung, passes the shared invariant suite into the LLM
+loop, refuses `--max-actions > 100` on a local model), a `playtest:` block in
+`ugt.config.yaml` where every knob cites the §B check that set it, and **two**
+30-action `gemma4:26b` runs. Both: two complete battles to a real winner,
+0 invariant violations, 0 forced repeat-blocks, `ended_early: null`. Full
+disposition table for P1–P12 in `README.md` § "Tier 3 pre-flight".
 
-**Guide status (rewritten 2026-07-26):** `strategy-guide.md` covers the 7
-allocations, all three bonus-dice rules and how they stack, the observable
-state, the two-for-one defense block, and the fact that the cap decides on
-points so surviving one point ahead is a full win.
+Four gaps found, three fixed:
+
+- **P3 — the guide was over budget by 2.8x.** 5,649 chars against a default
+  2,000, so everything from "What you can see" onward — the entire skill half —
+  would have been cut silently. Budget raised and now asserted fail-closed
+  before any model is contacted. Terminal budget sized by measurement too
+  (a full dispatch log is ~3,900 chars; the default 400 shows ~one round).
+- **P2 — the pilot could not see the battle log at all** (README finding 6).
+  Fixed game-side as D19; suite 157 → 162.
+- **P6 — the guide mis-described `bonus_dice`** (it reports the round that just
+  resolved, not the one you are choosing for) and said nothing about the
+  opponent. Both fixed.
+- **P11 — UGT core asserted a constraint that did not exist**, and the pilot
+  obeyed it (README finding 8). Fixed in `ugt/core/playtester.py`; re-run shows
+  false-prohibition beliefs 2 → 0.
+
+- **P9 — every episode replayed the same seed** (README finding 7 — measured, 10
+  of 12 identical action/delta pairs across two "different" battles). Fixed in
+  UGT core: `playtest.episode_seeds`, `BaseAdapter.reset_seeded()` (which raises
+  rather than ignoring a seed it cannot honour), per-episode outcome records, and
+  a rotation probe that was proven able to fail. Dice needed **no game change** —
+  `__RESET_GAME__(seed)` already worked; the adapter had never passed an argument.
+
+**Sampling design settled at the same time (README § "Sampling design"):** 8
+seeds fixed by rule, scored **paired** against each seed's own reference-policy
+baseline rather than by win rate — the win rate's 95% CI is ±34 points at 8
+battles and ~15% of seeds are unwinnable by any policy, whereas pairing removes
+the seed's difficulty and is worth 2.7× the battles (±1.49 at n=8). All of it
+measured off the engine for free before a single paid call.
+
+*P7 read (§B P12: positive signal only): the reasoning names defense 23/30,
+lead 23/30, round 12 8/30, morale 7/30, points 6/30, margin 5/30, reinforcements
+3/30 — and inferred the opponent unprompted at step 26. The channel is proven.
+`two-for-one` scored 0/30 against `block` 9/30; local silence is ambiguous, so
+that re-checks on Haiku rather than closing here.*
+
+### T-006 · `ugt playtest` run on Haiku — `status: BLOCKED(awaiting user approval to spend API credits)` · `coder: sonnet` · `after: T-008`
+
+Run as **two** stages, not one (README § "Sampling design"):
+
+```bash
+# 2a — one seed, ~14 actions. Verify Haiku's data quality BEFORE committing spend.
+python3 playtest_dice.py --provider anthropic --model claude-haiku-4-5-20251001 \
+  --seeds 1 --max-actions 14
+# 2b — the measurement: 8 seeds x 2 runs = 16 battles, paired CI +/-1.06
+python3 playtest_dice.py --provider anthropic --model claude-haiku-4-5-20251001 \
+  --max-actions 96 --runs 2
+```
+This is the tier that is allowed to produce a number, and 2b is the only run
+whose output may be quoted.
+**Accept:** 2a exits 0 with one completed battle and reasoning worth reading;
+2b exits 0 with **≥12 completed battles across all 8 seeds** and a paired mean
+reported with its CI. A run whose `distinct_episode_seeds` is less than the
+configured seed count has NOT met this — that is finding 7 returning.
+
+**Guide status (rewritten 2026-07-26, then corrected by T-008's P6 pass):**
+`strategy-guide.md` covers the 7 allocations, all three bonus-dice rules and how
+they stack, the observable state, the two-for-one defense block, and the fact
+that the cap decides on points so surviving one point ahead is a full win.
+T-008 added how to read the field dispatches (D19's new channel) and a
+description of the opponent, and fixed the `bonus_dice` description, which said
+"granted this round" when the field reports the round that just *resolved*.
 
 > ⚠️ The previous note here claimed the guide warned that "the round-12 cap
 > makes a draw the DEFAULT outcome". That was true when written and D18 made it
@@ -166,15 +227,9 @@ points so surviving one point ahead is a full win.
 > change by four commits. **This is exactly the P6 drift T-008 exists to catch,
 > and it is recorded rather than quietly edited away.**
 
-The run itself is NOT done: this stage bills a real Anthropic API call per
-action. After T-008 passes, trigger with:
-
-```bash
-ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md \
-  --provider anthropic --model claude-haiku-4-5-20251001 --max-actions 30
-```
-
-then flip to DONE. Expect to iterate afterwards — on the harness or on the game
+The runs themselves are NOT done: this stage bills a real Anthropic API call per
+action (2a ≈ 14 calls, 2b ≈ 192). Trigger them with the commands at the top of
+this task, then flip to DONE. Expect to iterate afterwards — on the harness or on the game
 — and to re-run. That loop is faster than human testing, and the target is that
 the **first human UAT is already relatively bug-free**, so a person's time goes
 on feel and readability rather than on defects a free local run would catch.

@@ -6,8 +6,11 @@
 #
 # Tier 0: ugt smoke-test --config ugt.config.yaml
 # Tier 1: ugt verify --config ugt.config.yaml --feature-map feature-map.yaml
-# Tier 2: python3 exploit_hunt.py                  # spawns/reaps serve.py itself
-# Tier 3: ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md
+# Tier 2: python3 verify_round3.py                 # spawns/reaps serve.py itself
+# Tier 3: python3 playtest_dice.py --provider ollama --max-actions 30
+#         (the runner spawns its own server + checks bundle freshness; the bare
+#          `ugt playtest` CLI works too but needs a server started by hand and
+#          cannot pass the invariant suite)
 
 project:
   name: "DiceDuel"
@@ -52,3 +55,117 @@ action_space:
 
 evaluation:
   victory_key: "winner"
+
+# ── Tier 3: LLM playtest ────────────────────────────────────────────────────
+# Every knob below is set from a specific LESSONS.md §B pre-flight check, with
+# the measurement that fixed the number. Defaults are NOT safe here: three of
+# them would have silently starved or corrupted the run (P3, P10/P11).
+playtest:
+  # P10 — state says where you are, not what winning means. One line, rendered
+  # ABOVE the state dump (the guide says it too, but from the bottom of the
+  # prompt, behind everything else).
+  objective: >-
+    Win the battle: reduce the enemy's force_strength to 0, OR finish round 12
+    with more force_strength than the enemy. Both are full wins — surviving the
+    cap one point ahead counts exactly the same as a knockout.
+
+  # P3 — TRUNCATION IS SILENT STARVATION. Measured, not guessed:
+  #   strategy-guide.md is 5,649 chars; the default budget is 2,000, which would
+  #   have cut everything from "What you can see" onward — i.e. every rule that
+  #   creates the skill (P6) — and printed nothing to say so.
+  #   Re-measure (`wc -c strategy-guide.md`) whenever the guide is edited; this
+  #   number must stay above it, and the P3 assertion in playtest_dice.py
+  #   fails the run if it ever slips below.
+  guide_char_budget: 8000
+  # A full 12-round dispatch log renders at ~3,900 chars (~323/round, measured
+  # on seed 'dice-duel' via renderRoundLog). The default 400 would show the
+  # pilot roughly the last ONE round. 4,400 keeps a whole battle in view, which
+  # is what a human scrolling the Field dispatches panel has.
+  terminal_char_budget: 4400
+  # state_char_budget is left at its 4,000 default: the contract state is 7
+  # fields (~200 chars serialized), three orders of magnitude clear.
+
+  # P10 — a battle is 12 rounds, so a 5-step window (the default) hides the
+  # first half of every match, including the round-3 reinforcement swing.
+  history_window: 12
+
+  # P11 corollary, INVERTED FOR THIS GAME. The hard repeat block exists because
+  # a weak model can loop forever; but in Dice Duel repeating an allocation is
+  # legitimate, often correct play — the guide itself says a3_d3 is usually
+  # right when level. At the default 3 the guard would override the pilot's
+  # third consecutive a3_d3 with `wait`, and `wait` does not resolve a round, so
+  # it would burn budget AND corrupt what we are measuring. 13 permits an
+  # entire 12-round battle on one allocation (a real, testable strategy) while
+  # still bounding a genuinely unbounded loop.
+  repeat_block_threshold: 13
+
+  # The contradiction detector fires on 3 consecutive actions with no MATERIAL
+  # delta. round_number ticks on every resolved round, so without this the
+  # detector is permanently inert for this game — it could never see anything.
+  # With it, three rounds where the clock is the only thing that moved is
+  # exactly the degenerate mutual-turtle state D18 was fixed to remove, and the
+  # detector can now say so.
+  ignore_delta_fields:
+    - round_number
+
+  # ── The seed set (LESSONS.md §B P9) ───────────────────────────────────────
+  # Without this the adapter's parameterless soft reset replays the same seed
+  # forever, and a "batch" of N battles is one battle sampled N times. Measured
+  # here before it was fixed: 10 of the first 12 (action, delta) pairs of
+  # battle 2 were identical to battle 1's.
+  #
+  # EIGHT seeds, fixed by rule and chosen before any run. Three reasons for 8:
+  #
+  #   * 8 battles x ~11 rounds is ~90 actions, just under §B P12's ~100-action
+  #     ceiling for a local model, so the whole set fits in one free stage-1 run.
+  #   * On the PAIRED score (see paired_baseline.mjs) 8 battles give a 95% CI of
+  #     +/-1.49 force-strength points, against a mean best-vs-worst policy spread
+  #     of 7.6 — enough to resolve whether the pilot plays as well as the average
+  #     sensible line. Unpaired it would be +/-2.45, and as a WIN RATE +/-34
+  #     points, which cannot tell a 40% pilot from a 75% one.
+  #   * More seeds do not fix the win-rate CI at any budget we would spend; a
+  #     +/-12-point win rate needs ~60 battles. That is why the headline metric
+  #     is the paired margin and the win rate is reported as underpowered.
+  #
+  # NOT screened on outcome. 200-seed characterisation: only 17/200 seeds fail
+  # to discriminate between policies, so a rule-based set is already informative,
+  # and screening would bias the set toward "the game is winnable". 31/200 seeds
+  # cannot be won by ANY fixed policy — those stay in, because under paired
+  # scoring the baseline is negative there too and the seed still measures
+  # judgement.
+  #
+  # CHANGING THIS LIST RE-BASELINES THE TIER (§B P8). Runs on different seed sets
+  # are not poolable. Add seeds by extending the tail, never by renumbering.
+  episode_seeds:
+    - dice-s01
+    - dice-s02
+    - dice-s03
+    - dice-s04
+    - dice-s05
+    - dice-s06
+    - dice-s07
+    - dice-s08
+
+  # Banked across mid-run episode resets, so a multi-battle run reports total
+  # damage dealt/taken rather than only the last battle's.
+  summary_paths:
+    - { path: "enemy.force_strength", label: "enemy_fs_delta" }
+    - { path: "player.force_strength", label: "player_fs_delta" }
+
+  # DELIBERATELY UNSET, each for a cited reason — absence here is a decision:
+  #   redact_state_fields (P5): nothing to hide. All 7 projected fields are on
+  #     screen for a human — both ForceBars render force_strength and the
+  #     "+N bonus dice last round" line, the masthead renders round_number, and
+  #     the outcome banner renders battle_over/winner (App.jsx:36-49,123-131).
+  #   win_path / loss_path: `winner` is the enum null|player|enemy|draw, and
+  #     the summary applies bool() to it — bool("enemy") is True, so wiring it
+  #     would report a LOSS as won_game. Outcomes are read off the action log's
+  #     terminal delta instead (winner: null -> "player"), which the loop
+  #     records before it resets the episode.
+  #   revealed_content (P7): the game reveals no progressive content — all 7
+  #     allocations are legal from round 1 — so the tracker correctly reports
+  #     `not_configured` rather than a fabricated 100%.
+  #   display_only_verbs: none. Every action resolves a round.
+  #   diagnose_resets_episode: left True. A battle is ~12 actions and restarts
+  #     instantly, so losing one to pilot confusion costs almost nothing —
+  #     unlike the long persistent campaigns that knob was added for.
