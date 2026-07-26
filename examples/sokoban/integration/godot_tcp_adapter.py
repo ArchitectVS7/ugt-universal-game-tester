@@ -43,6 +43,7 @@ class GodotTcpAdapter(BaseAdapter):
         self.port: int | None = None
         self.sock: socket.socket | None = None
         self._buf = b""
+        self._screen: list = []
 
     # ── lifecycle ────────────────────────────────────────────────────────────
 
@@ -106,6 +107,7 @@ class GodotTcpAdapter(BaseAdapter):
         reply = self._request({"command": "reset"})
         if "state" not in reply:
             raise RuntimeError(f"reset: bridge replied without a state: {reply!r}")
+        self._remember_screen(reply["state"])
         return reply["state"]
 
     def step(self, action_id):
@@ -114,12 +116,41 @@ class GodotTcpAdapter(BaseAdapter):
         reply = self._request({"command": "step", "action_id": int(action_id)})
         if "state" not in reply:
             raise RuntimeError(f"step({action_id}): bridge replied without a state: {reply!r}")
+        self._remember_screen(reply["state"])
         return (
             reply["state"],
             bool(reply.get("terminated", False)),
             bool(reply.get("truncated", False)),
             reply.get("info", {}) or {},
         )
+
+    # ── the screen, for UI-driving tiers (playtest) ───────────────────────────
+
+    def _remember_screen(self, state) -> None:
+        """Keep the last `grid` the GAME sent, verbatim.
+
+        Storing a reply is not modelling the game: nothing here is derived,
+        merged or recomputed, and if the bridge stops sending `grid` this goes
+        back to empty rather than reconstructing a board from the scalars.
+        """
+        rows = state.get("grid") if isinstance(state, dict) else None
+        self._screen = list(rows) if isinstance(rows, list) else []
+
+    def get_terminal_text(self, chars: int = 600) -> str:
+        """The board as a player sees it — the game's own row render, joined.
+
+        `board.gd::render_rows()` draws these rows and `main.gd` paints exactly
+        them for the human; the only thing that happens here is `"\\n".join`, so
+        the machine player reads the same screen rather than a projection of it.
+
+        The game emits no prose anywhere — `main.tscn` is ColorRects with no
+        Label, no font and no message line — so this board IS the entire
+        player-facing text channel. An empty return means the wire stopped
+        sending `grid`, which is a defect, not a quiet genre difference; the
+        playtest driver asserts the channel is live and non-vacuous before a run.
+        """
+        text = "\n".join(self._screen)
+        return text[-chars:] if chars and chars > 0 else text
 
     # ── crash-recovery hook used by InvariantFuzzer ────────────────────────────
 

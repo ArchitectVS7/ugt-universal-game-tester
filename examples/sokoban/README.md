@@ -89,6 +89,56 @@ It took a machine player to notice, because a machine player *has* to have an an
 
 Both sides got it: the wire has action 4, the keyboard has R, and both go through one shared dispatch on the board so they can't drift into meaning different things. **The general shape: designing for the machine player audits the human one.** The tester didn't find this by running, it found it by being specified.
 
+### The game keeps one number and shows it to nobody
+
+Then I went to let a model play it, and the first question of the checklist — *what
+does a human actually see?* — turned up something I'd never noticed in hours of
+playing my own game.
+
+The PRD says "no scoring beyond move count". That's the whole scoring system: how
+many moves you took. And the game **never displays it.** There's no move counter on
+screen, no level number, no "solved!" — the scene is coloured rectangles with no
+text in it anywhere. So the one number the game keeps, the player never sees.
+
+It's not a bug in the sense the R key was, because nobody ever wrote down that
+there should be a HUD. It's more interesting than a bug: it's a thing that only
+becomes visible when you have to write out, explicitly, what information the player
+has. I'd been reading the move count off the debug output for days and had stopped
+noticing it wasn't on the screen.
+
+Left as a decision rather than fixed — that's a call about the game, not the
+tester. What I did fix is the tester's half: the model doesn't get told the move
+count either, because a player doesn't. That also happens to be the number I'm
+scoring it against, and letting a pilot watch its own metric measures something
+other than the game.
+
+### The model can read the rules and can't find the crate
+
+The local run is the free one — it's not measuring the game, it's proving the
+plumbing carries what a player sees. The plumbing is fine. The board arrives, in
+the panel a player looks at, correctly aligned.
+
+The model, though, is out of its depth, and the *shape* of how it fails is the
+useful bit. Over thirty moves it talked about crates sixty-seven times, about
+pushing thirty times, about targets thirty-three times — it clearly read the
+briefing and understood the game. It moved a crate **zero times**, on a level you
+can finish in six moves. And when it stated where things were: its own position,
+right every single time; the crate's position, **wrong twenty-one times out of
+thirty**.
+
+That split is not random, and it's the finding. Its own position is *handed to it as
+two numbers*. Everything else it has to find by counting characters in a row of
+ASCII. So it's been given a coordinate system for exactly one object in the world
+and asked to place the rest into it by eye, which is precisely the thing a
+text-only reader is worst at and a human with a screen never has to do at all.
+
+There are two honest fixes and they go opposite ways: take the numbers away so
+everything comes off the board, or put row and column markers on the board so a
+reader can count the way a person points. I filed both instead of picking, because
+the evidence that would decide it — does the error rate actually drop — needs a
+model that can localise at all, and that's the paid run. Choosing now would bake my
+guess into the instrument and then measure it.
+
 ### Small ones, each of which cost a red run
 
 - **A move counter I was wrong about twice.** I had written down that `moves_taken` starts over when you advance a level, so the "it only ever goes up" invariant got scoped to a single level. It doesn't start over — the counter runs for the whole session, and the game's own test suite says so explicitly. The invariant was *narrower* than the truth, which is the sneaky kind of wrong: it never fired, so it never argued with the note, and both sat there agreeing with each other through a green ladder. The real boundary is that a reload rewinds it to exactly zero and nothing else may take it backwards, which is what it now asserts. **Two artifacts written from one wrong belief will corroborate each other forever.**
@@ -102,19 +152,81 @@ The pattern from the other two examples holds here: pointing the tester at a gam
 
 **Two of UGT's own shared pieces were only ever exercised by a throwaway demo.** The gate runner and the divergence finder — the fail-closed footer, the findings channel, the same-seed replay comparison — were used by exactly one example game that existed to demonstrate them, and by nothing that was actually testing anything. Sokoban hand-rolled around them, which is the honest signal that they weren't pulling their weight. Now all five rungs go through one fail-closed path, and the duplication is gone.
 
+**Letting a model play it found two more tester bugs, both of which quietly stole the model's moves.**
+
+The first is my favourite kind: a limit set for one game silently taxing another.
+The local model's replies were capped at 256 tokens. The JSON the tester asks for
+puts the *action* first and the explanation after it — so a reply that runs long
+gets cut mid-sentence, the JSON won't parse, and the tester throws the whole thing
+away and substitutes a do-nothing move. The model had already decided. The cap
+deleted the decision.
+
+Why it showed up here and not on the other two games: reasoning about a grid is
+wordy. "The player is at (4, 2) and the crate is at (3, 2), so moving left will…"
+is simply longer than "attack-weighted, the enemy is at half strength". A dice game
+never reached the ceiling. A puzzle game reaches it in the first thirty moves. And
+nothing in the summary counts it, so it costs you budget invisibly. Fixed both
+ways — a bigger ceiling, and the tester now recovers the action from the truncated
+prefix rather than binning it. It refuses to recover an action name the game
+doesn't declare, so it can't invent a move, and I checked that by feeding it a
+made-up one.
+
+The second is subtler and I like it more on reflection. This game hides two state
+fields from the model on purpose — the move count, and the raw board (it gets the
+board as a picture instead). The tester has a detector that flags "the state
+changed in a way the model didn't predict", which is a good signal for spotting
+hidden mechanics. It was comparing against **every** field, including the two the
+model is never shown. So every successful move got logged as the model failing to
+predict something it had been deliberately denied.
+
+Here it happened to be harmless, because there's a noise filter that ignores fields
+changing on nearly every step and both of these did. That's luck, not correctness —
+a hidden field that changed on *half* the steps would sit under that filter and get
+counted against the model forever. Fixed, and I'd flag the general rule: **if you
+deliberately hide something from an agent, nothing downstream may score it on
+knowing that thing.**
+
+Worth separating those two, because they're different animals. The first changed
+what the model *receives*, so runs before and after it can't be compared. The second
+changed only what gets *written down*, so they can. I've seen that distinction
+skipped and it invalidates a batch either way — once by pooling across a real change,
+once by throwing away a perfectly good comparison out of caution.
+
 **And sokoban is the clean case for the seeding question** that the escape room turned up. This game has no randomness at all: three fixed levels, no generation, no hidden state. Every episode is the same three puzzles in the same order. So however many you run, the honest sample size is one. UGT used to infer that from whether a seed list *happened to be in the config*, which meant "deliberately deterministic" and "I forgot to configure seeds" looked identical. The game declares `deterministic` out loud now, and UGT proves the declaration against the running game before spending anything — including checking that the probe it uses actually moves the state, because "two resets matched" proves nothing if nothing happened. The probe here is `left`, the first move of level 1's committed solution, so it can't bounce off a wall.
 
 ## Where it's up to
 
-**As of 2026-07-26**, ladder green at **18 · 9 · 14 · 15 · 7**, game suite **89/89**. Re-run from scratch rather than copied out of the table — the rule in this repo is that a number in a README is evidence about one commit, and a results table doesn't fail when it goes stale, it just quietly stops being true. Which it did: this section used to read `14 · 9 · 12 · 13 · 7` and `84/84`, both true when written, both wrong the moment the wire gained a field and the ladder grew checks to cover it. Two rungs got bigger, and per our own rule that's the point — a gate that returns its old count after the contract changed never tested the change.
+**As of 2026-07-26**, ladder green at **18 · 11 · 14 · 15 · 7**, game suite **89/89**. Re-run from scratch rather than copied out of the table — the rule in this repo is that a number in a README is evidence about one commit, and a results table doesn't fail when it goes stale, it just quietly stops being true. Which it did: this section used to read `14 · 9 · 12 · 13 · 7` and `84/84`, both true when written, both wrong the moment the wire gained a field and the ladder grew checks to cover it. Two rungs got bigger, and per our own rule that's the point — a gate that returns its old count after the contract changed never tested the change.
 
 Fail-closed is demonstrated on *these* scripts, not assumed from an older run: inverting R1's box-reached-a-target predicate gives `ROUND 1 NOT MET — 13/14 checks passed` and exit 1, and I compared the checksum afterwards to be sure the file went back exactly as it was. Every rung also feeds its invariant suite a deliberately corrupted transition and requires it to complain, because a suite that's never been seen to fail is decoration.
 
-**The LLM tier still hasn't been run here, and it's the next thing.** Dice and the escape room have both had a model driving them; this one hasn't, and that's the gap I actually care about closing, because it's the only one of the three inside a game engine. A browser page and a subprocess have both been proven to carry a model's decisions. A Godot frame loop over a socket has not, and *"can a language model play a game running in a real engine"* is a different question from *"can a harness step it."*
+**The LLM tier is built and the local stage has run.** That was the gap I cared
+about, because this is the only one of the three examples inside a game engine. A
+browser page and a subprocess had both been shown to carry a model's decisions; a
+Godot frame loop over a socket hadn't, and *"can a language model play a game
+running in a real engine"* is a different question from *"can a harness step it."*
 
-Preparing for it has already paid for itself twice over without a single model call — the `grid` field and the missing R key both came out of asking "what would a player see, and what could a player do?" — but the run itself is genuinely not done. What's missing is a briefing, a driver script (this is a `custom` engine, so the CLI can't dispatch it), the context budgets, and the pre-flight checklist. That list is written out in [`integration/README.md`](integration/README.md) so it's a task rather than a vibe.
+**The answer is yes, and it is specifically the transport that's been proven.** The
+model reads a real board, aligned, in the panel a player looks at; it chooses legal
+moves; it never broke one of the nine invariants across a hundred and sixty actions
+of trying. That's the whole job of the free local stage and it's done.
 
-Four directions, three levels and an R is about the smallest surface that question can be asked on — no economy, no combat, no hidden state, nothing to read but a grid and a box count. If it can't work here it won't work anywhere, and if it does work it's the transport that's been proven rather than the puzzle.
+What the local stage did *not* do is tell me anything about whether the puzzles are
+good, because the model never pushed a crate. That's the expected shape of a
+stage-one result rather than a disappointment — the free stage proves the wiring and
+is forbidden from producing a number, and this is a clean illustration of why: any
+figure from it would be a fact about a small local model's ASCII indexing, not about
+sokoban.
+
+Four directions, three levels and an R is about the smallest surface that question
+can be asked on — no economy, no combat, no hidden state, nothing to read but a grid.
+Which is exactly why it's a fair test of the transport: there was nothing else for a
+failure to hide behind.
+
+**Stage two, on a paid model, is the open item, and it's now a spending decision
+rather than a blocked one.** Everything before it is done: the briefing, the driver,
+the fourteen-point checklist worked through and written down, four things it caught
+fixed. Two of those four were bugs in the tester rather than the game.
 
 What it'll measure when it runs is **competence, not balance**: solved or not, and moves against the committed 73. There's no win rate to quote — the game has no randomness at all, so every episode is the same three puzzles in the same order and the honest sample size is one however many you run. The config already says `seeding: deterministic` out loud for exactly that reason.
 

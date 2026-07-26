@@ -370,6 +370,23 @@ This is `LESSONS.md` P10's own correction resurfacing in a second code path —
 actively harmful" — this time in the warning block rather than the ledger.
 **Report; do not instruct.**
 
+**9. This script's own documented stage-1a command had stopped working. FIXED
+2026-07-26.** `playtest_dice.py --seeds 1` narrowed `playtest.episode_seeds` to a
+single entry, and `seeding.resolve` refuses `per_episode` with one seed — correctly,
+because a one-entry rotation replays one match while the declaration claims variety.
+So the command in this file's own docstring exited 1 before contacting a model.
+
+The recorded 1a result predates the seeding declaration landing (`694eb9d`), and
+nobody re-ran the command afterwards — **a documented command is a claim, and it
+goes stale exactly like a results table.** Found by re-running it as a regression
+check after an unrelated `ugt/core/playtester.py` change, which is the only reason
+it surfaced at all.
+
+No config surgery was needed in the end: the rotation starts at `seeds[0]`, so a
+budget that only affords one episode already plays exactly `dice-s01` with all
+eight seeds declared and honest. The script now says that in its output instead of
+rewriting the declaration underneath itself.
+
 ## Notes
 
 `feature-map.yaml` is one continuous battle split into five assertions, because

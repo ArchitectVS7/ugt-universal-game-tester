@@ -15,6 +15,7 @@ Usage:
 
 import json
 import os
+import re
 import sys
 import time
 import urllib.request
@@ -725,7 +726,8 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         # Mechanical expected-vs-delta escalation: the LLM rarely volunteers mismatches,
         # so surface state changes its stated expectation never mentioned. Heuristic
         # (leaf-name substring match) — an escalation signal for triage, not a verdict.
-        surprises = _unexpected_delta_fields(delta, f"{expected} {reasoning}")
+        surprises = _unexpected_delta_fields(delta, f"{expected} {reasoning}",
+                                             redact=_redaction_paths(playtest_cfg))
         if surprises:
             log_entry["unexpected_deltas"] = surprises
         if _consecutive_repeat >= 2:
@@ -1123,7 +1125,16 @@ class _OllamaLLM:
             "messages": [{"role": "user", "content": combined}],
             "stream": False,
             "think": False,   # Gemma 4 thinking models hide output in <think> blocks; disable it
-            "options": {"temperature": 0.2, "num_predict": 256},
+            # num_predict was 256 until 2026-07-26, when a Godot puzzle integration
+            # showed what that costs. The required JSON puts `reasoning` and
+            # `expected_outcome` AFTER the action, so a reply cut off mid-reasoning
+            # is unparseable and the step becomes a forced `wait` — the model had
+            # already decided, and the cap threw the decision away. Spatial games
+            # produce longer reasoning than card games ("the player is at (3,2), the
+            # crate is at (2,2), the target is at…"), so the cap bound there first
+            # and nothing in the run summary said so. A truncated reply is never
+            # useful, so a bigger ceiling can only ever preserve work.
+            "options": {"temperature": 0.2, "num_predict": 512},
         }).encode()
 
         req = urllib.request.Request(
@@ -1140,6 +1151,43 @@ class _OllamaLLM:
 
         raw = body.get("message", {}).get("content", "")
         return _parse_json_action(raw, self.valid_actions)
+
+
+def _salvage_truncated_action(text, valid_actions):
+    """Recover the decision from a reply the provider cut off mid-JSON.
+
+    The response contract puts the action FIRST and the prose after it:
+
+        {"action_type": "action_id", "value": "down", "reasoning": "the player is…
+
+    so a reply truncated by the provider's token ceiling has usually already said
+    what it wants to do — and the old behaviour threw that away and forced a
+    `wait`, spending a step of the pilot's budget on nothing. Found on a Godot
+    puzzle game, where spatial reasoning ("the player is at (4,2), the crate is
+    at…") runs longer than a card game's and hit the ceiling first.
+
+    Deliberately conservative — returns None unless the salvaged name is one the
+    config actually declares, so this can never invent an action or coerce a
+    hallucinated name onto a neighbouring id (§B P4). A salvage is also marked in
+    the reasoning, so a transcript never implies the model said more than it did.
+    """
+    if not valid_actions:
+        return None
+    m = re.search(r'"value"\s*:\s*"([^"]+)"', text)
+    if not m or m.group(1) not in valid_actions:
+        return None
+    tail = text[m.end():]
+    reasoning = ""
+    rm = re.search(r'"reasoning"\s*:\s*"([^"]*)', tail)
+    if rm:
+        reasoning = rm.group(1)
+    return {
+        "action_type": "action_id",
+        "value": m.group(1),
+        "reasoning": (reasoning + " [reply truncated by the provider's token limit; "
+                      "action recovered from the prefix]").strip(),
+        "expected_outcome": "",
+    }
 
 
 def _parse_json_action(raw_text, valid_actions=None):
@@ -1164,15 +1212,23 @@ def _parse_json_action(raw_text, valid_actions=None):
         # Try to extract the first {...} block
         start = text.find("{")
         end = text.rfind("}") + 1
+        data = None
         if start >= 0 and end > start:
             try:
                 data = json.loads(text[start:end])
             except json.JSONDecodeError:
-                print(f"  [warn] Unparseable JSON from LLM, skipping step: {text[:100]}")
-                return {"action_type": "wait", "value": "", "reasoning": "(parse error)", "expected_outcome": ""}
-        else:
-            print(f"  [warn] No JSON object in LLM response, skipping step: {text[:100]}")
-            return {"action_type": "wait", "value": "", "reasoning": "(no json)", "expected_outcome": ""}
+                pass
+        if data is None:
+            # Before burning the step: the reply may be a COMPLETE decision with an
+            # incomplete tail. See `_salvage_truncated_action`.
+            salvaged = _salvage_truncated_action(text, valid_actions)
+            if salvaged is not None:
+                print(f"  [salvaged] response was cut off mid-JSON; recovered "
+                      f"action_id={salvaged['value']!r} from the prefix.")
+                return salvaged
+            reason = "(parse error)" if start >= 0 and end > start else "(no json)"
+            print(f"  [warn] Unparseable/absent JSON from LLM, skipping step: {text[:100]}")
+            return {"action_type": "wait", "value": "", "reasoning": reason, "expected_outcome": ""}
 
     # Validate required fields; salvage recognizable intents, else default gracefully
     atype = data.get("action_type")
@@ -2135,17 +2191,30 @@ def _key_values_line(playtest_cfg, current_state):
     return "⚡ KEY VALUES: " + ", ".join(parts) + "\n\n"
 
 
-def _unexpected_delta_fields(delta, expectation_text):
+def _unexpected_delta_fields(delta, expectation_text, redact=None):
     """State-change keys whose leaf name the LLM's expectation/reasoning never mentioned.
 
     Heuristic escalation only: leaf-name substring match, underscores also matched as
     spaces (e.g. delta key 'ship.shield_strength' is 'mentioned' by 'shield strength').
+
+    **A REDACTED field can never be a surprise.** `playtest.redact_state_fields` is
+    the tier's fog of war: the pilot is deliberately not shown that field, so
+    recording it as something the pilot "failed to predict" charges it for
+    information it was denied — and it is exactly the fields that change often
+    which look worst. Found 2026-07-26 on a Godot puzzle integration that redacts
+    `grid` (a whole-board render) and `moves_taken`: every successful move logged
+    both as unexpected. There the summary's ubiquity floor happened to absorb it,
+    which is luck rather than correctness — a redacted field changing on half the
+    steps sits under that floor and would be counted forever.
     """
     text = (expectation_text or "").lower()
+    redact = set(redact or ())
     surprises = {}
     for key, change in delta.items():
-        leaf = key.rsplit(".", 1)[-1].lower()
-        if leaf in text or leaf.replace("_", " ") in text:
+        leaf = key.rsplit(".", 1)[-1]
+        if key in redact or leaf in redact:
+            continue
+        if leaf.lower() in text or leaf.lower().replace("_", " ") in text:
             continue
         surprises[key] = change
     return surprises

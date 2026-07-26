@@ -33,7 +33,7 @@ Recorded results — **whole ladder re-run 2026-07-26 (late), on the wire contra
 | Rung | Script | Result |
 |---|---|---|
 | 1 | `spike_sokoban.py` | **SPIKE MET — 18/18** |
-| 2 | `smoke_sokoban_adapter.py` | **SMOKE MET — 9/9** |
+| 2 | `smoke_sokoban_adapter.py` | **SMOKE MET — 11/11** (incl. the screen channel the LLM tier reads) |
 | 3 | `verify_round1.py` | **ROUND 1 MET — 14/14** (F1–F6; no findings — see below) |
 | 4 | `verify_round2.py` | **ROUND 2 MET — 15/15** (90 commands) |
 | 5 | `verify_round3.py` | **ROUND 3 MET — 7/7** (240 random steps, 2 seeds, 0 findings) |
@@ -49,28 +49,91 @@ Every rung uses `ugt.core.trial.GateRunner`, so a failure is fail-closed
 (non-zero exit) and a game anomaly that is *not* a gate failure has somewhere to
 go — the `[FINDING]` channel, printed in a block above the footer.
 
-Tier 3 is **not built yet** — no strategy guide, no playtest driver, nothing run.
-It is in scope: this is the only one of the three examples inside a game engine,
-so it is the only place the LLM tier can be shown to drive one. When it runs it
-measures competence (solved, and moves against the committed 73-move solution),
-never a rate.
+There is deliberately no `feature-map.yaml` here: `ugt verify` has no `custom`
+path to dispatch (see `PLAN-FORWARD.md`'s backlog), and the same properties are
+asserted per command by the ladder's own rungs.
 
-What exists for it so far, all landed by `b66f710` while *preparing* the tier
-rather than running it: the `grid` field (Finding 4), action 4 = `reload`
-(Finding 5), `playtest.seeding: deterministic` and a non-vacuous `probe_action`
-in `ugt.config.yaml`. What is still missing, so the gap is a list rather than a
-shrug: `strategy-guide.md`; a `playtest_sokoban.py` (this is `engine.type:
-custom`, so the `ugt playtest` CLI cannot dispatch it — the driver has to own the
-bridge lifecycle and call `playtest_game_with_adapter()`, the way
-`examples/dice/integration/playtest_dice.py` does for its server); the
-`playtest.*` context knobs (`objective`, `guide_char_budget`, `history_window`
-— the config carries only the seeding pair today); and a `LESSONS.md` §B P1–P14
-disposition table, which per P12 gets worked through on a local model before any
-paid call.
+## Tier 3 — the LLM playtester
 
-There is deliberately no `feature-map.yaml` here either: `ugt verify` has no
-`custom` path to dispatch (see `PLAN-FORWARD.md`'s backlog), and the same
-properties are asserted per command by the ladder's own rungs.
+```bash
+# stage 1 — local, free, proves the CHANNEL and never produces a number
+python3 examples/sokoban/integration/playtest_sokoban.py --provider ollama --max-actions 30
+# stage 2 — paid, the only stage allowed to produce a quotable figure. NOT RUN.
+python3 examples/sokoban/integration/playtest_sokoban.py --provider anthropic \
+    --model claude-haiku-4-5-20251001 --max-actions 150
+```
+
+`ugt playtest` cannot drive this game — `engine.type: custom` means `env.py` has
+no adapter to dispatch, and `playtest_game()` raises saying exactly that. The LLM
+loop is unchanged: `playtest_sokoban.py` builds `GodotTcpAdapter`, runs the §B
+pre-flight fail-closed, and hands the adapter to
+`playtest_game_with_adapter(..., action_mode="action_id")`. It also passes the
+same 9 predicates R1/R2/R3 assert, so a defect the pilot never notices is still
+caught — one invariant definition, now three tiers.
+
+**This tier measures COMPETENCE here, never a rate.** No RNG exists anywhere in
+the game, so N episodes are N replays of one puzzle set and a percentage over them
+has a denominator of N and a sample size of 1 (§B P9/P13). The scoreline is: how
+many levels were solved, and how many moves against the committed 73-move optimum
+in `levels/solutions.json`. The report says so itself in `sample_note`.
+
+### The §B pre-flight (2026-07-26)
+
+Run before spending anything, per P12. Everything below was free.
+
+| # | Check | Verdict |
+|---|---|---|
+| P1 | Identities, not handles | **PASS.** Actions are `up`/`down`/`left`/`right`/`reload`, never ids. State names are plain (`boxes_on_target`, not `bot`). No room-code equivalent exists — the board is the world |
+| P2 | Adapter passes through every PUBLIC field | **PASS, and the channel had to be built.** This game has NO prose: `main.tscn` is ColorRects with no Label, no font, no message line. So the board IS the entire player-facing text channel, and `GodotTcpAdapter.get_terminal_text()` now carries it by joining the very rows `board.gd::render_rows()` draws for the human. Asserted live in both directions — a board arrives, AND it changes when the game changes (a channel serving a stale screen forever would pass the first check and is worse than an empty one, because it looks right) |
+| P3 | Truncation is silent starvation | **WOULD HAVE FAILED — FIXED.** The guide is 4,422 chars against the 2,000 default. The cut lands from "The one rule that matters" onward, i.e. every rule that creates the skill. Budget set to 6,000 and `assert_guide_fits` fails the run before any model is contacted |
+| P4 | Action channel sends what the LLM thinks | **PASS.** `action_id` mode maps name → id 1:1; an unknown name is dropped, never coerced to a neighbouring id. The truncation salvage added in Finding 7 keeps that property — it refuses to salvage a name the config does not declare |
+| P5 | Prompt must not leak what the client hides | **WAS LEAKING — CLOSED, and the audit ran the other way too.** There is no HUD at all here, so every field had to be justified rather than passed through. Six of eight are derivable by looking at the board. Two are redacted: `moves_taken` (a score the game keeps and shows nobody — Finding 6 — and the exact number this tier scores against) and `grid` (not hidden, *moved* to the Terminal panel where it renders aligned instead of JSON-quoted). Verified against a **rendered prompt**, not against the config |
+| P6 | Guide teaches the RULES that create skill | **PASS.** Push-not-pull and its consequences: why a wall-flush crate can only slide, why a corner is permanent, why finishing a crate early can wall you off, and that reload is the correct move rather than a failure. No solution sequences — teaching the moves would measure recall |
+| P7 | Competence from the reasoning, not the exit code | **RUN — the channel is proven and the local model is below the floor.** Quantified rather than sensed: across 160 actions over three runs the pilot moved a crate **0 times** on a first level solvable in 6 moves, and of the crate positions it stated out loud only ~40% matched the board (9/17, 9/21, 41/59 right/wrong). It is engaged with the right concepts (`crate` 67×, `push` 30×, `target` 33× in 30 actions) and cannot reliably localise a glyph in a 7×5 grid. This is NOT P12's ambiguous-silence case: a specific wrong belief, stated out loud, is diagnosable — see Finding 8 |
+| P8 | Never pool across an information fix | **Boundaries declared** — see the run table. Row 1 → 2 crosses the Finding 7 fix and is a before/after pair, never a trend. Finding 9 is a *reporting* fix that never touched a prompt, so it creates no behavioural boundary |
+| P9/P13 | Episodes: samples or replays? | **Declared `deterministic` and probed live** before every run: two resets replay identically over 4 steps, and the probe (`left`, level 1's first committed move) really moved the state, so "identical" is not vacuous |
+| P10 | Pilot needs memory, not just state | **Configured** — `history_window: 12`, roughly one crate's worth of work including the walking. The default 5 forgets the plan halfway through executing it |
+| P11 | A prompt guard is part of the game | **WOULD HAVE MADE THE GAME UNPLAYABLE — FIXED.** The repeat guard blocks the 3rd identical proposal at its default. Pushing a crate five cells along a row *is* five consecutive `left`s, and the committed solutions contain runs of 5 and 6. Raised to 8, and `assert_repeat_guard_allows_real_play` derives the bound from `solutions.json` so authoring a longer push run re-checks it automatically |
+| P12 | Local model first | **DONE — `gemma4:26b`, zero API cost.** It paid for itself: P3, P11, and Findings 6–9 were all found free, and two of those are UGT-core defects that would otherwise have surfaced on a paid bill |
+| P14 | Content: solvable, and every obstacle teaches | **Solvable is PROVEN** — R1 and R2 replay the committed solutions through the live engine every run. "Teaching" works differently in this genre and needs saying: there is no authored refusal text because there is no text. A refused move returns byte-identical state, and the board itself is the explanation — a human sees the wall. The guide therefore has to teach *how to read a refusal* ("if the board comes back exactly as it was…"), which is the substitute for a spoken one |
+
+### Stage 1 runs — local, free, and no number from here is quotable
+
+```bash
+python3 examples/sokoban/integration/playtest_sokoban.py --provider ollama \
+  --max-actions 30 --output results/channel-check-ollama-30.json
+```
+
+| Run | Actions | Real moves | Crates moved | Levels solved | Invariant violations | Stated crate position right/wrong |
+|---|---|---|---|---|---|---|
+| pre-Finding-7 | 30 | **26** | 0 | 0/3 | 0 | 9 / 17 |
+| post-Finding-7 | 30 | **30** | 0 | 0/3 | 0 | 9 / 21 |
+| post-Finding-7, fair budget | 100 | **100** | 0 | 0/3 | 0 | 41 / 59 |
+
+**Row 1 → 2 is the Finding 7 fix, and it is worth more than it looks: 4 of 30
+actions — 13% of the pilot's budget — were destroyed by truncated replies, and the
+run summary had no field that said so.** All four show in the log as
+`wait` with reasoning `(no json)`. Post-fix: zero, three runs in a row.
+
+⚠️ **P8: these are before/after pairs, not a trend.** Row 1 → 2 crosses an
+information fix, so no number may be pooled across it; row 3 additionally changes
+the budget, so it answers "given a fair budget" rather than continuing row 2. And
+per P12 no stage-1 figure is quotable at all, whichever row it comes from.
+
+**What stage 1 established, which is its whole job:** the pilot can see the game
+(a real board, aligned, in the panel a player looks at), acts on it legally, and
+never broke an invariant in 160 actions of trying. The transport question this
+example exists to answer — *can a language model drive a game running inside a
+real engine frame loop* — is answered yes. The transport is proven.
+
+**What stage 1 did NOT establish, and is honest about:** whether the puzzles are
+any good. The local model never pushed a single crate in 160 actions — not once,
+across three runs, including one at P12's full 100-action ceiling — so it produced
+no evidence about the game's difficulty at all. It also never once used `reload`,
+which is unsurprising given it never created a position that needed one. That is
+the expected shape of a stage-1 result and precisely why P12 forbids quoting one.
+
+Stage 2 (Haiku) is un-run and is a credit decision, not a blocked one.
 
 ## Files
 
@@ -80,11 +143,13 @@ properties are asserted per command by the ladder's own rungs.
 | `godot_tcp_adapter.py` | Transport-only `BaseAdapter`: connect/reset/step/close over newline-delimited JSON. **No game rules.** |
 | `invariants.py` | The 9 properties, defined once, used by R1/R2 (`check_command`) and R3 (`to_hunter_invariants`). |
 | `spike_sokoban.py` | Rung 1 — raw protocol, no adapter. |
-| `smoke_sokoban_adapter.py` | Rung 2 — the `BaseAdapter` contract. |
+| `smoke_sokoban_adapter.py` | Rung 2 — the `BaseAdapter` contract, including `get_terminal_text()`: the tier-3 screen channel is asserted on **every ladder run**, because `BaseAdapter`'s default returns `""` and losing it would otherwise be silent. |
 | `verify_round1.py` | Rung 3 — level 1 solved, F1–F6. |
 | `verify_round2.py` | Rung 4 — all 3 levels to `all_levels_solved`, no-op probes. |
 | `verify_round3.py` | Rung 5 — invariant fuzzer, illegal ids, replay determinism. |
-| `ugt.config.yaml` | Documentary (`engine.type: custom` — env.py dispatches nothing). 5 actions: four directions plus `4 = reload`. |
+| `playtest_sokoban.py` | Tier 3 — the LLM runner. Owns the §B pre-flight, then hands the adapter to `playtest_game_with_adapter()`. |
+| `strategy-guide.md` | Tier 3 — the briefing the pilot reads. Teaches push geometry, corner deaths and when to reload; no solutions. |
+| `ugt.config.yaml` | `engine.type: custom` — env.py dispatches nothing, so the rungs and the tier-3 runner construct the adapter. 5 actions: four directions plus `4 = reload`. Also carries the `playtest.*` block, where every setting is justified inline. |
 
 ## Findings
 
@@ -141,6 +206,99 @@ clearest dual-validation case in this example: the wire needed `reset_level`
 every front end shares), and giving the machine the capability revealed the human
 never had it either. R1's F6 now proves action 4 returns the exact level-start
 state, and the game's suite covers the keybinding.
+
+**6. The game keeps exactly one number and shows it to nobody. FILED, not
+fixed.** The PRD's one-liner is "no scoring beyond move count", so `moves_taken`
+is the whole score — and `main.tscn` is ColorRects with no Label, no font and no
+message line, so a human at the keyboard never sees it. Nor the level number, nor
+any "solved" acknowledgement. The PRD's own state-shape section sets the standard
+this fails: *"exactly what the human sees on screen … so a machine player is told
+no less and no more than a person at the keyboard."* The wire sends eight scalars
+the screen does not.
+
+Not fixed, because unlike the missing R key (Finding 5) the PRD never promised a
+HUD, and adding one is a scope decision for whoever owns the game rather than a
+defect to repair. Handled on the tester's side instead, which is the half this
+repo owns: `moves_taken` is redacted from the prompt, so the pilot plays with what
+a player has. Recorded because a puzzle game whose only score is invisible is
+worth someone deciding about on purpose.
+
+**7. UGT core: a truncated reply silently cost the pilot its move. FIXED.** The
+Ollama client capped responses at `num_predict: 256`. The required JSON puts the
+action FIRST and `reasoning`/`expected_outcome` after it, so a reply cut off
+mid-prose is unparseable — and the loop turned that into a forced `wait`, which
+spends a step of the budget without touching the game. The model had already
+decided; the cap threw the decision away.
+
+**Spatial reasoning is what exposed it.** "The player is at (4, 2) and the crate
+is at (3, 2). Moving left will…" runs longer than a card game's "attack-weighted,
+the enemy is at half strength", so this game hit the ceiling where dice and
+escape-room never did — 1 action in 30 on the first run, invisible in the summary,
+which has no counter for it.
+
+Fixed twice over in `ugt/core/playtester.py`: the ceiling is 512 (a truncated
+reply is never useful, so a larger one can only preserve work), and
+`_salvage_truncated_action` recovers the action from the prefix when it still
+happens. The salvage is deliberately conservative and was proven in both
+directions — it recovers `"value": "down"`, and **refuses** `"value": "teleport"`
+because the config does not declare it, so it can never invent an action or coerce
+a hallucinated name onto a neighbouring id (§B P4). A salvaged step says so in its
+own reasoning, so a transcript never implies the model said more than it did.
+
+**8. The pilot is handed a coordinate frame for itself and has to derive everyone
+else's. FILED — it needs a paid run to settle.** The state gives `player_x` and
+`player_y` as numbers; every crate and target must be located by reading ASCII.
+The local model's error pattern follows that split exactly: across 160 actions it
+stated its own position correctly essentially every time, and only ~40% of the
+crate positions it asserted out loud matched the board. It moved a crate zero
+times on a level solvable in six moves, while talking about crates constantly.
+
+Two candidate fixes point in opposite directions and both are defensible:
+
+* **Redact `player_x`/`player_y` too**, so everything comes off the board and
+  there is one frame instead of two. Maximally faithful — a human is not given
+  their own coordinates either.
+* **Label the board's rows and columns**, so a text reader can locate a glyph the
+  way vision does. Reveals nothing about the puzzle, and arguably restores parity
+  rather than granting an advantage.
+
+Not chosen here, on purpose. Which one is right is a question about the
+*measurement instrument*, and the evidence that would settle it — does the
+localisation error rate drop — has to come from a model that can localise at all,
+i.e. stage 2. Guessing now would bake a choice into the tier and then measure it
+(`LESSONS.md` §D).
+
+**9. UGT core: a redacted field could be recorded as something the pilot "failed
+to predict". FIXED.** `_unexpected_delta_fields` compared the raw state delta
+against the pilot's expectation text with no knowledge of
+`playtest.redact_state_fields` — so `grid` and `moves_taken`, both deliberately
+hidden from the prompt, were logged as surprises on every successful move. The
+pilot was being charged for information it had been denied.
+
+Here the summary's ubiquity floor (a key changing on ≥80% of delta-bearing steps
+carries no signal) happened to absorb both, which is luck rather than correctness:
+a redacted field changing on *half* the steps sits under that floor and would be
+counted forever. The filter now drops redacted paths before the comparison, and it
+was proven able to fail — with redaction removed, the same delta reports all four
+keys.
+
+This one changed only what is RECORDED, never what the pilot is shown, so it
+creates no P8 boundary. Worth separating explicitly: an information fix invalidates
+comparisons across it, and a reporting fix does not.
+
+**10. Neither stall detector can see a two-cycle. FILED.** The pilot spent long
+stretches alternating `right`, `left`, `right`, `left` between two cells. Every
+one of those moves is legal and changes the state, so:
+
+* the **no-op detector** never fires — it needs a step with no material delta;
+* the **repeat guard** never fires — it needs the *same* action twice in a row.
+
+An A-B-A-B loop is invisible to both, and it is the single most natural way for a
+pilot to waste a whole budget. UGT already knows how to detect the shape —
+`ugt/core/generic_checks.py::check_state_cycles` finds exactly this — but the
+generic checks run in the invariant-fuzzer tier and not in the LLM loop. Filed as
+a framework item rather than patched here, because it belongs to `ugt/core/` and
+wants its own negative control.
 
 ## Corrections to this harness
 

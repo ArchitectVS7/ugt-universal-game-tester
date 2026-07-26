@@ -76,3 +76,107 @@ playtest:
   # guaranteed to change the state rather than bounce off a wall (an inert probe
   # would make "two resets matched" vacuously true, and UGT refuses that).
   probe_action: 2
+
+  # ── What the pilot is told it is doing (P10) ──────────────────────────────
+  # Rendered ABOVE the state dump. The guide says it too, but from the bottom of
+  # the prompt behind everything else.
+  objective: >-
+    Push every crate onto a target, on three levels in a row. Solving the third
+    sets all_levels_solved and ends the game. Nothing is timed and nothing can
+    kill you, but a crate pushed into a corner is lost forever — when that
+    happens, `reload` is the correct move, not a failure.
+
+  # ── The screen (P2) ──────────────────────────────────────────────────────
+  # This game has NO prose. `main.tscn` is ColorRects with no Label, no font and
+  # no message line, so the board IS the whole player-facing text channel — and
+  # `GodotTcpAdapter.get_terminal_text()` carries it by joining the very rows
+  # `board.gd::render_rows()` draws for the human.
+  #
+  # Measured: the widest shipped level renders 7 rows x 9 cols = 70 chars with
+  # newlines. The default 400 would already fit, but a budget that cannot bind is
+  # a budget that cannot warn if a level ever grows, so this is set from the
+  # measurement with room to spare rather than left at a default that happens to
+  # work.
+  terminal_char_budget: 600
+
+  # ── Fog of war (P5) — the pilot reads what a human reads, no more ─────────
+  # There is no HUD in this game: a person at the keyboard sees the board and
+  # NOTHING else. So each state field had to be justified rather than passed
+  # through by default. Six of the eight are derivable by looking:
+  # player_x/player_y are the `@`, boxes_on_target/boxes_total are the `*` and
+  # `$` counts, level_solved is "every crate is a `*`", all_levels_solved is the
+  # end of the game. level_index is not on screen but is not an advantage either
+  # — a player who has solved two levels knows they are on the third.
+  #
+  # These two are redacted, PROMPT-ONLY (the report, the invariants and
+  # `evaluation.victory_key` all keep the full state):
+  #
+  #   grid        — not hidden, MOVED. It is rendered as an aligned ASCII board
+  #                 in the Terminal panel above, which is what a player looks at;
+  #                 leaving it in the state block too would spend context showing
+  #                 the same board twice, once with JSON quoting that makes the
+  #                 columns harder to line up.
+  #   moves_taken — the game keeps this and never shows it to anyone (see the
+  #                 integration README's HUD finding). It is also the exact
+  #                 number this tier scores competence against, and a pilot that
+  #                 can watch its own metric is being measured on a different
+  #                 game from the one a human plays.
+  redact_state_fields:
+    - "grid"
+    - "moves_taken"
+
+  # ── Memory (P10) ─────────────────────────────────────────────────────────
+  # A crate route is 4-8 pushes with walking in between, and the value of the
+  # history is remembering which directions were already refused from a cell.
+  # 12 covers a whole crate's worth of work; the default 5 would forget the plan
+  # halfway through executing it.
+  history_window: 12
+
+  # ── P11, AND THE DEFAULT WAS UNPLAYABLE HERE ──────────────────────────────
+  # The repeat guard counts consecutive IDENTICAL proposals regardless of whether
+  # they changed the state, and at its default of 3 it hard-blocks the third one
+  # and substitutes `wait`. But pushing a crate five cells along a row IS five
+  # consecutive `left`s, and the committed optimal solutions contain runs of
+  # 5 (level_02) and 6 (level_03) — so on the default config the pilot is
+  # physically prevented from playing the shipped solution, and the override
+  # burns budget on a `wait` that does not touch the game.
+  #
+  # 8 permits every legitimate straight run in the shipped content (the widest
+  # board is 9x7, so an interior straight line cannot exceed 7 cells) while still
+  # bounding a genuinely unbounded loop. A pilot shoving repeatedly into a wall
+  # is caught by the SEPARATE no-op detector, which is delta-gated and auto-flags
+  # at 3 — that is the right mechanism for "stuck", and it is untouched by this.
+  repeat_block_threshold: 8
+
+  # ── Guide budget (P3) ────────────────────────────────────────────────────
+  # Measured, not guessed: strategy-guide.md is 4,422 CHARS against a default
+  # budget of 2,000. (`wc -c` says 4,442 — it counts bytes, and the guide has em
+  # dashes. The budget is applied to `len(str)`, so the char figure is the one
+  # that matters; playtest_sokoban.py measures it the same way the loop does
+  # rather than shelling out to `wc`.)
+  # The guide is cut from the END, and the end is where the
+  # skill lives — corner deadlocks, push geometry, when to reload. The pilot
+  # would have received the legend and the objective and none of the reasoning.
+  # Re-measure (`wc -c strategy-guide.md`) whenever the guide is edited;
+  # playtest_sokoban.py fails the run before contacting any model if it slips.
+  guide_char_budget: 6000
+  # The state block is 8 scalars minus the 2 redacted above (~180 chars
+  # serialized). 1,200 can still bind if a field is ever added, unlike the 4,000
+  # default. NOTE the specific trap this avoids: `_compact_state_block` shrinks
+  # the LARGEST LIST first, and `grid` is the only list here — so on a tight
+  # budget the board rows would be the first thing silently dropped.
+  state_char_budget: 1200
+
+  # DELIBERATELY UNSET, each for a reason — absence here is a decision:
+  #   narration_field: the game sends no prose (see P2 above), so there is no
+  #     field to name. The board arrives through get_terminal_text instead.
+  #   episode_seeds: nothing to rotate — `seeding: deterministic`, declared
+  #     above and probed live before every run.
+  #   ignore_delta_fields: the no-op detector must stay fully armed here. There
+  #     is no clock or turn counter ticking underneath a stalled board, so a
+  #     board that does not change really is a refused move.
+  #   action_context_path: `up` from one cell and `up` from another are
+  #     different observations, but the position is two fields rather than one
+  #     path, so plain per-action keying is the honest option.
+  #   win_path / loss_path: there is no loss state at all, and the win is
+  #     `all_levels_solved`, which `evaluation.victory_key` already names.

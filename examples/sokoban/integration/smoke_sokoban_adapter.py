@@ -67,6 +67,21 @@ def main() -> int:
     check(moved, "at least one step actually changed state (not a dead wire)",
           f"moves_taken={prev.get('moves_taken')}")
 
+    # get_terminal_text() — the OPTIONAL BaseAdapter capability the LLM tier reads
+    # the screen through. Asserted here rather than only in playtest_sokoban.py so a
+    # regression goes red on every ladder run instead of surfacing mid-playtest:
+    # `BaseAdapter`'s default returns "", so losing this channel is silent by
+    # construction and the pilot would simply play blind.
+    screen = ad.get_terminal_text(600)
+    check(bool(screen.strip()) and ("@" in screen or "+" in screen) and ("$" in screen or "*" in screen),
+          "get_terminal_text() serves the player-facing board (player + crate glyphs)",
+          f"{len(screen.splitlines())} rows, {len(screen)} chars")
+    ad.reset()
+    opening = ad.get_terminal_text(600)
+    ad.step(2)  # `left` — level 1's first committed move, so it is always accepted
+    check(ad.get_terminal_text(600) != opening,
+          "...and the screen MOVES when the game does (not a stale first frame)")
+
     rs = ad._read_state()
     check(isinstance(rs, dict) and set(rs) == STATE_KEYS,
           "_read_state() returns state without applying an action (hunter recovery hook)",

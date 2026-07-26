@@ -358,6 +358,21 @@ ledgers, objective lines — is content the pilot reasons from exactly like the 
 centrally, for a default that some game will change. Grep the prompt builders for load-bearing claims whenever a
 game overrides a knob one of them mentions.
 
+**Corollary — set the ceiling from the game's own committed solution, and DERIVE the bound.** The guard counts
+consecutive identical proposals whether or not they changed the state. In a push-puzzle, moving a crate five
+cells along a row *is* five consecutive `left`s, and the shipped optimal solutions contained runs of 5 and 6
+against a default ceiling of 3 — so the default made the game's own solution physically unplayable, and each
+override spent a step on a `wait` that never touched the game. The check that catches this must read the
+solution artifact rather than hardcode a number, or authoring one longer push run silently re-breaks it.
+
+**Corollary — neither standard stall detector can see a TWO-CYCLE, and it is the most natural way to waste a
+budget.** A pilot alternating `right`/`left`/`right`/`left` between two cells trips nothing: the no-op detector
+needs a step with no material delta (every move here changes state) and the repeat guard needs the *same*
+action twice running (these alternate). An A-B-A-B loop therefore reads as productive play to every counter in
+the loop. The shape is already detectable — `check_state_cycles` in the generic-checks floor finds exactly it —
+but that floor runs in the robustness tier, not in the LLM loop. Until it runs in both, read the action log
+rather than trusting `back_to_back_repeat_steps` to tell you the pilot was stuck.
+
 ### P12 · Validate the harness on a LOCAL model first — never spend an API call proving the plumbing
 **Stage the tier: local model proves the CHANNEL, paid model measures the GAME.** They are different jobs and
 the same run cannot do both.
@@ -470,6 +485,46 @@ Checks worth running once per game, all cheap and all off-model:
 **Enforce the outcome as a content rule, not a review habit.** A gated room now *fails to load* without its
 own refusal text, and fails to load if it carries refusal text while ungated. That is the P13 argument again:
 a check that lives in someone's review checklist is a habit, and a habit does not survive the next author.
+
+### P15 · The channel between the model and the loop is under test too — a truncated reply must not cost a turn
+P1–P8 audit what reaches the model. This is the return leg, and it fails in a way that reads as a bad decision.
+
+A local provider capped replies at 256 tokens. The response contract puts the action FIRST and
+`reasoning`/`expected_outcome` after it, so a reply that ran long was cut mid-prose, failed to parse, and the
+loop substituted a do-nothing `wait` — **spending a step of the pilot's budget on a decision that had already
+been made.** Nothing in the run summary counted it.
+
+**A ceiling set for one genre taxes another silently.** It surfaced on a grid puzzle and never on a card game,
+because spatial reasoning is wordier: *"the player is at (4,2) and the crate is at (3,2), so moving left…"* runs
+longer than *"attack-weighted, the enemy is at half strength"*. Any per-call ceiling — tokens, timeout, retry
+count — is a per-genre tax until someone measures it on the genre in front of them.
+
+- **Raise the ceiling AND salvage the prefix.** A truncated reply is never useful, so a larger ceiling can only
+  preserve work; and when it still happens, the action is usually already there to recover.
+- **A salvage must be able to REFUSE.** Recover only a name the config declares, or the salvage becomes exactly
+  the coercion P4 forbids — a hallucinated verb snapped onto a neighbouring id. Prove both directions: it
+  recovers the real name, and it declines an invented one.
+- **Say a salvage happened, in the record.** Otherwise a transcript implies the model said more than it did.
+- **Count what you discard.** If the loop can throw away a turn, the summary needs a number for it; a silent
+  discard is indistinguishable from a pilot that chose to wait.
+
+### P16 · Nothing downstream may score the pilot on a field you redacted from it
+P5 removes a field from the prompt. This is the other half nobody remembers: every *analysis* path has to
+learn about the redaction too, or the pilot is charged for information it was denied.
+
+A contradiction detector compared the raw state delta against the pilot's stated expectation with no knowledge
+of `redact_state_fields`, so two deliberately-hidden fields — a whole-board render and a move counter — were
+logged as things the pilot "failed to predict" on **every successful move**. It was absorbed by an unrelated
+noise floor (a key changing on ≥80% of steps carries no signal), which is luck rather than correctness: a
+hidden field changing on *half* the steps sits under that floor and gets counted forever.
+
+**Audit the redaction as a list of consumers, not a config line.** Prompt, delta summaries, surprise metrics,
+auto-flag heuristics, engagement trackers — anything that reads state and reasons about the pilot.
+
+**And separate an INFORMATION fix from a REPORTING fix, explicitly.** P8 invalidates pooling across a change to
+what the pilot receives. A change to what gets *written down* invalidates nothing — the runs remain comparable.
+Both mistakes cost real work: pooling across a real information change produces a confident wrong number, and
+declaring a boundary that does not exist throws away a valid comparison out of caution.
 
 ---
 

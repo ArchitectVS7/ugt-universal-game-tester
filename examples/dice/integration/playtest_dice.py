@@ -334,7 +334,22 @@ def main() -> int:
         # be visible in the output — a reader must never have to infer the
         # denominator from the run length.
         print(f"[*] using the first {len(seeds)} of {len(all_seeds)} configured seeds: {seeds}")
-        config.data["playtest"]["episode_seeds"] = seeds
+        if len(seeds) > 1:
+            config.data["playtest"]["episode_seeds"] = seeds
+        else:
+            # DO NOT narrow the config to a single seed. `seeding.resolve` refuses
+            # `per_episode` with one seed — correctly: a one-entry rotation replays
+            # one match while the declaration claims variety. Rewriting it here made
+            # this script's own documented stage-1a command exit 1 (found 2026-07-26
+            # by re-running it; the recorded 1a result predates the seeding
+            # declaration landing, and nobody re-ran the command afterwards).
+            #
+            # No surgery is needed anyway: the rotation starts at seeds[0], so a
+            # budget that only affords one episode plays exactly `dice-s01` with the
+            # full declaration left intact and honest.
+            print(f"[*] stage 1a: config left at {len(all_seeds)} declared seeds; the "
+                  f"action budget only reaches the first ({seeds[0]}), so this run is "
+                  f"one battle and cannot express a rate.")
 
     with served_bundle() as port:
         print(f"[*] serving the built bundle on :{port}")
