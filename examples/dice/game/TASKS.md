@@ -26,11 +26,22 @@ Statuses: `TODO` | `IN-PROGRESS` | `DONE` | `BLOCKED(reason)`
 
 ## M0 — Scaffold
 
-### T-001 · Vite + React scaffold — `status: TODO` · `coder: sonnet` · `after: —`
+### T-001 · Vite + React scaffold — `status: DONE` · `coder: sonnet` · `after: —`
 Initialize a Vite React project in this folder. Add Vitest for unit tests and
 ESLint. No routing, no state library.
 **Accept:** `npm run build` exits 0; `npm test -- --run` runs (0 tests ok);
 `npm run lint` exits 0.
+
+**Delivered (2026-07-25):** Scaffolded the project with Vite's React template
+(`package.json`, `vite.config.js`, `index.html`, `src/`), added Vitest for
+unit testing and ESLint for lint checks, and committed the generated
+`.gitignore` alongside `package-lock.json`. Scope was held to the bare
+scaffold only — no routing library, no state-management library, no engine
+code, and no UI beyond the template default, all deliberately deferred to
+their own later tasks (T-002 onward) per this file's task boundaries.
+Orchestration: graphify=none — no `graphify-out/graph.json` exists at the
+repo root or in `examples/dice/game`, and T-001 is a self-contained scaffold
+task with no existing source to m · attempts=1/4.
 
 ## M1 — Engine
 
