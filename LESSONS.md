@@ -112,6 +112,17 @@ JSON."* **Check:** read one real prompt and ask "could a human play well from on
 annotate the legal-action list with display-only keys (`_card`, `_hand` — underscore prefix = stripped before
 the wire), never by widening the wire payload.
 
+**The STATE is a channel too, and auditing only the action names passes a game that is still starving.** A
+text adventure's P1 was dispositioned PASS because the prompt listed `take_lantern` and never `14` — a correct
+finding about the *action* channel, and the audit stopped there. Its state said `current_room: "R04"`, an
+internal id no player is ever shown; a human sees `Storeroom`, printed on every entry. The pilot bound the
+wrong name to the right id ("R04 (Guard Corridor)" — R04 was the Storeroom), then spent twelve of thirty moves
+walking into a wall. **Check every field the prompt renders, not just the ones you had to build:** an id that
+appears in the state because it is how the code indexes rooms is a handle, and it needs its display name
+beside it. **Fix pattern:** carry the player-facing name in state next to the id, derived from the same source
+the human front end prints, and add an invariant asserting the pair agrees on every transition — two fields
+that can disagree will.
+
 ### P2 · The adapter must pass through every field the game marks PUBLIC
 Normalizing state is where read layers die. A card game's `_seat()` normalizer discarded `echo`, `chain`,
 `statuses` and `modifiers` — all four explicitly PUBLIC in the engine's own types and served to both seats by
@@ -125,6 +136,18 @@ while the HTTP adapter — which builds an explicit dict and silently discards a
 the floor. The pilot could have bought a toolkit and never seen that it owned one. An adapter that enumerates
 fields explicitly is safer than one that passes everything through, but only if something re-checks it after
 each schema change. Make it part of the definition of done for any game-side change.
+
+**"Is there a channel" and "does the channel carry everything" are two different audits, and passing the first
+feels exactly like passing both.** A text adventure's bridge was found dropping the engine's narration
+entirely — room descriptions, examine text, authored refusals — so the pilot played a text adventure with no
+text. Fixed, tested, dispositioned. The audit had asked whether narration crossed the wire, and it now did.
+What it never asked was *on which responses*: `reset` still answered with state alone, so the pilot's **first**
+decision was made with an empty text panel while a human's opening screen is the room they woke up in. Found
+one run later, by a local model that could not say where it was. **Check the initial/reset response
+explicitly** — it is the one response a client cannot recover by acting, because there is no earlier turn to
+have learned it from, and it is systematically the one a step-shaped test never covers. Underneath it was a
+framework bug with the same shape: `SubprocessAdapter.reset()` recorded no narration at all, starving the
+first prompt of **every** simulation-engine game.
 
 **Corollary — a partial list is a starvation defect the moment you treat it as authoritative.** In the same
 round, a prompt knob was written to replace the action vocabulary with the game's own live `unlockedCommands`,
@@ -406,6 +429,47 @@ script is a habit, not a guarantee. The seed-variety proof sat in a browser dice
 week, which meant every other game in the portfolio had no such proof and nobody noticed. Anything you would
 write into every integration belongs in the framework, keyed off a declaration the game makes.*
 *(→ `ugt/core/seeding.py`; `tools/prove_seeding.py` is its test suite.)*
+
+### P14 · Trace the content graph: prove it is solvable, then prove every obstacle TEACHES
+P1–P13 ask whether the pilot can see the game. This asks whether the game says anything back. They are
+different failures and the second one looks exactly like a stupid model.
+
+**Solvable is the easy half, and passing it proves less than it looks.** Walk the whole dependency graph —
+every gate, what sets it, where that thing lives, in what order — and confirm a real playthrough reaches the
+end. A committed walkthrough replayed by R1 does this for free. But solvable only says a path *exists*; it
+says nothing about whether a player who does not already know the answer could find it.
+
+**The half that actually bites: for every obstacle, ask what the player is told when they hit it.** Not what
+they are told after solving it — at the moment of refusal. Do this per gate TYPE, because a game usually has
+more than one and they are usually authored by different mechanisms:
+
+> A ten-room text adventure had beautiful authored refusals on every *object* gate — *"the wick is bone dry,
+> without oil it will never catch"* names the missing thing — and one shared engine string on every *door*:
+> *"the way is shut."* The LLM pilot opened six of eight locks off the object hints, then spent its last
+> twenty moves at a door that could not tell it anything, while holding both things that would have opened it.
+> Same game, same session: one gate type carried the whole design and the other carried none of it, and
+> nothing in the ladder could see the difference because both are legal refusals.
+
+Checks worth running once per game, all cheap and all off-model:
+- **Diff the gate types.** Group obstacles by mechanism (object gates, door gates, skill checks, currency
+  walls). Any group whose refusal is a single shared engine constant is a group that teaches nothing.
+- **Read the room text against the gate.** The obstacle must be *visible before* it refuses you. One room
+  described a stair as simply climbing north and then refused it — the description advertised an exit the
+  rules denied, which is worse than no description.
+- **Look for double-gating, which makes authored content unreachable.** The same flag gated both a room and
+  the key used inside it, so the player could never stand at the gate and *try* the key — and the key's
+  refusal, the best hint in the game, could not be reached by anybody. **Fiction usually says which gate is
+  the real one**; here the success text said the bolt was part of the gate, not the stair.
+- **Grep for authored data the engine never reads.** A per-object verb column (`unlock`, `light`, `read`) was
+  only ever null-checked, so the game authored a vocabulary it then refused to accept: `read ledger` answered
+  *"I don't understand that."* Declared-but-unread content is the same defect class as dead refusal text.
+- **Check that a rule applies where it should.** `use` verified held-and-prerequisite and never *location*,
+  so every puzzle solved from anywhere — a door unlocked from a cell two rooms away, narrating "the door
+  swings open" where you stood.
+
+**Enforce the outcome as a content rule, not a review habit.** A gated room now *fails to load* without its
+own refusal text, and fails to load if it carries refusal text while ungated. That is the P13 argument again:
+a check that lives in someone's review checklist is a habit, and a habit does not survive the next author.
 
 ---
 

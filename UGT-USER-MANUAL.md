@@ -708,7 +708,11 @@ Include:
 - **Action vocabulary** — what each action does, when to use it
 - **What broken looks like** — describe observable symptoms of bugs (credits unchanged after purchase, screen not changing, etc.)
 
-See `examples/mock-game/strategy-guide.md` for a working example.
+Two working examples ship, and they are deliberately different shapes:
+`examples/escape-room/integration/strategy-guide.md` (a puzzle game — teaches how to read refusals, and
+says plainly what the state will *not* tell you) and `examples/dice/integration/strategy-guide.md` (a
+combat game — teaches the scoring rules that create skill, while withholding the opponent's closed-form
+policy so the run measures play rather than exploitation of a leaked answer).
 
 ### 8b. Running `ugt playtest`
 

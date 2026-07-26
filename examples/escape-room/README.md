@@ -12,7 +12,7 @@ Just node, nothing else. No dependencies at all — the CSV parser is about fort
 
 ```bash
 cd game
-npm test               # 85 tests
+npm test               # 104 tests
 npm start              # play it yourself
 ```
 
@@ -66,7 +66,7 @@ That last group is the interesting one. There are objects in this game whose ent
 
 R2 now issues all 41 and checks what each one actually does. The check I'm most pleased with is take → drop → **re-take** on every portable object, because a `drop` that quietly *deleted* the item would look identical to a working one if you only checked the inventory afterwards. And it now proves every locked door from both sides — the same command refused before you have the prerequisite and accepted after, for all five gated objects, where the old feature map could only manage that for the lantern.
 
-That rung runs 552 commands and passes 47 checks.
+That rung runs 570 commands and passes 56 checks.
 
 ### The two bugs that were already found, and had nothing pinning them
 
@@ -98,14 +98,66 @@ So the game now **declares** what it is — `deterministic`, `per_episode`, or `
 
 The bit I'd underline: **that proof already existed, in the dice game's own playtest script.** It had been sitting there for a week doing its job perfectly for exactly one game, which meant every other game in the portfolio had no such check and nobody had noticed. Anything you'd end up writing into every integration belongs in the framework instead, keyed off a declaration the game makes. That's the difference between universal and configurable, and configurable is the one that's actually achievable.
 
-The pattern from the dice write-up holds. **Pointing the tester at a game keeps finding things wrong with the tester** — and a game with no combat, no randomness and no way to lose still found three. Different transports and different genres stress different parts of it; the browser game found bugs a subprocess game structurally cannot, and this one found a probe design that a four-action puzzle would never have embarrassed.
+The pattern from the dice write-up holds. **Pointing the tester at a game keeps finding things wrong with the tester** — and a game with no combat, no randomness and no way to lose has now found four. Different transports and different genres stress different parts of it; the browser game found bugs a subprocess game structurally cannot, and this one found a probe design that a four-action puzzle would never have embarrassed, plus a reset path that threw away the opening screen for *every* subprocess game, not just this one.
 
 ## Where it's up to
 
-Ladder green at 27 · 12 · 17 · 47 · 10, game suite 85/85.
+Ladder green at 30 · 12 · 18 · 56 · 10, game suite 104/104, `ugt verify` 6/6. All five rungs were re-run from scratch on 2026-07-26 rather than taken from the table — the numbers in it had drifted by one in three places, because the pre-flight had added tests to the game and a check to R1 after the table was written. Worth knowing that a results table goes stale silently: it doesn't fail, it just quietly stops being true. Then they were re-run *again* after the fixes below.
 
-The LLM tier is wired and the briefing is written, but hasn't been run — that one costs real money per action, so it waits for a deliberate decision rather than happening as a side effect. The local free rehearsal comes first, same as the dice game.
+The local free rehearsal has now been run, and it's the interesting part.
 
-When it does run, it's measuring **competence, not balance**: did the model escape, and in how many moves against the 26-move optimum. There's no win rate to quote here and the config now says so out loud.
+**The pilot got lost.** Thirty actions on the local model, and it opened the iron door and then spent its last twelve moves in the storeroom trying to walk north through a wall. Four rooms out of ten, no escape. Its own reasoning gives it away — it kept saying things like "I am currently in R04 (Guard Corridor)", and R04 is the Storeroom. It had the room codes and it had the prose, and it never reliably joined them up.
+
+Some of that is just a small local model, and I can't tell how much from the outside. But two things are asymmetries I could measure directly, by running the same commands through the human CLI and through the wire and diffing what came back:
+
+**It starts blind.** A human's first screen is the cell description — the room, the exits, the map scrap lying there. Over the wire, `reset` sends state and no prose at all, so the pilot's text panel is empty on its first decision. It has to spend a move on `look` to see the room it woke up in, and nothing tells it to.
+
+**It never learns the room's name.** The state says `current_room: "R04"`. A human is never shown a room code in their life — they're shown "Storeroom", every time they walk in. So the one field that's supposed to say where you are says it in an internal id, and the name is only in prose that scrolls.
+
+Both are the same shape as the big finding from the pre-flight — the wire client seeing less than the person does — which is mildly annoying given that's exactly what that audit was for. It checked whether the narration channel existed. It didn't check whether the channel was *complete*. That's the lesson I'd actually keep: **"is there a channel" and "does the channel carry everything" are two different audits, and passing the first one feels exactly like passing both.**
+
+Both are now fixed. Reset sends the opening room, and the state carries the room's name next to its id. There's a new invariant that checks the id and the name against the CSV on every single move, so they can't quietly drift apart again, and I checked the fixes were load-bearing by deleting them and confirming ten tests went red.
+
+**Then I ran the same thirty actions again, and it's a different game.** Every room correctly named in the reasoning. Auto-flagged bugs went from two to zero. It got through the iron door and two rooms deeper, and then it did the thing I actually wanted to see: it tried to light the lantern, got told the wick was dry, and worked out on its own that it needed to go and find oil. That's the game's authored refusal text doing its job on a machine player, which is the whole reason the narration channel matters.
+
+It still didn't escape in thirty moves — but the walkthrough is twenty-six, so thirty was never really a fair budget. I gave it a hundred, which is the local ceiling, and it got **six of the eight locks open and eight of the ten rooms** in fifty-nine moves. Through the iron door, lantern lit, steam vented, cog in hand, ledger read, hour learned.
+
+Then it stopped one step short, and where it stopped is the most interesting thing this game has told me yet.
+
+**Every object in this game explained itself when it refused you. Every locked door didn't.** The objects had authored refusal text in the CSV — *"The wick is bone dry. Without oil it will never catch"* tells you exactly what to go and find, and that's why it got six locks open. Doors all shared one line: *"The way is shut. You are missing something you'd need to pass."* There was no column in `rooms.csv` to say anything more specific, so a door literally could not tell you what it wanted.
+
+It finished standing in the clock room, holding the cog, already knowing the hour — both halves of the answer — hammering the blocked door instead of using the cog on the clock in front of it. It wasn't starved: it had everything. But the door was what it kept asking, and the door was the one thing in this game that never answered. It even read the two refusals correctly and separately: it worked out that a listed-but-blocked exit is a lock rather than a wall. It just had nowhere to take that.
+
+I nearly filed that as "doors are meant to be mute, objects carry the teaching" and moved on. That was wrong, and tracing the map properly is what showed it.
+
+**Three of the four doors were already fine** — the *room* description carries the hint. The corridor says a banded iron door blocks the way north. The furnace room says steam hisses up the shaft you want to climb. The antechamber says the gate is shut fast. Only the clockwork gallery lied: it described the north stair as simply climbing away, then refused it with no reason. One door out of four, not a design philosophy.
+
+So doors now say what kind of lock they are. There's a new column for it, and the loader **refuses to start** if a locked door doesn't have one — same trick as the existing content validation, which is turning out to be the best thing in this game. It also refuses hint text on a door that isn't locked, because that text could never be shown and dead content is the thing I keep finding.
+
+**Then tracing the chain turned up something that had been wrong the whole time.** The antechamber was locked behind the clock *and* the skeleton key needed the clock — the same lock twice. Which meant you could never stand at the gate and just *try* the key, so the key's best line — *"The key turns a quarter and stops. Something heavier than a lock is holding this gate."* — could never be seen by anybody. That's the line that sends you looking for the bolt. It was written, it was good, and it was unreachable.
+
+The fiction already said which way round it should be: *"the drawn bolt lets the key turn at last"* — the bolt is part of the gate, not the stair. So the stair is open now and the chain finally reads: reach the gate, it wants a key; find the key, something heavier is holding it; find the bolt, the clock drives it. Four beats, each naming the next. Twenty-six moves, same as before.
+
+**Two more things fell out of the same trace, and both are worse than the door was.**
+
+`objects.csv` has a `use_verb` column — `unlock`, `light`, `turn`, `fit`, `read`. The engine never read it. It only checked the column wasn't empty. So the game had been carefully authoring a verb for every object and then refusing to accept any of them: `read ledger` got you *"I don't understand that."* Exactly the thing you flagged — a person types the obvious word and the game says no. Those verbs are real commands now, each on the object that declares it.
+
+And puzzles had no geography at all. `use` checked that you held the thing and that the prerequisite was met, and never once checked where you were standing. **You could unlock the banded iron door from inside your cell, two rooms away, and the game would tell you the door swings open while you sat on the bunk.** A key belongs at its door now. The lantern and the ledger don't — you light a lamp in your hand and you read a book anywhere — which felt like the right line to draw.
+
+The nice part: the walkthrough I'd committed weeks ago already did every puzzle in its proper room. The geography was always the intent. The engine just never asked.
+
+### And then it got out
+
+Same model, same hundred moves, after those three fixes. **It escaped.** All eight locks, all ten rooms, out through the courtyard gate in thirty moves against a twenty-six move optimum.
+
+The run before this one stalled at six of eight while already holding both things it needed. So this isn't the model having a better day — it's the same model doing the same job with a game that finally answers when you knock on a door.
+
+I'm not going to quote the thirty as a score. It's a local model, and the rule I set for myself is that free local runs prove the plumbing and paid runs produce numbers. What it does prove is the thing I actually wanted: a player who knows nothing except what the game tells them can finish it. That was not true this morning.
+
+One last thing from the log, and it's a nice one. The pilot got hold of the oil flask and tried to `use` it on the lantern. Seven times. There's no such command — taking the flask is what gives you the oil, and it's the *lantern* you use. UGT threw the invented action away rather than quietly running the nearest real one, and the repeat guard cut the loop off deterministically instead of asking the model again. That's all working as designed. But it's also the single most natural thing a person would type, and the one place in the chain where the game has no verb for what the player is picturing. I haven't decided if that's worth an authored refusal. It's on the list.
+
+Nothing measured before those fixes is poolable with anything after. I kept both runs, because the pair is the finding.
+
+When the paid tier does run, it's measuring **competence, not balance**: did the model escape, and in how many moves against the 26-move optimum. There's no win rate to quote here and the config now says so out loud.
 
 The full technical write-up, including the findings that are only useful to Claude, stays in [`integration/README.md`](integration/README.md).
