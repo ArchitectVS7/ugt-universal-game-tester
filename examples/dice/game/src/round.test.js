@@ -203,7 +203,9 @@ describe('Accept 1 — all-attack vs all-defense damage math', () => {
     expect(s).toEqual(snapshot)
   })
 
-  it('leaves battle_over / winner to T-004, untouched', () => {
+  it('is still in progress after round 1, so battle_over is false and winner null', () => {
+    // The end-condition rule itself is covered in battle.test.js (T-004);
+    // asserted here so a round that decides nothing stays undecided.
     expect(next.battle_over).toBe(false)
     expect(next.winner).toBeNull()
   })
@@ -295,6 +297,12 @@ describe('Accept 3 — Dug in triggers at FS ≤ 10', () => {
 describe('Accept 4 — Reinforcements: once, at round 3, per side, routed by own allocation', () => {
   it('fires in exactly one round — round 3 — across a full 12-round battle', () => {
     const s = playRounds(createInitialState('reinf'), MAX_ROUNDS, EVEN, EVEN)
+    // Both sides survive all 12 rounds on this seed, so no round is skipped by
+    // T-004's post-battle no-op guard and the log really is 12 long. If this
+    // ever fails, the seed stopped going the distance — pick another one, never
+    // weaken the guard.
+    expect(s.player.force_strength).toBeGreaterThan(0)
+    expect(s.enemy.force_strength).toBeGreaterThan(0)
     expect(s.log).toHaveLength(MAX_ROUNDS)
     for (const side of ['player', 'enemy']) {
       const firing = s.log.filter((r) => r[side].bonuses.reinforcements > 0)

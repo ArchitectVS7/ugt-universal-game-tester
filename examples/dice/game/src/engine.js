@@ -13,6 +13,9 @@
  *
  * Layer 2 (T-003): allocation presets, bonus-dice rules, and round resolution
  * — see the banner comment further down.
+ *
+ * Layer 3 (T-004): battle end conditions (`battle_over` / `winner`) — see the
+ * banner comment above `evaluateOutcome`.
  */
 
 /** Faces on a die. */
@@ -119,8 +122,8 @@ export function rollPool(n, seed, rollCounter) {
  * T-003 — allocation presets, bonus-dice rules, and round resolution.
  *
  * Everything below is still pure: `resolveRound` takes a state and returns a
- * brand-new one. Battle end conditions (`battle_over` / `winner`) and the AI
- * opponent are deliberately NOT here — they belong to T-004 and T-005.
+ * brand-new one. The AI opponent is deliberately NOT here — it belongs to
+ * T-005. End conditions are the T-004 block further down.
  * ------------------------------------------------------------------------- */
 
 /**
@@ -160,10 +163,7 @@ export const REINFORCEMENT_DICE = 2
  */
 export const REINFORCEMENT_ROUND = 3
 
-/**
- * The battle ends in a draw after this many rounds. Unused by T-003 — declared
- * here so T-004 does not invent a second numbering convention.
- */
+/** The battle ends in a draw once this many rounds have been completed. */
 export const MAX_ROUNDS = 12
 
 /** A fresh side record. */
@@ -194,7 +194,9 @@ export function createInitialState(seed) {
     seed: String(seed),
     roll_counter: 0,
     round_number: 0,
-    // T-004 owns end conditions; T-003 carries these through untouched.
+    // A fresh battle is by definition unresolved: 20 vs 20 at round 0 is
+    // exactly `evaluateOutcome(STARTING_FS, STARTING_FS, 0)`, asserted in the
+    // tests so these literals cannot drift away from the rule.
     battle_over: false,
     winner: null,
     player: newSide(),
@@ -266,14 +268,26 @@ function poolSizes(preset, bonuses) {
  * D7 — the input state is never mutated; a brand-new state (with new nested
  * objects) comes back, because same-seed replay comparisons depend on it.
  *
+ * D10 (T-004) — once the battle is over, this is a NO-OP that returns the very
+ * same state object (`===`), rather than throwing. `__SEND_ACTION__` (T-007) is
+ * driven by a black-box browser adapter that will keep sending actions blind; a
+ * throw would surface as a console error and break the PRD acceptance criterion
+ * "a full battle completes without console errors". A no-op also freezes
+ * `roll_counter`, so same-seed replay stays byte-identical past the end of a
+ * battle. An invalid preset index is still a `RangeError` either way — the
+ * validation runs first, so a caller bug is never masked by the battle's state.
+ *
  * @param {object} state
  * @param {number} playerPresetIndex 0-6
  * @param {number} enemyPresetIndex 0-6
- * @returns {object} the new state
+ * @returns {object} the new state (or `state` itself if the battle is over)
  */
 export function resolveRound(state, playerPresetIndex, enemyPresetIndex) {
   const playerPreset = presetAt(playerPresetIndex, 'playerPresetIndex')
   const enemyPreset = presetAt(enemyPresetIndex, 'enemyPresetIndex')
+
+  // D10: post-battle actions are inert.
+  if (state.battle_over) return state
 
   const { seed, round_number: roundNumber } = state
   const playerFS = state.player.force_strength
@@ -320,6 +334,10 @@ export function resolveRound(state, playerPresetIndex, enemyPresetIndex) {
   const playerFSAfter = Math.max(0, playerFS - damageToPlayer)
   const enemyFSAfter = Math.max(0, enemyFS - damageToEnemy)
 
+  // T-004: end conditions are evaluated on the post-damage FS and the
+  // *completed* round count (D1), i.e. after this round's increment.
+  const outcome = evaluateOutcome(playerFSAfter, enemyFSAfter, roundNumber + 1)
+
   const sideAfter = (side, bonuses, fsAfter) => ({
     force_strength: fsAfter,
     // D5: this round's total bonus dice, the field `__GET_STATE__` exposes.
@@ -362,13 +380,59 @@ export function resolveRound(state, playerPresetIndex, enemyPresetIndex) {
     ...state,
     roll_counter: counter,
     round_number: roundNumber + 1,
-    // T-004 owns end conditions — carried through unchanged, and entry is
-    // deliberately NOT guarded on `battle_over` here (that guard is T-004's).
-    battle_over: state.battle_over,
-    winner: state.winner,
+    // T-004: FS ≤ 0 is decisive; otherwise the round cap draws. Never carried
+    // through from the previous state — the rule is re-derived every round.
+    battle_over: outcome.battle_over,
+    winner: outcome.winner,
     player: sideAfter(state.player, playerBonuses, playerFSAfter),
     enemy: sideAfter(state.enemy, enemyBonuses, enemyFSAfter),
     last_round: record,
     log: [...state.log, record],
   }
+}
+
+/* ------------------------------------------------------------------------- *
+ * T-004 — battle end conditions.
+ *
+ * The whole rule lives in `evaluateOutcome` so it is assertable in isolation
+ * and `resolveRound` merely applies it; nothing else in the engine (and nothing
+ * in the React tree) may re-derive "is the battle over".
+ * ------------------------------------------------------------------------- */
+
+/**
+ * Decide whether the battle has ended, and who won.
+ *
+ * PRD: "Battle ends when either side's FS ≤ 0 (decisive win/loss) or after
+ * round 12 (draw)." Precedence, in this exact order — it is the rule, not an
+ * implementation detail:
+ *
+ *   1. D9 — MUTUAL DESTRUCTION FIRST. Damage is applied simultaneously, so a
+ *      same-round double KO is genuinely reachable. The PRD does not name this
+ *      case; `"draw"` is the only value in its allowed enum
+ *      (`null | "player" | "enemy" | "draw"`) that is coherent when neither
+ *      side survived. Pinned here so T-005/T-006/T-007 need not re-litigate it.
+ *   2. enemy FS ≤ 0 → the player wins.
+ *   3. player FS ≤ 0 → the enemy wins.
+ *   4. `MAX_ROUNDS` completed rounds with both sides alive → draw.
+ *   5. otherwise the battle continues, and `winner` is `null`.
+ *
+ * Decisive checks come BEFORE the round cap on purpose: a knockout landing on
+ * round 12 is a decisive result, not a draw.
+ *
+ * `<= 0` rather than `=== 0` even though `resolveRound` clamps FS at 0 — this
+ * is what the PRD literally says, and the function must be correct for any
+ * state handed to it. Likewise `>=` on the round cap, so a hand-built or
+ * rewound state can never slip past it.
+ *
+ * @param {number} playerFS the player's Force Strength, post-damage
+ * @param {number} enemyFS the enemy's Force Strength, post-damage
+ * @param {number} roundNumber completed rounds (see D1)
+ * @returns {{battle_over: boolean, winner: null|'player'|'enemy'|'draw'}}
+ */
+export function evaluateOutcome(playerFS, enemyFS, roundNumber) {
+  if (playerFS <= 0 && enemyFS <= 0) return { battle_over: true, winner: 'draw' }
+  if (enemyFS <= 0) return { battle_over: true, winner: 'player' }
+  if (playerFS <= 0) return { battle_over: true, winner: 'enemy' }
+  if (roundNumber >= MAX_ROUNDS) return { battle_over: true, winner: 'draw' }
+  return { battle_over: false, winner: null }
 }

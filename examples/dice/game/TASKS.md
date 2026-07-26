@@ -112,11 +112,38 @@ or `window.__*__` hook was touched (T-006/T-007). Gate: `npm test -- --run`
 70/70 green, `npm run build` and `npm run lint` both clean.
 Orchestration: graphify=none — no `graphify-out/graph.json` exists in the repo root (`examples/dice/game`) or anywhere above it; the task area is two files (`src/engine.js`, its test)  · attempts=1/4.
 
-### T-004 · Battle end conditions — `status: TODO` · `coder: sonnet` · `after: T-003`
+### T-004 · Battle end conditions — `status: DONE` · `coder: sonnet` · `after: T-003`
 Implement `battle_over` / `winner` per PRD (FS ≤ 0 decisive win/loss; round 12
 reached with both sides alive → draw).
 **Accept:** unit tests cover decisive win, decisive loss, and
 draw-by-round-cap; `winner` is `null` while `battle_over` is `false`.
+
+**Delivered (2026-07-25):** Added `evaluateOutcome(playerFS, enemyFS,
+roundNumber)` to `src/engine.js` as the single source of truth for
+`battle_over`/`winner`, and wired it into `resolveRound` so end conditions are
+re-derived every round from the post-damage FS and the completed round count
+rather than carried through from the previous state. Precedence is pinned:
+a same-round mutual knockout (both sides ≤ 0) resolves as `"draw"` before the
+one-sided checks, decisive FS ≤ 0 checks come before the round-cap draw (so a
+round-12 knockout is decisive, not a draw), and both comparisons use `<=`/`>=`
+rather than `===` so a hand-built or rewound state is still handled correctly.
+Also added a post-battle no-op guard (D10) to `resolveRound`: once
+`battle_over` is true, further calls return the same state object unchanged
+(no throw), which keeps `roll_counter` frozen for same-seed replay and matches
+the PRD's no-console-errors acceptance bar for a black-box `__SEND_ACTION__`
+driver that may keep sending actions after the battle ends. New
+`src/battle.test.js` (28 tests) covers `evaluateOutcome` in isolation
+(decisive win/loss, the D9 mutual-destruction draw, `<=`/`>=` boundary
+correctness) plus `resolveRound` integration (draw-by-round-cap, winner stays
+`null` while in progress, the post-battle no-op by reference equality);
+`src/round.test.js` was updated to point its old "leaves battle_over to
+T-004" placeholder at the real behavior. Scope was held to this layer only —
+the AI opponent's allocation heuristic (T-005) and all UI/`window.__*__` hook
+work (T-006/T-007) were deliberately left untouched. Gate: `npm test -- --run`
+green, `npm run build` and `npm run lint` both clean.
+Orchestration: graphify=none — no `graphify-out/graph.json` exists in this
+repo root (`examples/dice/game`) or above it, so there is no graph to query; I
+grounded the plan in `PRD.md`, · attempts=1/4.
 
 ### T-005 · Deterministic AI opponent — `status: TODO` · `coder: sonnet` · `after: T-003`
 Implement the AI allocation heuristic (`defense dice ∝ 1 - own_FS/20`, rounded
