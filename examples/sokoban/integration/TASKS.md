@@ -12,17 +12,27 @@ against `../game`.
 introduced so far all exit 0.
 
 **Standing constraints:**
-- This example requires a local `godot4` CLI binary (Godot 4.x) on `PATH`,
-  same as `../game` — confirm `godot4 --version` works before starting
-  T-001.
+- This example requires a local Godot 4.x CLI binary on `PATH`, invoked as
+  `godot4`, same as `../game` — confirm `godot4 --version` works before
+  starting T-001. (Homebrew installs it as `godot`; if that is what you have,
+  symlink it: `ln -s "$(command -v godot)" /usr/local/bin/godot4`.)
 - No push/collision/win logic here — every rule lives in
   `../game/scripts/board.gd`. This folder only transports state and actions.
 - `GodotTcpAdapter` is constructed directly by each ladder script, per
-  `examples/harness-game`'s precedent — it is not wired into
-  `ugt/core/env.py`'s `engine.type` dispatch.
-- `../game` must be running headless with `--ugt-bridge` before ANY ladder
-  script — including the spike — can pass; there is no scripted way to bring
-  the bridge up automatically yet, so start it manually first.
+  `examples/harness-game`'s precedent — it is not dispatched by
+  `ugt/core/env.py` (its `ugt.config.yaml` declares `engine.type: custom`).
+- **Every ladder script owns the bridge's lifecycle** — it spawns
+  `godot4 --headless --path ../game -- --ugt-bridge --ugt-port=<port>` itself,
+  waits for the port to accept a connection, and tears the process down on
+  exit (including on failure). Attaching to an already-running bridge is a
+  fallback for interactive debugging, not the normal path. This mirrors
+  `examples/harness-game`, whose adapter spawns `harness.py` rather than
+  requiring a human to start it, and it is what `PRD.md` specifies for
+  `connect()`. No ladder script may require a manual pre-step: a rung that
+  only passes when someone started a server by hand cannot run unattended,
+  and a rung that silently passes because it attached to a *stale* bridge
+  from an earlier build is worse — verify the PID you spawned is the one
+  listening (`lsof -nP -iTCP:<port> -sTCP:LISTEN`).
 
 Statuses: `TODO` | `IN-PROGRESS` | `DONE` | `BLOCKED(reason)`
 
@@ -31,11 +41,17 @@ Statuses: `TODO` | `IN-PROGRESS` | `DONE` | `BLOCKED(reason)`
 ## M0 — Transport
 
 ### T-001 · Spike: raw TCP round-trip — `status: TODO` · `coder: sonnet` · `after: —`
-`spike_sokoban.py`: launch (or attach to) the headless Godot bridge, open a
-TCP socket, send `reset` then one `step`, print both responses, close
-cleanly. No adapter class.
-**Accept:** script exits 0 and prints a valid `state` dict from both
-commands.
+Two files. `bridge_process.py`: a small reusable context manager that spawns
+`godot4 --headless --path ../game -- --ugt-bridge --ugt-port=<port>`, polls
+until the port accepts a connection (bounded timeout, clear error on
+give-up), yields the port, and terminates the child on exit including on
+exception. Every later rung imports this rather than re-rolling spawn logic.
+`spike_sokoban.py`: use it to open a TCP socket, send `reset` then one
+`step`, print both responses, close cleanly. No adapter class.
+**Accept:** `python3 spike_sokoban.py` exits 0 from a cold machine with **no
+Godot process already running**, and prints a valid `state` dict from both
+commands; no `godot4` process survives the script (check with `pgrep -f
+ugt-bridge`); the port is free again afterwards.
 
 ### T-002 · `GodotTcpAdapter` (`BaseAdapter`) — `status: TODO` · `coder: opus` · `after: T-001`
 Wrap the spike's transport in a `BaseAdapter` subclass: `connect`/`reset`/
@@ -52,21 +68,24 @@ through the adapter and exits 0.
 **Accept:** unit-callable; asserts pass against a known-good state sequence
 and fail against a deliberately corrupted one (test fixture).
 
-### T-004 · `verify_round1.py` — one solved level — `status: TODO` · `coder: opus` · `after: T-003`
-Drive level 1's documented solution to `level_solved: true`; assert F1, F2,
-F4, F5 from the PRD's table; check invariants after every step.
+### T-004 · `verify_round1.py`: one solved level — `status: TODO` · `coder: opus` · `after: T-003`
+Drive level 1's solution — read it from `../game/levels/solutions.json`, the
+artifact `../game`'s T-005 commits; never hardcode a copy here, or the two
+drift — to `level_solved: true`; assert F1, F2, F4, F5 from the PRD's table;
+check invariants after every step.
 **Accept:** script prints `[PASS]`/`[FAIL]` per check and a `ROUND 1 MET —
 p/t` footer; exits non-zero on any failure.
 
-### T-005 · `verify_round2.py` — full 3-level clear + no-op checks — `status: TODO` · `coder: opus` · `after: T-004`
-All 3 levels back-to-back to `all_levels_solved: true`; deliberately drive
-into a wall and a blocked box to assert F1/F3 (no-op, state unchanged).
+### T-005 · `verify_round2.py`: full 3-level clear + no-op checks — `status: TODO` · `coder: opus` · `after: T-004`
+All 3 levels back-to-back to `all_levels_solved: true`, again reading the
+sequences from `../game/levels/solutions.json`; deliberately drive into a
+wall and a blocked box to assert F1/F3 (no-op, state unchanged).
 **Accept:** same PASS/FAIL + footer convention; exits non-zero on any
 failure.
 
 ## M2 — Robustness (Tier 2, R3)
 
-### T-006 · `verify_round3.py` — exploit-hunter + replay — `status: TODO` · `coder: opus` · `after: T-005`
+### T-006 · `verify_round3.py`: exploit-hunter + replay — `status: TODO` · `coder: opus` · `after: T-005`
 Random walk ≥100 steps per level via `ugt/core/exploit_hunter.py`, invariants
 after every step; then replay one seed twice and diff state.
 **Accept:** 0 invariant violations across all 3 levels; replay diff empty;
