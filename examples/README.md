@@ -15,8 +15,8 @@ dev/                            # parent directory of all my projects
 │   ├── _UGT                    # Underscore in front of UGT keeps this folder on top
 │   │   ├──  examples           # Shipped with repo, where you are now
 │   │   └── integrations        # Where my live UGT harnesses go per game
-│   │        └── SpacerQuest    # UGT test harness and lesson learned files for my local game    
-│   ├── SpacerQuest             # Example local game repo
+│   │        └── SpaceTrader    # UGT test harness and lesson learned files for my space trading game
+│   ├── SpaceTrader             # Example local game repo (a space trading game)
 
 I used .gitignore to exclude my local 'integrations' folder from being committed to the repository.
 

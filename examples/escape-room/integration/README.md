@@ -240,8 +240,9 @@ Also hit independently by `dice` (its Finding 5).
 Now exits 1 on `failed` **or** `not_reached` (a feature never reached has not
 been verified). Negative control run before believing it — inverted assertion
 gives exit 1, clean map gives exit 0 — and every feature-map integration in the
-repo re-run to check nothing had been silently red: `dice` 4/4, `escape-room`
-6/6, `spacerquest` 9/9, all still exit 0. Blast radius was zero.
+portfolio re-run to check nothing had been silently red: `dice` 4/4,
+`escape-room` 6/6, and a third (a space trading game kept outside this repo)
+9/9 — all still exit 0. Blast radius was zero.
 
 **2. `ugt smoke-test` passes ~45% of the time on a FROZEN state here.** Only
 **6 of 41** actions change state from the start room, and an inapplicable action

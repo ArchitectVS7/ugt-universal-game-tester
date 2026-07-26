@@ -41,8 +41,12 @@ Every rung uses `ugt.core.trial.GateRunner`, so a failure is fail-closed
 (non-zero exit) and a game anomaly that is *not* a gate failure has somewhere to
 go — the `[FINDING]` channel, printed in a block above the footer.
 
-Tier 3 (`ugt playtest`) is deliberately out of scope for this example — `dice`
-and `escape-room` already demonstrate that tier end to end.
+Tier 3 (`ugt playtest`) is **not built yet** — no strategy guide, no playtest
+script, nothing run. It is in scope: this is the only one of the three examples
+inside a game engine, so it is the only place the LLM tier can be shown to drive
+one. `playtest.seeding: deterministic` and `probe_action` in `ugt.config.yaml`
+are already set for it. When it runs it measures competence (solved, and moves
+against the committed 73-move solution), never a rate.
 
 ## Files
 
