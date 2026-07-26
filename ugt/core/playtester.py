@@ -322,7 +322,10 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
     # not just the ones whose author remembered to write a probe — the browser
     # dice game had to carry its own, which is how the check stayed a per-game
     # habit instead of a guarantee.
-    _probe_action = playtest_cfg.get("probe_action", 0)
+    # `probe_actions` (a LIST, driven verbatim) wins over `probe_action` (a single
+    # id, repeated). The list exists for games whose seed-sensitive action has a
+    # precondition — see ugt/core/seeding.py::as_sequence.
+    _probe_action = playtest_cfg.get("probe_actions", playtest_cfg.get("probe_action", 0))
     try:
         print(f"[*] {seeding.probe(adapter, seeding_mode, episode_seeds, _probe_action)}")
     except seeding.SeedingError as e:

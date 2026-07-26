@@ -48,18 +48,32 @@ class FakeAdapter:
       "random"        - different every reset, seed or not
       "deterministic" - identical every reset
       "inert"         - never changes state at all (probe cannot prove anything)
+      "seeded_after_setup"
+                      - genuinely seeded, but the seed only decides the outcome
+                        of action ROLL, and ROLL does nothing until action SETUP
+                        has been driven. Models the terminal-hacking RPG whose
+                        hack roll needs a connection first: every single-action
+                        probe is honestly identical across seeds.
     """
+
+    #: The two action ids the "seeded_after_setup" game cares about.
+    SETUP = 4
+    ROLL = 8
 
     def __init__(self, mode):
         self.mode = mode
         self._seed = None
         self._tick = 0
         self._run = 0
+        self._connected = False
+        self._loot = 0
 
     def reset(self):
         self._seed = None
         self._tick = 0
         self._run += 1
+        self._connected = False
+        self._loot = 0
         return self._state()
 
     def reset_seeded(self, seed):
@@ -68,9 +82,15 @@ class FakeAdapter:
         self._seed = seed
         self._tick = 0
         self._run += 1
+        self._connected = False
+        self._loot = 0
         return self._state()
 
     def _state(self):
+        if self.mode == "seeded_after_setup":
+            # `x` moves on every step (so the probe is never vacuous), but `loot`
+            # — the only seed-DEPENDENT field — moves only on a ROLL after SETUP.
+            return {"x": self._tick, "loot": self._loot}
         if self.mode == "inert":
             return {"x": 0}
         if self.mode == "random":
@@ -83,6 +103,14 @@ class FakeAdapter:
 
     def step(self, _action):
         self._tick += 1
+        if self.mode == "seeded_after_setup":
+            if _action == self.SETUP:
+                self._connected = True
+            elif _action == self.ROLL and self._connected:
+                # Deterministic in (seed, roll index): the same seed replays, and
+                # two different seeds diverge — exactly the contract per_episode
+                # claims, reachable only through SETUP.
+                self._loot += sum(ord(c) for c in str(self._seed)) + self._tick
         return self._state(), False, False, {}
 
 
@@ -130,6 +158,40 @@ def main() -> int:
                      seeding.PER_EPISODE, ["s1", "s2"])
     check(ok, "a game that never reproduces a seed is caught",
           "passes 'two seeds differ' but a seed names nothing")
+
+    # ── the probe SEQUENCE: a seed-sensitive action behind a precondition ────
+    # Both directions on the same game, because the point is that the verdict
+    # flips with the probe and not with the game.
+    print("\n  -- probe(): action SEQUENCE (seed-sensitive action has a precondition) --")
+    SETUP, ROLL = FakeAdapter.SETUP, FakeAdapter.ROLL
+
+    ok, msg = raises(seeding.probe, FakeAdapter("seeded_after_setup"),
+                     seeding.PER_EPISODE, ["s1", "s2"], ROLL)
+    check(ok, "a single repeated action CANNOT reach the seed here — probe fails",
+          "the false-failure this feature exists to remove")
+    check(ok and "probe_actions" in msg,
+          "and that failure NAMES the probe as the suspect, not just the game",
+          msg.splitlines()[-1].strip() if ok else "no hint offered")
+
+    proof = seeding.probe(FakeAdapter("seeded_after_setup"), seeding.PER_EPISODE,
+                          ["s1", "s2"], [SETUP, ROLL, ROLL, ROLL])
+    check("PROVEN" in proof,
+          "the SAME game PASSES once the sequence reaches the roll", proof)
+
+    ok, _ = raises(seeding.probe, FakeAdapter("ignores_seed"), seeding.PER_EPISODE,
+                   ["s1", "s2"], [SETUP, ROLL, ROLL, ROLL])
+    check(ok, "a sequence probe still catches a game that ignores its seed",
+          "the longer probe must not become a way to pass by accident")
+
+    ok, msg = raises(seeding.probe, FakeAdapter("seeded"), seeding.PER_EPISODE,
+                     ["s1", "s2"], [])
+    check(ok, "an EMPTY sequence is REFUSED (two empty streams compare equal)",
+          msg.splitlines()[0] if ok else "accepted — every mode would pass vacuously")
+
+    seq = seeding.as_sequence(7)
+    check(seq == [7] * seeding.PROBE_STEPS,
+          "a plain int still repeats PROBE_STEPS times (backward compatible)",
+          f"{seq}")
 
     print("\n  -- probe(): deterministic --")
     proof = seeding.probe(FakeAdapter("deterministic"), seeding.DETERMINISTIC, [])

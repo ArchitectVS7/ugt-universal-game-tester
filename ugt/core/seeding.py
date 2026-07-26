@@ -63,6 +63,39 @@ class SeedingError(Exception):
     """The seeding declaration is missing, malformed, or contradicted by the game."""
 
 
+def as_sequence(probe_action) -> list:
+    """Normalize `probe_action` into the exact action sequence a trial drives.
+
+    An int repeats `PROBE_STEPS` times, which is right for most games: the
+    seed-sensitive thing is reachable from the opening position, so hitting it
+    four times is the cheapest way to make two seeds disagree.
+
+    A LIST expresses the case a repeat cannot: **a game whose seed-sensitive
+    action has a precondition.** Measured on a terminal-hacking RPG whose RNG
+    cursor ticks once per command but whose only seed-DEPENDENT outcome is a
+    hack roll — and a hack roll requires being connected to a server first. Every
+    single-action probe there is honestly identical across seeds, so the probe
+    reported "the seed is being ignored" against a game with a passing
+    same-seed-replay test. A false failure here is expensive precisely because it
+    is indistinguishable from the real bug this module exists to catch: both say
+    the seed did nothing.
+
+    The sequence is driven verbatim (its length replaces PROBE_STEPS), so it must
+    END on the seed-sensitive action rather than merely include it.
+    """
+    if isinstance(probe_action, (list, tuple)):
+        seq = list(probe_action)
+        if not seq:
+            raise SeedingError(
+                "the probe action sequence is EMPTY, so a trial would drive nothing "
+                "and every mode would 'pass' by comparing two empty streams. Give "
+                "`playtest.probe_actions` the action sequence that reaches a "
+                "seed-sensitive outcome, or set a single `playtest.probe_action`."
+            )
+        return seq
+    return [probe_action] * PROBE_STEPS
+
+
 def resolve(playtest_cfg: dict) -> tuple:
     """(mode, seeds) from a `playtest:` config block. Raises SeedingError.
 
@@ -107,15 +140,15 @@ def resolve(playtest_cfg: dict) -> tuple:
     return mode, seeds
 
 
-def _trial(adapter, seed, probe_action: int) -> list:
+def _trial(adapter, seed, sequence: list) -> list:
     """Drive a short fixed sequence and return the observable state stream."""
     if seed is None:
         adapter.reset()
     else:
         adapter.reset_seeded(seed)
     out = []
-    for _ in range(PROBE_STEPS):
-        state, terminated, _trunc, _info = adapter.step(probe_action)
+    for action in sequence:
+        state, terminated, _trunc, _info = adapter.step(action)
         out.append(json.dumps(state, sort_keys=True, default=str))
         if terminated:
             break
@@ -130,17 +163,35 @@ def probe(adapter, mode: str, seeds: list, probe_action: int = 0) -> str:
     a one-directional check passes for the wrong reasons: a reset hook returning
     random state would satisfy "two seeds differ" while being just as broken as
     one that ignores the seed entirely.
+
+    `probe_action` is an action id, or a LIST of them driven verbatim when the
+    seed-sensitive action has a precondition (see `as_sequence`).
     """
+    seq = as_sequence(probe_action)
+
     if mode == PER_EPISODE:
-        a1 = _trial(adapter, seeds[0], probe_action)
-        b1 = _trial(adapter, seeds[1], probe_action)
-        a2 = _trial(adapter, seeds[0], probe_action)
+        a1 = _trial(adapter, seeds[0], seq)
+        b1 = _trial(adapter, seeds[1], seq)
+        a2 = _trial(adapter, seeds[0], seq)
         if a1 == b1:
+            # The two readings of this are opposite, and the message has to carry
+            # both: either the game ignores its seed, or the PROBE never reached
+            # anything the seed decides. A repeated single action is the shape
+            # that most often cannot reach it.
+            hint = ""
+            if len(set(seq)) == 1:
+                hint = (
+                    f"\n  The probe drove action {seq[0]!r} x{len(seq)}. If that action's "
+                    f"outcome is not decided by the RNG, this failure is the PROBE's, not "
+                    f"the game's — set `playtest.probe_actions` to a sequence that ENDS on "
+                    f"a seed-sensitive action (e.g. the setup steps its precondition needs, "
+                    f"then the roll)."
+                )
             raise SeedingError(
                 f"seeding={PER_EPISODE!r} is contradicted: seeds {seeds[0]!r} and "
                 f"{seeds[1]!r} produce an IDENTICAL {len(a1)}-step stream. The seed is "
                 f"being ignored, so every episode is the same match and no batch "
-                f"computed from this run means anything."
+                f"computed from this run means anything.{hint}"
             )
         if a1 != a2:
             raise SeedingError(
@@ -152,8 +203,8 @@ def probe(adapter, mode: str, seeds: list, probe_action: int = 0) -> str:
                 f"and {seeds[0]!r} replays identically ({len(a1)} steps compared)")
 
     if mode == DETERMINISTIC:
-        a1 = _trial(adapter, None, probe_action)
-        a2 = _trial(adapter, None, probe_action)
+        a1 = _trial(adapter, None, seq)
+        a2 = _trial(adapter, None, seq)
         if a1 != a2:
             raise SeedingError(
                 f"seeding={DETERMINISTIC!r} is contradicted: two plain resets driven "
@@ -174,8 +225,8 @@ def probe(adapter, mode: str, seeds: list, probe_action: int = 0) -> str:
     # UNCONTROLLED — the useful direction is the opposite one. A game declared
     # unseedable that actually replays identically is mislabelled, and its
     # episodes are replays being counted as samples.
-    a1 = _trial(adapter, None, probe_action)
-    a2 = _trial(adapter, None, probe_action)
+    a1 = _trial(adapter, None, seq)
+    a2 = _trial(adapter, None, seq)
     if a1 == a2 and len(set(a1)) > 1:
         raise SeedingError(
             f"seeding={UNCONTROLLED!r} is contradicted: two plain resets replayed "
