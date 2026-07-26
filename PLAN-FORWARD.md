@@ -104,7 +104,8 @@ Revisit when an item actually blocks the current game, not on a schedule:
   added specifically to sidestep this rather than solve it.
 - **Browser feature map + screen detection** — `press_key`/`type_text` action syntax in `feature-map.yaml`,
   plus `detect_screen()`/`waitForScreen()` (needed for `ugt verify` to cover browser titles).
-- **`ugt verify` doesn't support `engine.type: "real_server"`** — low priority; the ladder scripts cover it.
+- **`ugt verify` doesn't support `engine.type: "custom"`** — by construction (there is no adapter for it to
+  dispatch); low priority, since those integrations assert the same invariants in their ladder scripts.
 - **Desktop adapter** — `pyautogui` or a computer-use API for non-browser, non-terminal games.
 - **HTML coverage report** — human-readable `coverage-report.html` generated from the JSON.
 - **`ugt init --with-feature-map`** — scaffold a starter `feature-map.yaml` alongside `ugt.config.yaml`.

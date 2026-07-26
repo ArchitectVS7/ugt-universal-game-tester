@@ -21,9 +21,9 @@
 
 `ugt playtest` (`ugt/core/playtester.py`) already implements the core LLM-action contract described below
 (`LLM_ACTION_SCHEMA`: `reasoning`, `expected_outcome`, `potential_bug`, `is_novel`) for `browser`/`simulation`
-engines. **It does not yet support `engine.type: "real_server"`** — `playtest_game()` only branches on
-`PlaywrightAdapter`/`SubprocessAdapter`. Wiring `RealClientAdapter` in is the concrete next step for Phase 2,
-not a redesign — the contract below already fits `RealClientAdapter.get_terminal_text()`/`press_key()`.
+engines. Games on `engine.type: custom` are covered too, via a different door: build your adapter and call
+`playtest_game_with_adapter()` directly, which runs the identical LLM loop — `playtest_game()` is only the
+config-dispatched convenience wrapper around it.
 
 ## Principles worth keeping
 

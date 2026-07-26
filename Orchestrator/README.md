@@ -344,11 +344,12 @@ is the onboarding path in depth; [`../examples/harness-game/`](../examples/harne
 is the fastest thing you can actually run.
 
 There is one wiring step in between. The Orchestrator writes code; UGT drives it;
-neither knows the other exists, so your game needs an **adapter**. Pick one of three
-bridges via `engine.type` in a `ugt.config.yaml`: `simulation` (a JSON-lines
-subprocess harness over stdin/stdout), `browser` (a headless page exposing
-`window.__GET_STATE__` / `window.__SEND_ACTION__`), or `real_server` (a live server
-over HTTP + Socket.IO). The manual's **trial-ladder** section covers the
+neither knows the other exists, so your game needs an **adapter**. Pick a bridge via
+`engine.type` in a `ugt.config.yaml`: `simulation` (a JSON-lines subprocess harness
+over stdin/stdout), `browser` (a headless page exposing `window.__GET_STATE__` /
+`window.__SEND_ACTION__`), or `custom` (anything else — you write a small
+transport-only `BaseAdapter` subclass and your ladder scripts construct it
+directly). The manual's **trial-ladder** section covers the
 methodology; `examples/harness-game/` shows the subprocess harness end-to-end and is
 the fastest orientation available.
 

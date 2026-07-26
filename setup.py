@@ -19,8 +19,6 @@ setup(
         # post-install step to fetch browser binaries: `playwright install chromium`.
         "browser":    ["playwright"],
         "playtest":   ["anthropic>=0.25.0", "python-dotenv>=1.0.0"],
-        # Real-server adapter (drives a live game server over HTTP + Socket.IO).
-        "realclient": ["requests", "python-socketio[client]>=5", "websocket-client"],
     },
     entry_points={
         "console_scripts": [

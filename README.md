@@ -38,7 +38,6 @@ pip install -e .                  # core (numpy + gymnasium + pyyaml — no heav
 pip install -e ".[browser]"       # + Playwright headless browser (for engine.type: browser)
 playwright install chromium       # required after [browser] install — downloads browser binaries
 pip install -e ".[playtest]"      # + anthropic SDK (for ugt playtest)
-pip install -e ".[realclient]"    # + requests/python-socketio/websocket-client (for real_server adapter)
 ```
 
 ## Quickstart — wiring up a new game
@@ -85,12 +84,12 @@ in your game's or integration's directory.
 ## Architecture, in one paragraph
 
 A Gymnasium environment (`ugt/core/env.py`) builds observation/action spaces dynamically from your
-`ugt.config.yaml` and picks one of three adapters by `engine.type`: `browser` (Playwright, drives a real
-web game through `window.__GET_STATE__`/`__SEND_ACTION__` hooks the game itself exposes), `simulation`
-(JSON over stdin/stdout to a subprocess harness the game exposes), or `real_server` (Socket.IO + HTTP
-against a live running server). A few integrations use additional purpose-built adapters (plain HTTP,
-JSON-lines subprocess harnesses) constructed directly by that integration's trial-ladder scripts rather
-than through `engine.type`. Every adapter is transport-only — it maps declared action ids to real UI/API
+`ugt.config.yaml` and picks an adapter by `engine.type`: `browser` (Playwright, drives a real
+web game through `window.__GET_STATE__`/`__SEND_ACTION__` hooks the game itself exposes) or `simulation`
+(JSON over stdin/stdout to a subprocess harness the game exposes). Games that fit neither declare
+`engine.type: custom` and supply their own purpose-built adapter (plain HTTP, a TCP socket, a JSON-lines
+subprocess harness), constructed directly by that integration's trial-ladder scripts rather than
+dispatched by `env.py` — see `examples/harness-game/`. Every adapter is transport-only — it maps declared action ids to real UI/API
 calls and never reimplements game logic; an action not yet wired raises `NotImplementedError` rather than
 fabricating behavior.
 

@@ -91,9 +91,11 @@ def playtest_game(config, strategy_guide, max_actions=100, output_path=None, pro
     elif config.engine_type == "simulation":
         from ugt.adapters.subprocess import SubprocessAdapter
         adapter = SubprocessAdapter(config)
-    elif config.engine_type == "real_server":
-        from ugt.adapters.realclient import RealClientAdapter
-        adapter = RealClientAdapter(config)
+    elif config.engine_type == "custom":
+        raise ValueError(
+            "engine.type 'custom' cannot be dispatched here — build your adapter directly "
+            "and call playtest_game_with_adapter() instead (see that function's docstring)."
+        )
     else:
         raise ValueError(f"Unknown engine type: '{config.engine_type}'")
 
@@ -501,8 +503,8 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
                 # report the resulting transition (type_text_step -> (state, term,
                 # trunc, info)), capture it so the state-delta assertion and the
                 # invariant checks see the REAL delta — never a vacuous empty one.
-                # Adapters whose type_text is a pure keystroke-into-a-field (browser /
-                # real_server: the text is buffered and only committed by a later
+                # Adapters whose type_text is a pure keystroke-into-a-field (e.g. browser:
+                # the text is buffered and only committed by a later
                 # Enter/step) do NOT expose type_text_step, so they keep the existing
                 # fire-and-forget behavior byte-for-byte. This is an added input
                 # channel, not a change to the delta/fields/bug-report contract.

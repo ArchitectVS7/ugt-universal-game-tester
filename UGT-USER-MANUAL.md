@@ -179,10 +179,11 @@ are available.
 
 UGT never imports your game code directly. It talks to your game through a **bridge** — a thin wrapper that translates UGT's standard protocol into your game's API. You write the bridge; UGT handles everything else.
 
-The diagram shows the two engine types this manual walks through (`simulation` and `browser`). A third,
-`real_server` (RealClientAdapter), drives a live game server over HTTP + Socket.IO instead of a bridge —
-see the architecture section of `README.md`. Integrations may also construct purpose-built harness adapters
-directly (the JSON-lines subprocess pattern); the ladder scripts in `examples/harness-game/` show that shape.
+The diagram shows the two engine types this manual walks through (`simulation` and `browser`) — the two
+that `env.py` dispatches for you. Anything else (a live server over HTTP, a TCP socket to a game engine's
+frame loop, a JSON-lines harness) declares `engine.type: custom` and supplies its own transport-only
+`BaseAdapter` subclass, which the integration's own ladder scripts construct directly; the scripts in
+`examples/harness-game/` show that shape end to end.
 
 ---
 
@@ -210,9 +211,9 @@ The bridge is the only piece of code you write. It wraps your game engine in a s
 |---|---|---|
 | ...is a headless subprocess (Python sim, TypeScript harness, Godot/Unity CLI build) | `simulation` | JSON-lines over stdin/stdout (`SubprocessAdapter`) |
 | ...runs in a browser (React, Phaser, Vue, vanilla JS, any web frontend) | `browser` | Headless Chromium via Playwright; your game exposes `window.__GET_STATE__` / `window.__SEND_ACTION__` hooks (`PlaywrightAdapter`) |
-| ...is a live server already running (HTTP + Socket.IO, multiplayer backend) | `real_server` | HTTP + Socket.IO client (`RealClientAdapter`) — see `README.md` architecture section |
+| ...is anything else (a live server over HTTP/WebSocket, a TCP bridge into an engine's frame loop) | `custom` | You write a small transport-only `BaseAdapter` subclass; your ladder scripts construct it directly (`env.py` does not dispatch it). See `examples/harness-game/` |
 
-Not sure? **Subprocess is the most portable starting point** — `examples/harness-game/` shows it end-to-end with zero dependencies. If your game has a frontend you want to drive through UI interactions, use Browser. If your game already has a live running server and you want UGT to talk to it directly, use real_server.
+Not sure? **Subprocess is the most portable starting point** — `examples/harness-game/` shows it end-to-end with zero dependencies. If your game has a frontend you want to drive through UI interactions, use Browser. Reach for `custom` only when neither transport fits — it costs you a small adapter, but nothing else in the ladder changes.
 
 ### 4a. Subprocess Bridge (headless / simulation games)
 

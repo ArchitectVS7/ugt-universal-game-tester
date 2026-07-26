@@ -66,9 +66,12 @@ class UniversalGameEnv(gym.Env):
             self.adapter = PlaywrightAdapter(self.config)
         elif self.config.engine_type == "simulation":
             self.adapter = SubprocessAdapter(self.config)
-        elif self.config.engine_type == "real_server":
-            from ugt.adapters.realclient import RealClientAdapter
-            self.adapter = RealClientAdapter(self.config)
+        elif self.config.engine_type == "custom":
+            raise ValueError(
+                "engine.type 'custom' has no adapter to dispatch — the integration builds "
+                "its own adapter and calls it directly, so it cannot go through this env. "
+                "Import your adapter in your ladder scripts instead (see examples/harness-game)."
+            )
         else:
             raise ValueError(f"Unknown engine type: {self.config.engine_type}")
 

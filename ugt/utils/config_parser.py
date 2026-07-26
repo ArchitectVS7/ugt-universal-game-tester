@@ -30,11 +30,14 @@ class UgtConfig:
         if "engine" not in self.data:
             raise ConfigError("Missing required section: engine")
         engine = self.data["engine"]
-        if "type" not in engine or engine["type"] not in ["browser", "simulation", "real_server"]:
-            raise ConfigError("engine.type must be one of 'browser', 'simulation', 'real_server'")
-        # real_server drives a running game over HTTP/Socket.IO — it uses base_url/server_cmd,
-        # not a sim entrypoint — so engine.entry is not required for it.
-        if engine["type"] != "real_server" and "entry" not in engine:
+        if "type" not in engine or engine["type"] not in ["browser", "simulation", "custom"]:
+            raise ConfigError("engine.type must be one of 'browser', 'simulation', 'custom'")
+        # "custom" means the integration constructs its own adapter directly (its ladder
+        # scripts import it and call BaseAdapter methods) rather than being dispatched by
+        # env.py. Such a config is documentary — it carries observation/action mappings and
+        # per-game engine settings, but there is no entrypoint for env.py to spawn, so
+        # engine.entry is not required. See examples/harness-game for the pattern.
+        if engine["type"] != "custom" and "entry" not in engine:
             raise ConfigError("Missing required field: engine.entry")
 
         if "observation_space" not in self.data:
@@ -80,7 +83,7 @@ class UgtConfig:
 
     @property
     def engine_entry(self):
-        # Optional for real_server (which uses base_url/server_cmd instead of a sim entry).
+        # Optional for "custom" (the ladder scripts build the adapter; nothing to spawn).
         return self.data["engine"].get("entry")
 
     @property

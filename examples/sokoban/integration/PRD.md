@@ -5,11 +5,11 @@ engine-first adapter** over a local TCP socket — the same "purpose-built
 transport-only adapter, constructed directly by the ladder scripts" pattern
 `examples/harness-game` uses, because Godot has no built-in UGT engine type.
 
-## Why not a built-in `engine.type`
+## Why a hand-written adapter
 
-UGT ships three engine types: `browser` (Playwright + `window` hooks),
-`simulation` (subprocess + blocking stdio JSON-lines), `real_server`
-(Socket.IO + HTTP). None fit a Godot game directly:
+UGT dispatches two engine types from `ugt/core/env.py`: `browser` (Playwright
++ `window` hooks) and `simulation` (subprocess + blocking stdio JSON-lines).
+Neither fits a Godot game:
 
 - Not a web page → not `browser`.
 - Godot's frame-based `_process()` loop doesn't do a blocking
@@ -18,13 +18,12 @@ UGT ships three engine types: `browser` (Playwright + `window` hooks),
   a **non-blocking TCP socket polled once per frame** is Godot's natural
   idiom (the same reason the community's Godot-RL-Agents plugin uses TCP,
   not stdio).
-- Not a persistent multiplayer-style server → not `real_server` (that
-  adapter also assumes Socket.IO specifically).
 
 So this integration follows `examples/harness-game`'s precedent exactly: a
 small `BaseAdapter` subclass, constructed directly by the ladder scripts,
-**not** registered under `engine.type` in `ugt/core/env.py`.
-`ugt.config.yaml` here is documentary (the config *shape*), same caveat as
+**not** dispatched by `env.py`. Its `ugt.config.yaml` therefore declares
+`engine.type: custom` — the type reserved for exactly this case (documentary
+config, no entrypoint for `env.py` to spawn) — same caveat as
 `harness-game`'s.
 
 ## Adapter: `godot_tcp_adapter.py`
@@ -63,8 +62,9 @@ all_levels_solved   bool
 
 ## Feature map coverage plan
 
-(Driven directly by the ladder scripts, same as `harness-game` — this isn't
-`real_server`, so `verifier.py`'s real_server gap doesn't apply.)
+(Driven directly by the ladder scripts, same as `harness-game` — the `ugt
+verify` CLI only drives adapters `env.py` dispatches, so these assertions are
+asserted in-harness by the ladder rather than through `verifier.py`.)
 
 | ID | Assertion | Precondition |
 |---|---|---|
