@@ -12,29 +12,55 @@ examples.
 # from the repo root
 cd examples/escape-room/game && npm test && cd -      # game suite: 85/85
 
-cd examples/escape-room/integration
-ugt smoke-test --config ugt.config.yaml                                   # wiring
-ugt verify --config ugt.config.yaml --feature-map feature-map.yaml        # Tier 1 — 6/6
-python3 ../../../examples/escape-room/integration/fuzz_escape_room.py         # Tier 2 — 6/6
+# the trial ladder — each rung is fail-closed, exit 0 only when every check passed
+for s in spike_escape_room smoke_escape_room_adapter \
+         verify_round1 verify_round2 verify_round3; do
+  python3 examples/escape-room/integration/$s.py || break
+done
 ```
 
-Recorded results (2026-07-25, against the game at 85/85 green):
+Recorded results (2026-07-26, against the game at 85/85 green):
+
+| Rung | Script | Result |
+|---|---|---|
+| 1 spike | `spike_escape_room.py` | **SPIKE MET — 27/27** |
+| 2 smoke | `smoke_escape_room_adapter.py` | **SMOKE MET — 12/12** |
+| 3 R1 playability | `verify_round1.py` | **ROUND 1 MET — 17/17** |
+| 4 R2 full spine | `verify_round2.py` | **ROUND 2 MET — 47/47**, 552 commands |
+| 5 R3 robustness | `verify_round3.py` | **ROUND 3 MET — 10/10**, 2 seeds × 160 steps |
+
+The generic CLI tiers still work and are still worth running, but they are no
+longer what the gate rests on — see Findings 1 and 2 for why:
+
+```bash
+cd examples/escape-room/integration
+ugt smoke-test --config ugt.config.yaml                               # PASSED 5/5
+ugt verify --config ugt.config.yaml --feature-map feature-map.yaml    # 6/6, 0 FAILED
+```
 
 | Tier | Command | Result |
 |---|---|---|
-| 0 | `ugt smoke-test` | PASSED, 5/5 steps |
-| 1 | `ugt verify` | **6/6 PASSED, 0 FAILED, 0 NOT_REACHED** |
-| 2 | `fuzz_escape_room.py` | **TIER 2 MET — 6/6 checks**, 2 seeds x 160 steps, 0 findings |
-| 3 | `ugt playtest` | guide written, **run not yet performed** — see below |
+| 3 LLM | `ugt playtest` | guide written, **run not yet performed** — see below |
 
 ## Files
 
 | File | Role |
 |---|---|
-| `ugt.config.yaml` | `engine.type: simulation`; 41 actions, **generated** from `node ../game/src/bridge.js --actions` so ids cannot drift from the CSVs |
-| `feature-map.yaml` | Tier 1 — F1–F6 as one continuous playthrough of the real flag chain |
-| `fuzz_escape_room.py` | Tier 2 — random walks + invariants + negative control + determinism |
+| `ugt.config.yaml` | `engine.type: simulation`; 41 actions, **generated** from `node ../game/src/bridge.js --actions` so ids cannot drift from the CSVs (the spike asserts this) |
+| `invariants.py` | 13 predicates as an `InvariantSuite` — written once, consumed by R1/R2 (per command) and R3 (wrapped for the fuzzer) |
+| `spike_escape_room.py` | Rung 1 — raw JSON-lines over pipes, no adapter |
+| `smoke_escape_room_adapter.py` | Rung 2 — the `SubprocessAdapter` contract |
+| `verify_round1.py` | R1 — one full escape, invariants after every step |
+| `verify_round2.py` | R2 — the whole content surface: all 41 actions, every object, every use-gate |
+| `verify_round3.py` | R3 — `InvariantFuzzer` + negative control + generic checks + determinism |
+| `feature-map.yaml` | `ugt verify` — F1–F6 as one continuous playthrough of the real flag chain |
 | `strategy-guide.md` | Tier 3 — the briefing an LLM playtester reads |
+
+`fuzz_escape_room.py` was **removed** on 2026-07-26, superseded by
+`verify_round3.py`. It pre-dated `invariants.py` and carried a private copy of
+six predicates that R1/R2 had no way to share; keeping both would have been the
+exact drift `InvariantSuite` exists to prevent. Its three good ideas were kept:
+the negative control, same-seed replay, and the non-vacuity guard.
 
 ## Tier 3 is written but not run
 
@@ -46,48 +72,75 @@ a human to trigger:
 ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md --max-actions 40
 ```
 
-Its acceptance (per `TASKS.md` T-005) is that the report shows either
-`escaped: true` or an honest "insufficient actions" outcome — not a silent
-stall.
+**There is no seed axis here, and that is settled, not pending.** The game has
+no RNG at all — one map, one solution, one ending, no lose state — so dice's
+`playtest.episode_seeds` fix has nothing to rotate, and `SubprocessAdapter` does
+not implement `reset_seeded()` (it inherits `BaseAdapter`'s raise). N episodes
+are N replays of the same puzzle. That makes this tier a **competence** measure
+(does a pilot given the guide escape, and in how many moves against the 26-move
+optimum), not a balance figure, and one episode is the honest sample size. If
+variety is ever wanted it has to come from authoring alternate CSV content sets,
+which the game's design already supports.
 
 ## Findings
 
-Things this integration surfaced that are worth knowing. None block the ladder;
-the first is the one with teeth.
+Things this integration surfaced that are worth knowing.
 
 **1. `ugt verify` exits 0 even when features FAIL.** `handle_verify`
 (`ugt/cli.py`) only calls `sys.exit(1)` on an *exception* — a run reporting
-`1 FAILED` still exits 0. Verified directly: inverting F6's assertion produced
-`[FAIL] game.reaching_r10_sets_escaped` and `Coverage: 5/6 ... 1 FAILED`, and
-the shell still saw exit 0. Every example's `TASKS.md` gate is phrased "`ugt
-verify` … exits 0 with 0 FAILED features", so **a gate that checks only the
-exit code passes a red run**. Until it's fixed, gate on the `failed` count in
-`results/coverage-report.json`, not on `$?`.
+`1 FAILED` still exits 0. Re-confirmed 2026-07-26 by inverting F6's assertion:
+report said `passed 5 failed 1`, shell still saw exit 0. Every example's gate
+used to be phrased "`ugt verify` … exits 0 with 0 FAILED features", so **a gate
+that checks only the exit code passes a red run**. Also hit independently by
+`dice` (its Finding 5). Until it's fixed, gate on the `failed` count in
+`results/coverage-report.json`, not on `$?` — or use the ladder, which is
+fail-closed by construction.
 
-**2. Observation aggregators are list-only.** The integration PRD proposed
+**2. `ugt smoke-test` passes ~45% of the time on a FROZEN state here.** Only
+**6 of 41** actions change state from the start room, and an inapplicable action
+is documented to consume nothing — not even `moves_taken`. So five uniform-random
+steps leave the observation vector untouched with probability `(35/41)^5 ≈ 45%`,
+and the CLI still prints "fully operational". Measured, not modelled: three
+consecutive runs on 2026-07-26 produced a frozen vector in two of them.
+`smoke_escape_room_adapter.py` drives a known-good script instead and asserts
+the state moved. **This generalises to any game with a large action space and
+context-gated actions** — the smoke tier's uniform-random policy is the wrong
+probe for that shape.
+
+**3. Random play cannot solve this game, by design.** R3's walk reached **9
+distinct states and 2 of 10 rooms in 60 steps**, and never escaped. A uniform
+policy almost never advances an 8-link flag chain. That is a property of the
+genre, not a defect, and it is the clearest illustration in this repo of why the
+tiers are not interchangeable: R3 proves the game never *breaks* under nonsense
+input, while only R1/R2 (scripted) and Tier 3 (an LLM reading
+`strategy-guide.md`) can show it is *completable*. R3 prints its own reach for
+exactly this reason, and three generic-check observations (`state-cycle`,
+`dead-action`, `action-coverage`) are dispositioned in the script with the
+reason — `dead-action` in particular is refuted by R2, which issues all 41
+actions and asserts each one's real effect.
+
+**4. Observation aggregators are list-only.** The integration PRD proposed
 mapping `flags_set_count`, but `flags` is a dict and `count` only applies to
 lists (`ugt/core/env.py::get_value_by_path`) — it would have silently read 0
 forever, a mapped field that is always a lie. `escaped` is mapped instead, so
 all four observation fields are real.
 
-**3. The assertion language has no `len()` and no `in`.** So "the inventory
-shrank by one" is not directly expressible. Rather than weaken F5, it is
-asserted through a behavioural consequence: the engine leaves state *entirely*
-untouched on a refusal, so issuing `use_cog_bronze` (which consumes) then
-`drop_cog_bronze` and finding `moves_taken` advanced by only 1 across both
-proves the cog left the inventory. Adding `len` to the evaluator's `SAFE_FUNCS`
-would be a one-line, safe improvement, but it was left out of this branch: the
-Tier-1 gate runs through the installed `ugt` console script, so a core change
-here could not have been honestly verified as part of this work.
+**5. The assertion language has no `len()` and no `in`.** So "the inventory
+shrank by one" is not directly expressible in `feature-map.yaml`. It is asserted
+there through a behavioural consequence instead (see F5). The ladder has no such
+limit — `verify_round2.py` asserts take → drop → **re-take** directly, which is
+the stronger claim anyway: a `drop` that *deleted* the item would look identical
+to a working one if you only read the inventory.
 
-**4. Random play cannot solve this game, by design.** The Tier-2 walk reached
-only **9 distinct states across 61 steps** — a uniform random policy almost
-never advances a 7-link flag chain. That is a property of the genre, not a
-defect, and it is the clearest illustration in this repo of why the tiers are
-not interchangeable: Tier 2 proves the game never *breaks* under nonsense
-input, while only Tier 1 (scripted) and Tier 3 (an LLM that reads
-`strategy-guide.md`) can show it is *completable*. The exploit hunt asserts its
-own non-vacuity for this reason.
+**6. Two of my own invariants were wrong before the game was.** R1 immediately
+failed `escaped_only_in_the_exit_room`: R10 exits south back to R09 and
+`escaped` latches, so walking back out leaves a true flag in another room —
+which is the PRD's documented behaviour. The predicate now asserts the
+*transition* (escaped may only become true in the exit room), which is
+compatible with latching and still catches winning from the wrong place.
+Separately, R2's first draft asserted "exactly 3 non-puzzle objects" from
+memory; the content has 4. Both are the same lesson: **suspect your own
+invariant before the game.**
 
 ## Notes on the feature map
 
