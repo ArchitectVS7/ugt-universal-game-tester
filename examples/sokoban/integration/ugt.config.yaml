@@ -44,14 +44,23 @@ observation_space:
     - { path: "boxes_total",     min: 0, max: 8 }
     - { path: "moves_taken",     min: 0, max: 500 }
 
+# The state also carries `grid` — the player-facing ASCII render (one string
+# per row, classic Sokoban legend). It is not an observation MAPPING (those
+# feed the numeric obs vector); the LLM tier reads it straight out of the
+# state dict, and `invariants.py` cross-checks it against the scalars.
+
 action_space:
   type: "discrete"
-  size: 4
+  size: 5
   actions:
     0: { name: "up" }
     1: { name: "down" }
     2: { name: "left" }
     3: { name: "right" }
+    # The PRD's reset_level — the machine player's R key. Without it a wedged
+    # box would end the episode; with it, retrying is a decision the pilot can
+    # take, exactly like a human.
+    4: { name: "reload" }
 
 evaluation:
   victory_key: "all_levels_solved"

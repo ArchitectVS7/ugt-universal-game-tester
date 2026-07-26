@@ -4,10 +4,10 @@ extends Node2D
 ##
 ## THIS FILE CONTAINS NO GAME RULE. Per the standing constraint in TASKS.md,
 ## every push / collision / win rule lives in exactly one place —
-## `res://scripts/board.gd`'s `try_move()`. All this script may do is:
-##   1. translate a key into a PRD action id (`KEY_DIRECTIONS` below), and
-##   2. hand that id to `board.try_move()` via the single handler
-##      `_on_direction_input()`, then re-read `board` to snap the sprites.
+## `res://scripts/board.gd`. All this script may do is:
+##   1. translate a key into a PRD action id (`KEY_ACTIONS` below), and
+##   2. hand that id to `board.apply_action()` via the single handler
+##      `_on_action_input()`, then re-read `board` to snap the sprites.
 ## No wall check, no push check, no `moves_taken` arithmetic and no solved
 ## check may ever appear here. A reviewer can grep this file for `Tile.WALL`,
 ## `boxes_on_target`, `moves_taken` or `is_solved` and should find no decision
@@ -24,10 +24,12 @@ extends Node2D
 const Board := preload("res://scripts/board.gd")
 const Level := preload("res://scripts/level.gd")
 
-## Arrow keys + WASD. The ids on the right come from `Board.Direction` — this
+## Arrow keys + WASD to move, R to retry the level (the PRD's "a player can
+## always retry" — without it a wedged box would force a process restart). The
+## ids on the right come from `Board.Direction` / `Board.ACTION_RELOAD` — this
 ## table never invents a number of its own, so it cannot drift from the PRD's
-## `0=up, 1=down, 2=left, 3=right`.
-const KEY_DIRECTIONS := {
+## `0=up, 1=down, 2=left, 3=right, 4=reset_level`.
+const KEY_ACTIONS := {
 	KEY_UP: Board.Direction.UP,
 	KEY_W: Board.Direction.UP,
 	KEY_DOWN: Board.Direction.DOWN,
@@ -36,11 +38,12 @@ const KEY_DIRECTIONS := {
 	KEY_A: Board.Direction.LEFT,
 	KEY_RIGHT: Board.Direction.RIGHT,
 	KEY_D: Board.Direction.RIGHT,
+	KEY_R: Board.ACTION_RELOAD,
 }
 
 ## Returned for a key that is not bound. Also accepted by
-## `_on_direction_input()`, where `board.try_move()` treats it as a no-op.
-const NO_DIRECTION := -1
+## `_on_action_input()`, where `board.apply_action()` treats it as a no-op.
+const NO_ACTION := -1
 
 ## Side of one grid cell in pixels. The whole of the "snap sprites" behaviour
 ## is `cell_to_position()` below.
@@ -74,11 +77,11 @@ func _ready() -> void:
 	build_view()
 
 
-## Key -> PRD action id, or `NO_DIRECTION` when the key is not bound. Both
+## Key -> PRD action id, or `NO_ACTION` when the key is not bound. Both
 ## `_unhandled_input()` and the mapping test go through this one function, so
 ## the table can never drift from what the game actually reads.
-static func direction_for_key(keycode: int) -> int:
-	return KEY_DIRECTIONS.get(keycode, NO_DIRECTION)
+static func action_for_key(keycode: int) -> int:
+	return KEY_ACTIONS.get(keycode, NO_ACTION)
 
 
 ## Grid cell -> pixel position of that cell's sprite. This IS the snapping
@@ -88,17 +91,17 @@ static func cell_to_position(cell: Vector2i) -> Vector2:
 	return Vector2(cell.x * CELL_SIZE, cell.y * CELL_SIZE)
 
 
-## THE single entry point for a human move — every key press funnels through
-## here, and a test calls it directly with a direction id.
+## THE single entry point for a human action — every key press funnels through
+## here, and a test calls it directly with an action id.
 ##
-## Returns `board.try_move()`'s own bool, untouched. The view is re-synced
+## Returns `board.apply_action()`'s own bool, untouched. The view is re-synced
 ## unconditionally, including when the move returned false: `board.gd` warns
 ## that a false return can still coincide with its lazy level advance, so the
 ## view must always re-read state rather than trust the return value.
-func _on_direction_input(direction: int) -> bool:
+func _on_action_input(action: int) -> bool:
 	if board == null:
 		return false
-	var moved: bool = board.try_move(direction)
+	var moved: bool = board.apply_action(action)
 	_sync_view()
 	return moved
 
@@ -111,12 +114,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	# Physical keycode first so WASD keeps its physical position on a non-QWERTY
 	# layout; the `keycode` fallback is what resolves the arrow keys.
-	var direction := direction_for_key(key_event.physical_keycode)
-	if direction == NO_DIRECTION:
-		direction = direction_for_key(key_event.keycode)
-	if direction == NO_DIRECTION:
+	var action := action_for_key(key_event.physical_keycode)
+	if action == NO_ACTION:
+		action = action_for_key(key_event.keycode)
+	if action == NO_ACTION:
 		return
-	_on_direction_input(direction)
+	_on_action_input(action)
 	get_viewport().set_input_as_handled()
 
 
@@ -167,7 +170,7 @@ func build_view() -> void:
 
 
 ## Snaps the movable sprites onto their cells. A no-op when no view exists,
-## which is what lets tests drive `_on_direction_input()` without a scene tree.
+## which is what lets tests drive `_on_action_input()` without a scene tree.
 func _sync_view() -> void:
 	if view_root == null or board == null:
 		return

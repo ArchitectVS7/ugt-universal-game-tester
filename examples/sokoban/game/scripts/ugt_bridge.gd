@@ -4,17 +4,19 @@ extends Node
 ##
 ## THIS FILE CONTAINS NO GAME RULE. Per the standing constraint in TASKS.md,
 ## every push / collision / win rule lives in exactly one place —
-## `res://scripts/board.gd`'s `try_move()`. All this script may do is:
+## `res://scripts/board.gd`. All this script may do is:
 ##   1. frame newline-delimited JSON off a TCP socket,
-##   2. turn a wire `action_id` into an `int` and hand it to `board.try_move()`,
+##   2. turn a wire `action_id` into an `int` and hand it to
+##      `board.apply_action()` (the board's own id table: 0-3 move, 4 reload),
 ##   3. hand `board.get_state()` back out, verbatim.
 ## No direction vector, no wall/push check, no `boxes_on_target` arithmetic, no
 ## `is_solved()` reimplementation, and deliberately NO RANGE CHECK on
-## `action_id` — `try_move()` documents an out-of-range direction as a silent
-## no-op precisely so the wire value can be passed straight through. `terminated`
-## is READ OUT of `get_state()["all_levels_solved"]`, never recomputed. A
-## reviewer can grep this file for `Tile`, `WALL`, `Direction`, `moves_taken` or
-## `is_solved` and should find no decision made on them.
+## `action_id` — `apply_action()` owns the id table, including "an unknown id
+## is a silent no-op", precisely so the wire value can be passed straight
+## through. `terminated` is READ OUT of `get_state()["all_levels_solved"]`,
+## never recomputed. A reviewer can grep this file for `Tile`, `WALL`,
+## `Direction`, `moves_taken` or `is_solved` and should find no decision made
+## on them.
 ##
 ## Wire protocol (PRD.md "UGT hooks required", matched exactly):
 ##   {"command": "reset"}                  -> {"state": {...}}
@@ -156,7 +158,7 @@ func stop_server() -> void:
 
 ## ONE tick of accept / read / dispatch. Public and frame-independent so the
 ## tests can drive the real socket path inside the synchronous runner — exactly
-## the same discipline as T-006's `_on_direction_input(int)`.
+## the same discipline as T-006's `_on_action_input(int)`.
 func poll() -> void:
 	if _server == null:
 		return
@@ -295,9 +297,9 @@ func handle_line(line: String) -> Dictionary:
 			return {"response": {"state": board.get_state()}, "close": false}
 		"step":
 			var board = _ensure_board()
-			# The ONLY rule call in this file. No range check: `try_move()`
-			# owns "an unknown direction is a no-op".
-			board.try_move(_action_id_from(parsed))
+			# The ONLY rule call in this file. No range check and no id table:
+			# `apply_action()` owns both (0-3 move, 4 reload, else no-op).
+			board.apply_action(_action_id_from(parsed))
 			var state: Dictionary = board.get_state()
 			var response := {
 				"state": state,
@@ -321,8 +323,8 @@ func handle_line(line: String) -> Dictionary:
 ## A missing / non-numeric / fractional value becomes -1, which `board.gd`
 ## documents as a silent no-op. It must NEVER be `int(value)`: GDScript's
 ## `int("up")` is 0, a perfectly legal UP move — a garbage wire value would then
-## move the player. Out-of-RANGE integers (4, 99, -7) are passed through
-## untouched, because deciding they are illegal is `try_move()`'s job.
+## move the player. Out-of-RANGE integers (5, 99, -7) are passed through
+## untouched, because deciding they are illegal is `apply_action()`'s job.
 func _action_id_from(message: Dictionary) -> int:
 	if not message.has("action_id"):
 		return -1

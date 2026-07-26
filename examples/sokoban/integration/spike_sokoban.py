@@ -27,6 +27,7 @@ from bridge_process import bridge, connect_with_retry, listening_pid  # noqa: E4
 STATE_KEYS = {
     "level_index", "player_x", "player_y", "boxes_on_target",
     "boxes_total", "moves_taken", "level_solved", "all_levels_solved",
+    "grid",
 }
 
 gate = GateRunner()
@@ -87,13 +88,23 @@ def main() -> int:
             check(isinstance(r, dict) and set(r) == {"state"},
                   "reset returns exactly {'state': {...}}", f"keys={sorted(r)}")
             s0 = r.get("state", {})
-            check(set(s0) == STATE_KEYS, "state carries exactly the PRD's 8 keys",
+            check(set(s0) == STATE_KEYS, "state carries exactly the PRD's 9 keys",
                   f"missing={sorted(STATE_KEYS - set(s0))} extra={sorted(set(s0) - STATE_KEYS)}")
             check(s0.get("moves_taken") == 0 and s0.get("level_index") == 0,
                   "a fresh reset starts at level 0 with 0 moves",
                   f"level_index={s0.get('level_index')} moves_taken={s0.get('moves_taken')}")
             check(s0.get("boxes_total", 0) > 0, "level 1 actually has boxes",
                   f"boxes_total={s0.get('boxes_total')}")
+
+            grid = s0.get("grid")
+            check(isinstance(grid, list) and grid
+                  and all(isinstance(row, str) for row in grid),
+                  "grid is a non-empty list of row strings",
+                  f"{len(grid) if isinstance(grid, list) else 'n/a'} rows")
+            if isinstance(grid, list):
+                marks = sum(row.count("@") + row.count("+") for row in grid if isinstance(row, str))
+                check(marks == 1, "the grid shows exactly one player marker",
+                      f"found {marks}")
 
             print("\n  -- step --")
             w.send({"command": "step", "action_id": 0})
@@ -115,6 +126,16 @@ def main() -> int:
             check(isinstance(r_bad, dict) and r_bad != {},
                   "an unknown command still gets an answer (never a hang)",
                   f"keys={sorted(r_bad)}")
+
+            print("\n  -- reload (action 4) --")
+            w.send({"command": "step", "action_id": 4})
+            r_reload = w.recv()
+            check(set(r_reload) == {"state", "terminated", "truncated", "info"},
+                  "reload is an ordinary step reply, not a special shape",
+                  f"keys={sorted(r_reload)}")
+            check(r_reload.get("state") == s0,
+                  "action 4 rewinds to the exact level-start state",
+                  f"moves_taken back to {r_reload.get('state', {}).get('moves_taken')}")
 
             print("\n  -- framing --")
             # One message, deliberately split across two writes: the bridge must

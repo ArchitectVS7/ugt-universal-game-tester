@@ -25,6 +25,7 @@ from ugt.core.trial import GateRunner  # noqa: E402
 STATE_KEYS = {
     "level_index", "player_x", "player_y", "boxes_on_target",
     "boxes_total", "moves_taken", "level_solved", "all_levels_solved",
+    "grid",
 }
 
 gate = GateRunner()

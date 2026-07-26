@@ -14,12 +14,13 @@ examples):
 
 - **`res://scripts/board.gd`** — loads a level, holds `try_move(direction)`
   (the only place push/collision rules live), tracks solved state.
-- **Human input** — the four arrow keys / WASD call `try_move()` directly.
-  This is the real, playable game.
+- **Human input** — the four arrow keys / WASD move; `R` retries the current
+  level. Every key routes through the board's own action dispatcher. This is
+  the real, playable game.
 
 ## Core mechanics
 
-- 4 actions: `0=up, 1=down, 2=left, 3=right`.
+- 5 actions: `0=up, 1=down, 2=left, 3=right, 4=reset_level`.
 - Grid legend (classic Sokoban ASCII, used for level files): `#` wall, `@`
   player, `$` box, `.` target, `*` box-on-target, `+` player-on-target,
   ` ` floor.
@@ -31,8 +32,9 @@ examples):
   boxes_total`).
 - `moves_taken` increments only on a move that actually changes player or box
   position; a wall-blocked or box-blocked no-op does not increment it.
-- No lose state — a player can always retry; add a `reset_level` action for a
-  stuck position. No move limit, no timer.
+- No lose state — a player can always retry: `reset_level` (action id `4`,
+  the `R` key for humans) reloads the current level for a stuck position.
+  No move limit, no timer.
 
 ## Content: 3 bundled levels
 
@@ -52,11 +54,18 @@ sets `all_levels_solved: true`.
   "boxes_on_target": 1, "boxes_total": 2,
   "moves_taken": 17,
   "level_solved": false,
-  "all_levels_solved": false
+  "all_levels_solved": false,
+  "grid": ["#####", "#@$.#", "#####"]
 }
 ```
 
-`reset_level` reloads the current level from scratch, keeping `level_index`.
+`grid` is the player-facing render of the current level in the grid legend
+above — exactly what the human sees on screen, one string per row, so a
+machine player is told no less and no more than a person at the keyboard.
+
+`reset_level` reloads the current level from scratch, keeping `level_index` —
+including after `all_levels_solved`, which it clears (retrying the last level
+un-freezes the board).
 
 ## Verification
 

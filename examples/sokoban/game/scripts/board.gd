@@ -34,6 +34,11 @@ const Level := preload("res://scripts/level.gd")
 ## "an out-of-range action_id is a no-op, not an error" behaviour.
 enum Direction { UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3 }
 
+## PRD "Core mechanics": action id 4 is `reset_level` — the "a player can
+## always retry" action. Kept OUT of `Direction` deliberately: it is not a
+## movement, has no vector, and must never be reachable through `try_move()`.
+const ACTION_RELOAD := 4
+
 ## Indexed by `Direction`. Godot's Y axis grows downward, so UP is -1.
 const DIRECTION_VECTORS := [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]
 
@@ -166,6 +171,24 @@ func try_move(direction: int) -> bool:
 	return true
 
 
+## THE action dispatcher — every front end (the human key handler and the UGT
+## bridge) funnels its PRD action id through here, so the id table can never
+## drift between them. `0..3` are `try_move()` unchanged; `ACTION_RELOAD` (4)
+## is `reset_level()`; anything else falls through to `try_move()`'s
+## "an unknown direction is a silent no-op" rule.
+##
+## Returns `try_move()`'s own bool for a movement. For a reload it returns true
+## whenever a board is loaded — the reload happened even if the level was
+## already at its start, and callers re-read `get_state()` either way.
+func apply_action(action_id: int) -> bool:
+	if action_id == ACTION_RELOAD:
+		if _levels.is_empty():
+			return false
+		reset_level()
+		return true
+	return try_move(action_id)
+
+
 ## Reloads the current level from scratch (PRD's `reset` command). Keeps
 ## `level_index` — a reset retries the level being played, it does not restart
 ## the game — and clears `moves_taken` and the frozen `all_levels_solved` state.
@@ -225,7 +248,40 @@ func get_state() -> Dictionary:
 		"moves_taken": moves_taken,
 		"level_solved": is_solved(),
 		"all_levels_solved": all_levels_solved,
+		"grid": render_rows(),
 	}
+
+
+## The player-facing view of the current level: one string per row, in the
+## PRD's grid legend (`level.gd`'s CHAR_* constants) — exactly what a human
+## sees on screen, so a machine player is told no less and no more.
+##
+## This is a RENDER of state, not a rule: geometry comes from the parsed
+## level, entities from `player`/`boxes`, and nothing here decides legality
+## or victory. At a level's start it reproduces the level file byte for byte
+## (the loader validates rectangularity, so the round-trip is exact).
+func render_rows() -> Array:
+	var level = current_level()
+	if level == null:
+		return []
+	var rows: Array = []
+	for y in range(level.height):
+		var row := ""
+		for x in range(level.width):
+			row += _render_cell(level, Vector2i(x, y))
+		rows.append(row)
+	return rows
+
+
+func _render_cell(level, cell: Vector2i) -> String:
+	if level.tile_at(cell.x, cell.y) == Level.Tile.WALL:
+		return Level.CHAR_WALL
+	var on_target: bool = level.tile_at(cell.x, cell.y) == Level.Tile.TARGET
+	if cell == player:
+		return Level.CHAR_PLAYER_ON_TARGET if on_target else Level.CHAR_PLAYER
+	if _box_index_at(cell) >= 0:
+		return Level.CHAR_BOX_ON_TARGET if on_target else Level.CHAR_BOX
+	return Level.CHAR_TARGET if on_target else Level.CHAR_FLOOR
 
 
 ## Copies the start positions out of a parsed level. The `Level` is never

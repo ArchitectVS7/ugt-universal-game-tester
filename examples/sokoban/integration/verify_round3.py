@@ -3,7 +3,8 @@
 
     python3 examples/sokoban/integration/verify_round3.py
 
-Uniform-random walks over the 4 real actions plus deliberately illegal ids, with
+Uniform-random walks over the 5 real actions (4 moves + reload) plus
+deliberately illegal ids, with
 `invariants.py` asserted after every step — the SAME predicates R1/R2 use, via
 `InvariantSuite.to_hunter_invariants()`, so the scripted and random tiers cannot
 disagree about what correct means.
@@ -29,7 +30,7 @@ from ugt.core.trial import GateRunner, first_divergence  # noqa: E402
 from invariants import SUITE  # noqa: E402
 from ugt.core.invariant_fuzzer import InvariantFuzzer  # noqa: E402
 
-ACTIONS = {0: "up", 1: "down", 2: "left", 3: "right"}
+ACTIONS = {0: "up", 1: "down", 2: "left", 3: "right", 4: "reload"}
 STEPS = 120          # PRD asks for >= 100
 SEEDS = (0, 1)
 
@@ -86,21 +87,24 @@ def main() -> int:
         base = ad.reset()
         inert = True
         details = []
-        for bad in (-1, 4, 99, 10**9):
+        # 4 is deliberately NOT in this list any more — it is the legal reload.
+        for bad in (-1, 5, 99, 10**9):
             before = ad._read_state()
             after, _t, _tr, _i = ad.step(bad)
             if after != before:
                 inert = False
                 details.append(f"action_id={bad} mutated state")
         check(inert, "every illegal action_id is completely inert (state-identical)",
-              "; ".join(details) if details else "-1, 4, 99, 1e9 all no-ops")
+              "; ".join(details) if details else "-1, 5, 99, 1e9 all no-ops")
         check(ad.reset()["moves_taken"] == 0, "the bridge is still healthy after abuse")
     finally:
         ad.close()
 
     # ---- determinism ---------------------------------------------------------
     print("\n  -- determinism (adapter/bridge add no nondeterminism) --")
-    seq = [0, 2, 2, 0, 3, 1, 2, 0, 0, 3, 1, 1, 2, 3, 0]
+    # A reload (4) sits mid-sequence on purpose: the replay must be identical
+    # across processes even when the walk rewinds a level along the way.
+    seq = [0, 2, 2, 0, 3, 1, 2, 4, 0, 3, 1, 1, 2, 3, 0]
     a = replay(seq)
     b = replay(seq)
     # first_divergence() is the framework's own helper: None when the two streams

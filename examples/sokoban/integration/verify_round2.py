@@ -116,6 +116,17 @@ def main() -> int:
         gate.ck("an out-of-range action_id is completely inert", a == b,
                 f"moves_taken stayed {b['moves_taken']}")
 
+        # ---- reload (action 4) mid-level -------------------------------------
+        # The box is wedged against the wall from the F3 probe above — the
+        # exact position the PRD's retry action exists for.
+        start = drv.reset()
+        drv.step(0)
+        drv.step(2)
+        after_reload = drv.step(4)
+        gate.ck("reload mid-level returns the exact level-start state",
+                after_reload == start,
+                f"moves_taken back to {after_reload['moves_taken']}")
+
         # ---- solve every level ----------------------------------------------
         print("\n  -- solving all 3 levels back to back --")
         drv.reset()
@@ -140,12 +151,20 @@ def main() -> int:
               "the bridge reports terminated on the final solve",
               f"terminated={getattr(drv, 'terminated', None)}")
 
-        # ---- a finished game is inert ---------------------------------------
+        # ---- a finished game is inert to MOVES ------------------------------
         print("\n  -- after the last level --")
         b = drv.state
         a = drv.step(0)
         a = drv.step(3)
-        check(a["all_levels_solved"], "all_levels_solved stays set (it latches)")
+        check(a["all_levels_solved"], "all_levels_solved stays set across moves (it latches)")
+
+        # ...but reload is the documented exception: the PRD says retrying the
+        # last level un-freezes the board. Prove it over the wire, which also
+        # proves the invariant suite's reload exemption is not vacuous.
+        a = drv.step(4)
+        check(not a["all_levels_solved"] and a["moves_taken"] == 0 and a["level_index"] == 2,
+              "reload after the finish un-freezes the board onto the last level",
+              f"level_index={a['level_index']} moves_taken={a['moves_taken']}")
 
         # ---- invariants ------------------------------------------------------
         print("\n  -- invariants --")

@@ -1,13 +1,12 @@
 extends "res://tests/assertions.gd"
 ## T-006 — the human input front end (`res://scripts/main.gd`).
 ##
-## What this file proves: routing a move through `Main._on_direction_input()`
-## produces EXACTLY the state that calling `board.try_move()` with the same
-## direction produces — i.e. the input layer adds no rule of its own, which is
-## the standing constraint ("all push/collision/win rules live in
-## `board.gd::try_move()`"). Every parity case therefore runs the SAME fixture
-## down two paths and compares player position, box positions and the PRD state
-## dictionary.
+## What this file proves: routing an action through `Main._on_action_input()`
+## produces EXACTLY the state that calling the board directly with the same
+## action produces — i.e. the input layer adds no rule of its own, which is
+## the standing constraint ("all push/collision/win rules live in `board.gd`").
+## Every parity case therefore runs the SAME fixture down two paths and
+## compares player position, box positions and the PRD state dictionary.
 ##
 ## DELIBERATELY NOT DONE HERE: no `InputEventKey` is synthesized, no
 ## `Input.parse_input_event()` / `Input.action_press()`, no window resizing and
@@ -91,7 +90,7 @@ func test_handler_matches_try_move_for_each_direction() -> void:
 		var main = _main([ROOM])
 		var reference = _board([ROOM])
 
-		var handled: bool = main._on_direction_input(direction)
+		var handled: bool = main._on_action_input(direction)
 		var direct: bool = reference.try_move(direction)
 
 		assert_eq(handled, direct, "%s: handler and try_move agree on the return" % label)
@@ -113,7 +112,7 @@ func test_handler_matches_try_move_on_blocked_moves() -> void:
 		var main = _main([BLOCKED])
 		var reference = _board([BLOCKED])
 
-		var handled: bool = main._on_direction_input(direction)
+		var handled: bool = main._on_action_input(direction)
 		var direct: bool = reference.try_move(direction)
 
 		assert_false(handled, "%s: blocked move is refused" % label)
@@ -132,7 +131,7 @@ func test_handler_sequence_matches_try_move_sequence() -> void:
 
 	for step in range(sequence.size()):
 		var direction: int = sequence[step]
-		var handled: bool = main._on_direction_input(direction)
+		var handled: bool = main._on_action_input(direction)
 		var direct: bool = reference.try_move(direction)
 		assert_eq(handled, direct, "step %d (%s): same return" % [step, DIRECTION_NAMES[direction]])
 		assert_eq(_snapshot(main.board), _snapshot(reference), "step %d: same state" % step)
@@ -141,27 +140,49 @@ func test_handler_sequence_matches_try_move_sequence() -> void:
 	main.free()
 
 
-## The key -> direction mapping table, in one assertion (T-006 Accept). Read
-## through `direction_for_key()` — the same function `_unhandled_input()` uses —
+## The key -> action mapping table, in one assertion (T-006 Accept). Read
+## through `action_for_key()` — the same function `_unhandled_input()` uses —
 ## and compared as an Array so this is a single value comparison.
-func test_key_to_direction_table() -> void:
-	var keys := [KEY_UP, KEY_W, KEY_DOWN, KEY_S, KEY_LEFT, KEY_A, KEY_RIGHT, KEY_D]
+func test_key_to_action_table() -> void:
+	var keys := [KEY_UP, KEY_W, KEY_DOWN, KEY_S, KEY_LEFT, KEY_A, KEY_RIGHT, KEY_D, KEY_R]
 	assert_eq(
-		keys.map(func(key): return Main.direction_for_key(key)),
-		[0, 0, 1, 1, 2, 2, 3, 3],
-		"arrow keys + WASD map to the PRD action ids 0=up 1=down 2=left 3=right"
+		keys.map(func(key): return Main.action_for_key(key)),
+		[0, 0, 1, 1, 2, 2, 3, 3, 4],
+		"arrow keys + WASD map to 0=up 1=down 2=left 3=right, and R to 4=reset_level"
 	)
 
 
+## Pressing R mid-level rewinds the level to its start — the PRD's "a player
+## can always retry", and the affordance a wedged box makes necessary. Parity
+## with the board's own `apply_action()` is asserted the same way as a move.
+func test_r_key_reloads_the_level() -> void:
+	var main = _main([ROOM])
+	var reference = _board([ROOM])
+	var start := _snapshot(main.board)
+
+	for direction in [3, 1]:  # push the box right, then step down — real changes
+		main._on_action_input(direction)
+		reference.apply_action(direction)
+	assert_ne(_snapshot(main.board), start, "the setup really changed state")
+
+	var handled: bool = main._on_action_input(Board.ACTION_RELOAD)
+	var direct: bool = reference.apply_action(Board.ACTION_RELOAD)
+	assert_eq(handled, direct, "reload: handler and apply_action agree on the return")
+	assert_eq(_snapshot(main.board), _snapshot(reference), "reload: same state down both paths")
+	assert_eq(_snapshot(main.board), start, "reload rewound the level to its start")
+	assert_eq(main.board.moves_taken, 0, "reload zeroed moves_taken")
+	main.free()
+
+
 ## An unbound key yields the sentinel, and the handler survives being called
-## with it (board.gd treats an out-of-range direction as a no-op, not an error).
-func test_unmapped_key_yields_no_direction() -> void:
-	assert_eq(Main.direction_for_key(KEY_Q), Main.NO_DIRECTION, "Q is not bound")
-	assert_eq(Main.direction_for_key(KEY_SPACE), Main.NO_DIRECTION, "space is not bound")
+## with it (board.gd treats an out-of-range action as a no-op, not an error).
+func test_unmapped_key_yields_no_action() -> void:
+	assert_eq(Main.action_for_key(KEY_Q), Main.NO_ACTION, "Q is not bound")
+	assert_eq(Main.action_for_key(KEY_SPACE), Main.NO_ACTION, "space is not bound")
 
 	var main = _main([ROOM])
 	var before := _snapshot(main.board)
-	assert_false(main._on_direction_input(Main.NO_DIRECTION), "sentinel is refused")
+	assert_false(main._on_action_input(Main.NO_ACTION), "sentinel is refused")
 	assert_eq(_snapshot(main.board), before, "sentinel changed nothing")
 	main.free()
 
@@ -171,7 +192,7 @@ func test_unmapped_key_yields_no_direction() -> void:
 func test_handler_is_a_noop_without_a_board() -> void:
 	var main = Main.new()
 	assert_null(main.board, "no board yet")
-	assert_false(main._on_direction_input(0), "handler refuses without a board")
+	assert_false(main._on_action_input(0), "handler refuses without a board")
 	main.free()
 
 
@@ -196,7 +217,7 @@ func test_view_snaps_sprites_on_move() -> void:
 
 	# RIGHT is a push in ROOM: player (2,2) -> (3,2), box (3,2) -> (4,2), so
 	# BOTH a player sprite and a box sprite have to be re-snapped.
-	assert_true(main._on_direction_input(3), "the push happened")
+	assert_true(main._on_action_input(3), "the push happened")
 	assert_eq(main.board.player, Vector2i(3, 2), "player advanced")
 	assert_eq(main.board.boxes[0], Vector2i(4, 2), "box was pushed")
 
@@ -221,7 +242,7 @@ func test_handler_drives_a_level_advance() -> void:
 	var reference = _board([ONE_BOX, NEXT_LEVEL])
 
 	for step in range(sequence.size()):
-		var handled: bool = main._on_direction_input(sequence[step])
+		var handled: bool = main._on_action_input(sequence[step])
 		var direct: bool = reference.try_move(sequence[step])
 		assert_eq(handled, direct, "advance step %d: same return" % step)
 		assert_eq(_snapshot(main.board), _snapshot(reference), "advance step %d: same state" % step)

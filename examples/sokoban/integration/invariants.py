@@ -33,18 +33,22 @@ LEVEL_COUNT = 3  # levels shipped by ../game; read, not enforced
 
 
 def moves_never_decrease(before: dict, after: dict, command: str, result: dict) -> Optional[str]:
-    """moves_taken is monotonic non-decreasing within a level."""
-    # A level advance resets the counter by design, so only compare inside one level.
-    if after["level_index"] == before["level_index"] and after["moves_taken"] < before["moves_taken"]:
-        return (f"moves_taken went backwards on level {after['level_index']}: "
+    """moves_taken never decreases, except a reload rewinds it to exactly 0.
+
+    Pinned by the game's own test suite: the counter counts the whole session
+    and is NOT zeroed by a level advance — only `reset_level` (action 4)
+    zeroes it. So the only legal decrease is to exactly 0; any other backwards
+    step is a wire or rules defect.
+    """
+    if after["moves_taken"] < before["moves_taken"] and after["moves_taken"] != 0:
+        return (f"moves_taken went backwards to a non-zero value: "
                 f"{before['moves_taken']} -> {after['moves_taken']}")
     return None
 
 
 def moves_advance_by_at_most_one(before: dict, after: dict, command: str, result: dict) -> Optional[str]:
-    """A single action consumes at most one move."""
-    if after["level_index"] != before["level_index"]:
-        return None  # level advance resets the counter
+    """A single action consumes at most one move (a reload's rewind is negative,
+    which this deliberately ignores — moves_never_decrease owns that side)."""
     delta = after["moves_taken"] - before["moves_taken"]
     if delta > 1:
         return f"one action advanced moves_taken by {delta} (expected 0 or 1)"
@@ -97,9 +101,45 @@ def solved_flag_matches_box_count(before: dict, after: dict, command: str, resul
 
 
 def all_levels_solved_is_terminal(before: dict, after: dict, command: str, result: dict) -> Optional[str]:
-    """all_levels_solved latches: once true it never reverts."""
+    """all_levels_solved latches, except across a reload (PRD: retrying the last
+    level un-freezes the board).
+
+    A legal un-latching transition is recognisable by its shape, not by the
+    command (the fuzzer passes no command string): the after-state must be a
+    fresh start of the SAME level — moves_taken 0, level_index unchanged. Any
+    other revert is a defect.
+    """
     if before["all_levels_solved"] and not after["all_levels_solved"]:
-        return "all_levels_solved reverted from True to False"
+        is_reload = (after["moves_taken"] == 0
+                     and after["level_index"] == before["level_index"])
+        if not is_reload:
+            return "all_levels_solved reverted from True to False outside a reload"
+    return None
+
+
+def grid_matches_scalar_state(before: dict, after: dict, command: str, result: dict) -> Optional[str]:
+    """The player-facing grid and the scalar fields describe the SAME position.
+
+    The grid is a render, the scalars are the state — if they ever disagree, a
+    human and a machine player are being shown different games. Checks: exactly
+    one player marker, at (player_x, player_y); box markers count boxes_total;
+    '*' markers count boxes_on_target.
+    """
+    grid = after.get("grid")
+    if not isinstance(grid, list) or not grid:
+        return f"grid missing or empty: {type(grid).__name__}"
+    players = [(x, y) for y, row in enumerate(grid)
+               for x, ch in enumerate(row) if ch in "@+"]
+    if players != [(after["player_x"], after["player_y"])]:
+        return (f"grid shows player at {players}, scalars say "
+                f"({after['player_x']}, {after['player_y']})")
+    boxes = sum(row.count("$") + row.count("*") for row in grid)
+    if boxes != after["boxes_total"]:
+        return f"grid shows {boxes} boxes, boxes_total says {after['boxes_total']}"
+    on_target = sum(row.count("*") for row in grid)
+    if on_target != after["boxes_on_target"]:
+        return (f"grid shows {on_target} boxes on targets, "
+                f"boxes_on_target says {after['boxes_on_target']}")
     return None
 
 
@@ -112,6 +152,7 @@ PREDICATES = [
     level_index_never_regresses,
     solved_flag_matches_box_count,
     all_levels_solved_is_terminal,
+    grid_matches_scalar_state,
 ]
 
 SUITE = InvariantSuite(PREDICATES)

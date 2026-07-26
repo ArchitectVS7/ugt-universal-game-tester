@@ -48,6 +48,7 @@ const STATE_KEYS := [
 	"all_levels_solved",
 	"boxes_on_target",
 	"boxes_total",
+	"grid",
 	"level_index",
 	"level_solved",
 	"moves_taken",
@@ -178,7 +179,7 @@ func test_reset_returns_the_prd_state_shape() -> void:
 	var response: Dictionary = outcome["response"]
 	assert_eq(_sorted(response.keys()), ["state"], "reset reply has exactly one key")
 	var state: Dictionary = response["state"]
-	assert_eq(_sorted(state.keys()), STATE_KEYS, "the PRD's 8 state keys, exactly")
+	assert_eq(_sorted(state.keys()), STATE_KEYS, "the PRD's 9 state keys, exactly")
 	assert_eq(state["level_index"], 0, "level_index")
 	assert_eq(state["player_x"], 2, "player_x")
 	assert_eq(state["player_y"], 2, "player_y")
@@ -211,14 +212,39 @@ func test_step_applies_the_move() -> void:
 
 ## THE task's third acceptance criterion: an out-of-range `action_id` is a
 ## no-op, not an error and not a crash. Note what is asserted — a NORMAL 4-key
-## step response with NO `error` key, and a byte-identical state.
+## step response with NO `error` key, and a byte-identical state. (4 is absent
+## from this list on purpose: it is the PRD's `reset_level` action now.)
 func test_out_of_range_action_id_is_a_noop() -> void:
 	var bridge := _new_bridge(ROOM)
 	var before: Dictionary = _response(bridge, '{"command":"reset"}')["state"]
-	for action_id in [4, 99, -1, -7, 2147483647]:
+	for action_id in [5, 99, -1, -7, 2147483647]:
 		var response := _response(bridge, '{"command":"step","action_id":%d}' % action_id)
 		assert_false(response.has("error"), "action_id %d is not an error" % action_id)
 		assert_eq(response["state"], before, "action_id %d left the state unchanged" % action_id)
+
+
+## Wire action 4 is the PRD's `reset_level`: a normal 4-key step reply whose
+## state is the level start again. And after the game is FINISHED, a reload
+## un-freezes it — `terminated` flips back to false, which a driving client
+## must be prepared for (it is the documented retry semantics, not a latch bug).
+func test_step_action_4_reloads_the_level() -> void:
+	var bridge := _new_bridge(ROOM)
+	var start: Dictionary = _response(bridge, '{"command":"reset"}')["state"]
+	_response(bridge, '{"command":"step","action_id":3}')
+	var reloaded := _response(bridge, '{"command":"step","action_id":4}')
+	assert_eq(
+		_sorted(reloaded.keys()), ["info", "state", "terminated", "truncated"], "normal step reply"
+	)
+	assert_eq(reloaded["state"], start, "reload rewound to the level start")
+	assert_eq(reloaded["state"]["moves_taken"], 0, "moves_taken cleared")
+
+	var finished := _new_bridge(ONE_BOX)
+	var final := _response(finished, '{"command":"step","action_id":3}')
+	assert_true(final["terminated"], "solving the only level terminates")
+	var retried := _response(finished, '{"command":"step","action_id":4}')
+	assert_false(retried["terminated"], "a reload un-freezes a finished game")
+	assert_eq(retried["state"]["moves_taken"], 0, "and rewinds the level")
+	assert_false(retried["state"]["all_levels_solved"], "all_levels_solved cleared by the retry")
 
 
 ## The `int("up") == 0` trap: a naive coercion would turn every garbage value
@@ -321,7 +347,7 @@ func test_tcp_reset_then_step_round_trip() -> void:
 	if reset_reply.is_empty():
 		return
 	assert_eq(_sorted(reset_reply.keys()), ["state"], "reset reply over the wire")
-	assert_eq(_sorted(reset_reply["state"].keys()), STATE_KEYS, "the PRD's 8 state keys")
+	assert_eq(_sorted(reset_reply["state"].keys()), STATE_KEYS, "the PRD's 9 state keys")
 
 	var step_reply := _request(bridge, client, '{"command":"step","action_id":%d}' % RIGHT)
 	if step_reply.is_empty():

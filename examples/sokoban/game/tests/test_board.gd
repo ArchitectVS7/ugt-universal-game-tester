@@ -209,8 +209,9 @@ func test_direction_ids_match_the_prd() -> void:
 		assert_eq(board.moves_taken, 1, "one move counted")
 
 
-## Pre-satisfies T-007's Accept: an out-of-range `action_id` is a no-op, never an
-## error or a crash — the bridge passes the wire value straight through.
+## `try_move()`'s own range rule: anything outside `Direction` is a no-op, never
+## an error or a crash. (4 is `ACTION_RELOAD` at the `apply_action()` level, but
+## it is NOT a direction — `try_move()` must refuse it like any other stray id.)
 func test_out_of_range_direction_is_a_noop() -> void:
 	var board = _board(SOLVE_TWO)
 	for direction in [-1, 4, 99]:
@@ -240,8 +241,8 @@ func test_level_advances_after_a_solve() -> void:
 
 ## Design decision pinned: `moves_taken` counts the whole session and is NOT
 ## zeroed by a level advance (only `reset_level()` zeroes it). The integration's
-## R3 invariant is "moves_taken never decreases", and one connection drives all
-## three levels back to back.
+## invariant is "moves_taken never decreases, except a reload zeroes it", and
+## one connection drives all three levels back to back.
 func test_moves_taken_survives_a_level_advance() -> void:
 	var board = _board_of([ONE_BOX, PUSH_FLOOR])
 	assert_true(board.try_move(Board.Direction.RIGHT), "solve level 0")
@@ -316,6 +317,7 @@ func test_get_state_matches_the_prd_shape() -> void:
 		"all_levels_solved",
 		"boxes_on_target",
 		"boxes_total",
+		"grid",
 		"level_index",
 		"level_solved",
 		"moves_taken",
@@ -323,6 +325,11 @@ func test_get_state_matches_the_prd_shape() -> void:
 		"player_y",
 	]
 	assert_eq(keys, expected, "exactly the PRD's keys, no more and no fewer")
+
+	assert_eq(typeof(state["grid"]), TYPE_ARRAY, "grid is an array of row strings")
+	assert_eq(state["grid"].size(), 3, "one entry per level row")
+	for row in state["grid"]:
+		assert_eq(typeof(row), TYPE_STRING, "each grid row is a string")
 
 	var int_keys := [
 		"level_index",
@@ -341,6 +348,61 @@ func test_get_state_matches_the_prd_shape() -> void:
 	assert_eq(state["player_x"], 1, "player_x")
 	assert_eq(state["player_y"], 1, "player_y")
 	assert_eq(state["boxes_total"], 1, "boxes_total")
+
+
+## `apply_action()` is the one dispatcher every front end uses: 0-3 must be
+## indistinguishable from `try_move()`, 4 must be `reset_level()`, and anything
+## else must fall through to the silent no-op — so no front end can ever hold an
+## id table of its own.
+func test_apply_action_dispatches_moves_reload_and_noops() -> void:
+	# 0-3: exact parity with try_move on the same fixture.
+	for direction in [0, 1, 2, 3]:
+		var via_apply = _board(ROOM)
+		var via_move = _board(ROOM)
+		assert_eq(
+			via_apply.apply_action(direction),
+			via_move.try_move(direction),
+			"direction %d: same return down both paths" % direction
+		)
+		assert_eq(via_apply.get_state(), via_move.get_state(), "direction %d: same state" % direction)
+
+	# 4: a reload — positions and counter back to the level start.
+	var board = _board(SOLVE_TWO)
+	assert_true(board.try_move(Board.Direction.RIGHT), "setup push")
+	assert_true(board.apply_action(Board.ACTION_RELOAD), "reload is accepted")
+	assert_eq(board.player, Vector2i(1, 1), "player back at the start")
+	assert_eq(board.moves_taken, 0, "counter cleared")
+
+	# Anything else: inert, exactly like try_move's unknown-direction rule.
+	var before: Dictionary = board.get_state()
+	for stray in [-1, 5, 99]:
+		assert_false(board.apply_action(stray), "stray id %d is refused" % stray)
+	assert_eq(board.get_state(), before, "stray ids changed nothing")
+
+
+## The render is the level file, byte for byte, at a level's start — geometry
+## from the parsed level, entities overlaid from live state. If this drifts, the
+## machine player is being shown a different game than the human.
+func test_render_rows_round_trips_the_level_file() -> void:
+	for fixture in [ONE_BOX, PUSH_FLOOR, BOX_ON_TARGET, SOLVE_TWO, ROOM]:
+		var board = _board(fixture)
+		assert_eq(board.render_rows(), fixture, "start-state render equals the source rows")
+
+
+## The render tracks play: a pushed box appears at its new cell, `*` marks a box
+## on a target, `+` marks the player on a target.
+func test_render_rows_tracks_moves_and_target_overlaps() -> void:
+	var board = _board(ONE_BOX)
+	assert_true(board.try_move(Board.Direction.RIGHT), "push the box onto the target")
+	# Player took the box's old cell; the box sits on the target as '*'.
+	assert_eq(board.render_rows(), ["#####", "# @*#", "#####"], "post-push render")
+
+	var room = _board(ROOM)
+	assert_true(room.try_move(Board.Direction.DOWN), "step down")
+	assert_true(room.try_move(Board.Direction.RIGHT), "step onto the target")
+	assert_eq(room.render_rows()[3], "#  +#", "player on a target renders '+'")
+	assert_eq(room.get_state()["player_x"], 3, "scalar state agrees on x")
+	assert_eq(room.get_state()["player_y"], 3, "scalar state agrees on y")
 
 
 ## The PRD's determinism criterion at the rules layer: same level + same actions

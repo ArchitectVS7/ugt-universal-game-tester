@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rung 3 (R1) — playability: drive level 1 to a real solve, asserting F1-F5.
+"""Rung 3 (R1) — playability: drive level 1 to a real solve, asserting F1-F6.
 
     python3 examples/sokoban/integration/verify_round1.py
 
@@ -26,9 +26,19 @@ from invariants import SUITE  # noqa: E402
 from ugt.core.trial import GateRunner  # noqa: E402
 
 SOLUTIONS = os.path.join(HERE, "..", "game", "levels", "solutions.json")
-UP, DOWN, LEFT, RIGHT = 0, 1, 2, 3
+UP, DOWN, LEFT, RIGHT, RELOAD = 0, 1, 2, 3, 4
 
 gate = GateRunner()
+
+
+def box_cells(state: dict) -> set:
+    """Box positions read straight off the player-facing grid ('$' or '*').
+
+    Reading a render is not re-implementing a rule: the game drew the grid, we
+    only look at it — the same thing a human player does.
+    """
+    return {(x, y) for y, row in enumerate(state["grid"])
+            for x, ch in enumerate(row) if ch in "$*"}
 
 
 class Driver:
@@ -94,12 +104,12 @@ def main() -> int:
                     after["moves_taken"] == before["moves_taken"],
                     f"moves_taken stayed {before['moves_taken']}")
 
-        # ---- F2: a box demonstrably MOVES ------------------------------------
-        # The wire exposes no box coordinates (see the finding below), so the one
-        # unambiguous evidence that a box moved is boxes_on_target STRICTLY
-        # RISING: that transition is impossible unless a box entered a target.
-        # An earlier version of this check accepted `>=`, which is true on any
-        # player move and therefore could never fail — a vacuous green.
+        # ---- F4: a box demonstrably reaches a TARGET -------------------------
+        # boxes_on_target STRICTLY RISING is the evidence: that transition is
+        # impossible unless a box entered a target. An earlier version of this
+        # check accepted `>=`, which is true on any player move and therefore
+        # could never fail — a vacuous green. (F2, "a box moves at all", is
+        # proven separately below from the grid, which the wire now carries.)
         print("\n  -- solve level_01 from the committed solution --")
         drv.reset()
         seq = solutions["level_01"]
@@ -112,7 +122,7 @@ def main() -> int:
             prev = cur
         final = drv.state
 
-        gate.ck("F2/F4: boxes_on_target STRICTLY increased — a box provably moved onto a target",
+        gate.ck("F4: boxes_on_target STRICTLY increased — a box provably moved onto a target",
                 rises > 0, f"{rises} increase(s) across {len(seq)} actions")
         gate.ck("F5: every box is on a target at the end",
                 final["boxes_on_target"] == final["boxes_total"],
@@ -123,14 +133,6 @@ def main() -> int:
         gate.ck("no phantom moves: moves_taken never exceeds actions issued",
                 final["moves_taken"] <= len(seq),
                 f"{final['moves_taken']} moves for {len(seq)} actions")
-
-        gate.finding(
-            "The state contract exposes no box coordinates (only boxes_on_target / "
-            "boxes_total), so a push that does not cross a target is INVISIBLE to a "
-            "black-box tester. F2 can therefore only be evidenced where it coincides "
-            "with F4. Adding box positions to the wire would let the two be tested "
-            "independently."
-        )
 
         # ---- F3: a box pushed into a WALL is a no-op -------------------------
         # A genuine blocked BOX push, not another wall-walk. From the start on
@@ -151,12 +153,35 @@ def main() -> int:
                 != (before_push["player_x"], before_push["player_y"]),
                 f"player ({before_push['player_x']},{before_push['player_y']})"
                 f" -> ({after_push['player_x']},{after_push['player_y']})")
+
+        # F2 proper, now testable on its own: the accepted push above did not
+        # cross a target, yet the grid shows the box in a NEW cell. Before the
+        # wire carried the grid this was invisible — an R1 finding on every run
+        # until the game added box positions to the state contract.
+        gate.ck("F2: the grid shows the box in a new cell after the push, independent of any target",
+                box_cells(after_push) != box_cells(before_push)
+                and after_push["boxes_on_target"] == before_push["boxes_on_target"],
+                f"box cells {sorted(box_cells(before_push))} -> {sorted(box_cells(after_push))}, "
+                f"boxes_on_target stayed {after_push['boxes_on_target']}")
         blocked_before = drv.state
         blocked_after = drv.step(LEFT)
         gate.ck("F3: pushing that box into the wall is refused — state is COMPLETELY unchanged",
                 blocked_after == blocked_before,
                 f"player stayed ({blocked_before['player_x']},{blocked_before['player_y']}), "
                 f"moves stayed {blocked_before['moves_taken']}")
+
+        # ---- F6: reload (action 4) rewinds the level -------------------------
+        # The box above is now wedged against the wall — exactly the situation
+        # the PRD's "a player can always retry" exists for. Prove the machine
+        # player has the same way out a human's R key gives.
+        print("\n  -- F6: reload rescues a wedged position --")
+        start = drv.reset()
+        drv.step(UP)
+        drv.step(LEFT)
+        after_reload = drv.step(RELOAD)
+        gate.ck("F6: action 4 returns the exact level-start state",
+                after_reload == start,
+                f"moves_taken back to {after_reload['moves_taken']}")
 
         # ---- invariants ------------------------------------------------------
         print("\n  -- invariants --")
@@ -177,9 +202,10 @@ def main() -> int:
     return gate.finish(
         "ROUND 1",
         f"UGT drove level 1 to a real solve through the live Godot bridge; F1 (wall), "
-        f"F2/F4 (a box provably reached a target), F3 (a blocked BOX push is refused) and "
-        f"F5 (solved) all hold, and every invariant held after every one of {drv.commands} "
-        f"commands.",
+        f"F2 (a box move is visible in the grid on its own), F3 (a blocked BOX push is "
+        f"refused), F4 (a box provably reached a target), F5 (solved) and F6 (reload "
+        f"rescues a wedge) all hold, and every invariant held after every one of "
+        f"{drv.commands} commands.",
     )
 
 
