@@ -6,28 +6,22 @@ adventures are authored entirely by editing `rooms.csv` and `objects.csv`; no
 code changes needed for new content.
 
 **Why this example exists:** Demonstrate `/tasklist` + `/orchestrate` building
-a Node.js CLI game from a PRD, then UGT driving it through the built-in
-**simulation** (subprocess JSON-lines) adapter — the same transport
-`examples/mock-game` uses, in Node instead of Python, against a genuinely
-content-rich game instead of a toy economy.
+a Node.js CLI game from a PRD, against a genuinely content-rich game instead
+of a toy economy.
 
 ## Stack
 
 Node.js, no dependencies beyond a CSV parser (e.g. a single small hand-rolled
-parser — no framework needed for 2 flat files). One process, two front ends
+parser — no framework needed for 2 flat files). One process, one front end
 over one core:
 
 - **`src/engine.js`** — loads the CSVs, holds the only game-state mutation
   logic, exposes `executeCommand(verb, objectId | direction)`. This is the
-  single place rules live (UGT rule M1, one level up, same discipline as the
-  Dice Duel engine module).
+  single place rules live, same discipline as the Dice Duel engine module.
 - **`src/cli.js`** — human-facing REPL: parses free text ("take key", "go
   north", "use lantern") into `executeCommand()` calls, prints room
-  descriptions and flavor text.
-- **`src/bridge.js`** — machine-facing JSON-lines loop (stdin/stdout) for
-  UGT: maps a numeric `action_id` to a fixed `(verb, objectId|direction)`
-  pair and calls the same `executeCommand()`. **Never re-implements a rule**
-  — only translates.
+  descriptions and flavor text. It **never re-implements a rule** — only
+  translates input and renders output.
 
 ## Content format (the CSV authoring contract)
 
@@ -69,16 +63,9 @@ linear-with-branches flag chain ending in one exit room (`R10`) whose
 prerequisite, already held) prints a short in-fiction refusal and consumes no
 state.
 
-## UGT hooks required (the game/integration contract)
+## Game state
 
-`bridge.js` speaks newline-delimited JSON on stdin/stdout, matching UGT's
-`SubprocessAdapter` protocol exactly:
-
-- `{"command": "reset"}` → `{"state": {...}}`
-- `{"command": "step", "action_id": N}` → `{"state": {...}, "terminated": bool, "truncated": bool, "info": {}}`
-- `{"command": "close"}` → clean process exit
-
-State shape:
+The engine exposes a snapshot of exactly this shape:
 
 ```json
 {
@@ -91,22 +78,10 @@ State shape:
 }
 ```
 
-`escaped` becomes `true` the moment the player successfully enters `R10`;
-`terminated` in the bridge's step response should mirror it.
-
-**Fixed discrete action space** (built once at startup from the CSVs, so it's
-stable across the whole run): 4 movement actions + `look` + `inventory` +
-`take`/`drop`/`examine`/`use` for every object that supports each verb.
-Target ≤ 60 total actions for this content scope. **Assignment is
-deterministic:** `0=north, 1=south, 2=east, 3=west, 4=look, 5=inventory`,
-then for each row of `objects.csv` in file order, append `take` (if
-`takeable`), `drop` (if `takeable`), `examine`, `use` (if `use_verb` set) —
-in that per-object order. Same CSV content always produces the same
-`action_id` assignment, so the integration side's `ugt.config.yaml`
-action_space mapping stays valid without hand-tuning after a content edit.
-An action invalid in the current context (e.g. `use` on an object not held,
-`take` on something not in the room) is a no-op that still returns state
-(mirrors the CLI's in-fiction refusal, just without the flavor text).
+`escaped` becomes `true` the moment the player successfully enters `R10`, and
+latches. `inventory` serializes in `objects.csv` file order, and the `flags`
+key set covers the whole flag universe from the first move on, so a given held
+set always serializes identically.
 
 ## Non-goals
 
@@ -117,9 +92,7 @@ the flag-gated room chain.
 ## Acceptance criteria
 
 - `node src/cli.js` is playable start-to-finish by a human with only the 8
-  verbs above.
-- `node src/bridge.js` under the exact JSON-lines protocol above completes a
-  full escape (`escaped: true`) given the correct action sequence.
-- Same action sequence from a fresh `reset` reproduces identical state every
+  verbs above, reaching `escaped: true`.
+- Same command sequence from a fresh game reproduces identical state every
   time (the engine has no hidden randomness — CSV-driven puzzles are pure
   functions of state + action).

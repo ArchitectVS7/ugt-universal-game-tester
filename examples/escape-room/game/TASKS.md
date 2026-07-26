@@ -12,15 +12,12 @@ Build the Node.js game per `PRD.md` in this folder.
 **Format check (optional):** none — omitted (no formatter chosen for this project).
 
 **Standing constraints:**
-- All rules live in `src/engine.js`. `src/cli.js` and `src/bridge.js` only
-  translate input into `executeCommand()` calls — neither may contain a rule
-  (a flag check, an exit lock, a puzzle effect) that isn't in the engine.
+- All rules live in `src/engine.js`. `src/cli.js` only translates input into
+  `executeCommand()` calls — it may not contain a rule (a flag check, an exit
+  lock, a puzzle effect) that isn't in the engine.
 - `content/rooms.csv` and `content/objects.csv` are the only places
   room/object/puzzle content is defined — no hardcoded room or object data in
   `.js` files.
-- The bridge's JSON-lines protocol (`reset`/`step`/`close`, response shape)
-  must match `PRD.md` exactly — the integration side is written against this
-  shape and cannot change it independently.
 
 Statuses: `TODO` | `IN-PROGRESS` | `DONE` | `BLOCKED(reason)`
 
@@ -30,21 +27,20 @@ Statuses: `TODO` | `IN-PROGRESS` | `DONE` | `BLOCKED(reason)`
 
 ### T-001 · Project scaffold — `status: DONE` · `coder: sonnet` · `after: —`
 `package.json`, `node --test` wired up, empty `src/engine.js` /
-`src/cli.js` / `src/bridge.js`, empty `content/rooms.csv` /
+`src/cli.js`, empty `content/rooms.csv` /
 `content/objects.csv` with header rows only.
 **Accept:** `npm test` runs (0 tests ok); `node src/cli.js` starts and exits
 cleanly on `Ctrl+D`.
 
 **Delivered (2026-07-25):** Added `package.json` (ESM, `node --test` as the
-`test` script, `start`/`bridge` convenience scripts, `node >=20` engine pin);
+`test` script, a `start` convenience script, `node >=20` engine pin);
 header-only `content/rooms.csv` and `content/objects.csv`; and scaffold
-`src/engine.js` / `src/cli.js` / `src/bridge.js`. The engine's three exports
+`src/engine.js` / `src/cli.js`. The engine's three exports
 (`loadContent`/`createGame`/`executeCommand`) are signatures only, each
-throwing a "not implemented yet (T-00N)" error, so `cli.js`'s REPL and
-`bridge.js`'s documented JSON-lines protocol comment wire cleanly against the
-real entry points without pulling any rule logic ahead of T-002/T-004/T-006 —
-the deliberate scope boundary for this task. No CSV content, no engine
-behavior, and no bridge protocol implementation are in this commit.
+throwing a "not implemented yet (T-00N)" error, so `cli.js`'s REPL wires
+cleanly against the real entry points without pulling any rule logic ahead of
+T-002/T-004 — the deliberate scope boundary for this task. No CSV content and
+no engine behavior are in this commit.
 Orchestration: graphify=none — no graphify-out/graph.json in this repo; task is a self-contained project scaffold · attempts=1/4.
 
 ### T-002 · CSV loader + validation — `status: DONE` · `coder: opus` · `after: T-001`
@@ -135,10 +131,9 @@ exit room; `take` (room-presence + `takeable`, sets `take_sets_flag`); `drop`
 `use_fail_text`, success sets `use_sets_flag`, `use_consumes` *destroys* the item
 rather than dropping it, non-consuming uses are idempotent); plus `look` /
 `inventory` (`inv`/`i`), direction shorthands, and a generic refusal for unknown
-verbs/objects. Two semantics are pinned because T-006 depends on them: a refusal
+verbs/objects. Two semantics are pinned: a refusal
 (`ok: false`) changes **nothing at all, including `moves_taken`** (PRD: an
-inapplicable action "consumes no state" — this is what makes the bridge's
-invalid-`action_id` a true no-op that still returns state), and there is no
+inapplicable action "consumes no state"), and there is no
 randomness anywhere. **No content is hardcoded in the engine:** the start room is
 the first row of `rooms.csv` and the escape room is the last (documented as the
 authoring convention, overridable via `createGame(content, {startRoom,
@@ -152,10 +147,10 @@ removing an item (inline `parseContent()` content, proving the item is gone from
 inventory *and* not left in the room, plus the real content's consuming keys in
 the walkthrough run), and the real `content/walkthrough.json` driven step-by-step
 through `executeCommand()` to `escaped: true` in `game.escapeRoom` with
-`moves_taken === walkthrough.length` — with wire-shape, snapshot-isolation and
-same-sequence determinism guards for T-006. Scope boundary: no free-text CLI
-parser or output rendering (T-005) and no action table / JSON-lines loop (T-006);
-`src/bridge.js` is untouched and `src/cli.js` deliberately left as-is — its stub
+`moves_taken === walkthrough.length` — with state-shape, snapshot-isolation and
+same-sequence determinism guards. Scope boundary: no free-text CLI
+parser or output rendering (T-005);
+`src/cli.js` is deliberately left as-is — its stub
 `executeCommand(null, …)` call now prints the new TypeError message inside its
 existing try/catch, so T-001's Accept (starts, refuses input without crashing,
 exits 0 on Ctrl+D) still holds and T-005 owns the rewrite. No CSV content
@@ -164,7 +159,7 @@ Orchestration: graphify=none — no `graphify-out/graph.json` in the repo (check
 repo root); orientation came from PRD.md, TASKS.md, the T-002 loader in
 `src/engine.js`, the authored CSVs and `test/content.test.js`. · attempts=1/4.
 
-## M3 — Front ends
+## M3 — Front end
 
 ### T-005 · Human CLI — `status: DONE` · `coder: sonnet` · `after: T-004`
 Free-text parser (8 verbs, direction shorthands) over `executeCommand()`;
@@ -184,77 +179,8 @@ room can be printed before any move without inflating `moves_taken`, and
 `normalizeDirection`, so the CLI's bare-direction shorthand doesn't keep its
 own copy of the direction vocabulary); no rule, refusal text, or content
 changed. `test/cli.test.js` covers the parser and the REPL loop end-to-end
-against injected streams. Deliberately out of scope: `src/bridge.js` and the
-JSON-lines machine protocol remain T-006's.
+against injected streams.
 Orchestration: graphify=none — no `graphify-out/graph.json` in this repo (checked repo root); orientation came from PRD.md, TASKS.md, `src/engine.js`, `src/cli.js`, the authored CSVs a · attempts=1/4.
-
-### T-006 · Machine bridge (JSON-lines) — `status: DONE` · `coder: opus` · `after: T-004`
-Build the fixed action table (movement + per-object verbs) and the
-stdin/stdout JSON-lines loop per PRD's exact protocol.
-**Accept:** piping the T-003 walkthrough (as `action_id`s) into `node
-src/bridge.js` via stdin produces `escaped: true` in the final state; an
-out-of-context action_id returns state unchanged (no-op) instead of erroring.
-
-**Delivered (2026-07-25):** `src/engine.js` gained one export,
-`buildActionTable(content)`, which materializes PRD's deterministic action
-space: `0=north, 1=south, 2=east, 3=west, 4=look, 5=inventory`, then per row of
-`objects.csv` **in file order** `take`/`drop` (if `takeable`), `examine`
-(always), `use` (if `use_verb` is set) — 41 actions for the current content,
-inside PRD's ≤ 60 budget. It lives in the engine, not the bridge, for the same
-reason `resolveObject`/`describeRoom`/`normalizeDirection` do: deciding *which
-verbs an object supports* is a reading of the content model, i.e. a rule, so
-the bridge is left with nothing to do but index a frozen array. An object's
-`use_verb` column (`unlock`/`light`/`turn`/`fit`/`read`) stays authored flavor
-— the table's verb is always the engine verb `use`.
-`src/bridge.js` is now the real JSON-lines loop: `handleCommand()` (pure
-dispatch, unit-testable) plus `runBridge()` (readline over stdin, one
-`JSON.stringify` line per command on stdout). `reset` returns PRD's one-key
-`{state}`; `step` returns exactly `{state, terminated, truncated, info}` with
-`terminated` mirroring the engine-owned latching `escaped`, `truncated` always
-`false` (no timers — PRD non-goals) and `info` exactly `{}`; `close` writes no
-line and ends the process; an unknown command answers `{"error": "Unknown
-command: X"}` so a client never blocks. The table is built **once at startup**
-and never rebuilt on `reset`, and the game is created up front so a `step`
-before any `reset` reads a fresh game instead of crashing. Blank lines are
-skipped and unparseable lines are reported on **stderr** — stdout is a protocol
-channel carrying nothing but JSON (no banner, no farewell, unlike the CLI).
-`UGT_SEED` is deliberately ignored: the game has no randomness.
-**No rule and no content are in the bridge:** invalid `action_id`s (out of
-range, negative, non-integer, wrong type, missing) are simply never dispatched
-and the unchanged state is returned, while an in-context refusal (`use` on
-something not held, `take` on something not here) is the engine's and — per
-T-004's pinned semantics — already consumes nothing, not even `moves_taken`.
-Both readings of Accept clause 2 are asserted by deep-equality against the
-prior state. **Two defects found and fixed while testing, both invisible to a
-test that sends EOF:** (1) a whole pipe-full of input arrives as one chunk and
-readline emits every buffered line from it before `rl.close()` takes effect, so
-lines after `close` were still being answered — fixed with an explicit `closed`
-latch; (2) more seriously, closing the readline interface does **not** end the
-process while the parent's stdin pipe stays open, which is exactly how UGT's
-`SubprocessAdapter` runs — its `close()` sends the command and then does a
-*blocking, un-timed* read, so every UGT run would have wedged forever. Fixed by
-releasing the input handle (`input.pause()` + `input.destroy?.()`) rather than
-`process.exit()`, which could truncate a response still queued on stdout;
-verified by driving the bridge from Python with the adapter's exact call
-pattern (close now returns EOF immediately, exit 0) and pinned by a regression
-test that deliberately never closes stdin — confirmed non-vacuous by mutating
-the fix out and watching it hang for its full 10s timeout. New
-`test/bridge.test.js` (20 tests; suite 65 → 85) derives every room id, object
-id, action id, table length and step count from the loaded CSVs and
-`content/walkthrough.json` — nothing about the world is hardcoded — and covers
-the table's ordering rule (rebuilt independently in the test), Accept clause 1
-via a **real spawned `node src/bridge.js`** fed the walkthrough as `action_id`s
-(asserting `escaped`/`terminated` true, arrival in the last room of
-`rooms.csv`, `moves_taken === walkthrough.length` so a silent mid-run refusal
-would show, and the exact response key lists), Accept clause 2, post-escape
-latching, byte-identical replay across two separate processes (PRD acceptance
-criterion 3), mid-session `reset`, and protocol robustness (close, garbage,
-blank lines, unknown command, step-before-reset). Also added `node
-src/bridge.js --actions`, a one-shot table dump so the integration side can
-generate `ugt.config.yaml`'s `action_space` without hand-tuning. Scope
-boundary: no CSV content, no `cli.js` and no engine rule changed — the only
-engine addition is the derived action table.
-Orchestration: graphify=none — no `graphify-out/graph.json` in the repo root (checked); orientation came from PRD.md, TASKS.md, `src/engine.js`, `src/cli.js`, the authored CSVs, and UG · attempts=1/4.
 
 ---
 

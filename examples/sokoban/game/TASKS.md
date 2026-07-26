@@ -12,8 +12,7 @@ Build the Godot game per `PRD.md` in this folder.
 since `.godot/` is not committed) — then run the suite: `godot4 --headless
 --path . -s tests/run_tests.gd` — both exit 0. **Until T-002 is DONE the gate
 is the first command only** (T-001 builds the project, T-002 builds the
-runner). T-008 additionally requires `python3 tools/tcp_smoke_check.py` to
-exit 0.
+runner).
 
 **Format check (optional):** none — omitted (gdformat is optional tooling,
 not assumed here).
@@ -29,12 +28,10 @@ not assumed here).
   framework, and do not fetch anything from the network — see PRD
   "Verification" for why.
 - All push/collision/win rules live in `res://scripts/board.gd`'s
-  `try_move()`. Neither human input handling nor `ugt_bridge.gd` may contain
-  a rule — both only call `try_move()`.
+  `try_move()`. Human input handling may not contain a rule — it only calls
+  `try_move()`.
 - Level files are plain-text grids under `res://levels/`; no level geometry
   may be hardcoded in `.gd` scripts.
-- The bridge's JSON message shape (`reset`/`step`/`close`, response fields)
-  must match `PRD.md` exactly.
 
 Statuses: `TODO` | `IN-PROGRESS` | `DONE` | `BLOCKED(reason)`
 
@@ -125,7 +122,7 @@ hang; and `==` between unrelated Variant types raises at runtime, so the
 helpers compare `typeof()` first (`assert_true`/`assert_false` are
 strict-boolean — `1` does not pass). `tests/.gitkeep` removed (the directory
 now has real content). Scope boundary: no game logic — no `board.gd`, no
-levels, no bridge.
+levels, no board logic.
 Orchestration: graphify=none — no `graphify-out/graph.json` in the repo root or in `examples/sokoban/game/` (checked); the task is also self-contained (two new files + one shell script · attempts=1/4.
 
 ## M1 — Rules engine
@@ -201,8 +198,8 @@ engine (`try_move()`, `reset_level()`, `boxes_on_target()`/`is_solved()`,
 parser, with lazy level-advance (a solved level only advances at the start of
 the next `try_move()` call, so `level_solved: true` stays observable in the
 solving move's own state before the next level's grid replaces it) and
-out-of-range/unknown direction ids treated as a silent no-op so the future
-wire bridge can pass an `action_id` straight through with zero rule content of
+out-of-range/unknown direction ids treated as a silent no-op so a caller can
+pass a direction id straight through with zero rule content of
 its own. `tests/test_board.gd` adds 21 cases against small inline fixture
 grids (wall block, push into floor, push blocked by a wall/box behind it,
 no-op vs. real move increment, last-box-on-target solve, level advance +
@@ -245,13 +242,13 @@ with `moves_taken == sequence length`, all three concatenated on ONE board end
 `all_levels_solved: true` at `level_index: 2` / `moves_taken: 73` (which also
 pins T-004's lazy level-advance: the next level's FIRST action is what
 triggers the advance and is then applied inside the new level — no filler move
-between sequences, exactly what T-008 replays over the wire), and a
+between sequences), and a
 reset-then-replay reproduces an identical state dictionary. Unlike
 `test_board.gd`, this suite deliberately reads the real `res://levels/` files
 by path and embeds **no grid and no action list** of its own — level geometry
 stays data-only per the standing constraint, and `solutions.json` stays a flat
-`{name: [int, ...]}` map with no nesting or metadata because T-008 `json.load`s
-that exact file. Action ids are coerced with `int()` on read (Godot's JSON
+`{name: [int, ...]}` map with no nesting or metadata so any reader can
+`json.load` it directly. Action ids are coerced with `int()` on read (Godot's JSON
 parser can return numbers as floats, and `try_move(direction: int)`'s bounds
 check must not be fed one) with the coercion asserted lossless, so a stray
 `2.5` is a red test rather than a silent floor. Verified the new tests are not
@@ -262,12 +259,11 @@ failed`; appending one wall-blocked no-op after `level_01`'s win gave `45
 passed, 2 failed` — each naming the offending level. Gate green (editor pass
 exit 0, suite exit 0, stderr empty), `tools/check_runner_reports_failure.sh`
 still exits 0, and `levels/.gitkeep` was removed now that the directory holds
-real content. Scope boundary held: no `ugt_bridge.gd`, no human input
-handling, no `tools/tcp_smoke_check.py`, and `scripts/board.gd` /
-`scripts/level.gd` were not touched — T-006/T-007/T-008 own those.
+real content. Scope boundary held: no human input handling, and
+`scripts/board.gd` / `scripts/level.gd` were not touched — T-006 owns those.
 Orchestration: graphify=none — no `graphify-out/graph.json` in the game dir or the git root (`_UGT Universal Game Tester/`), both checked; the task is also self-contained (3 data files · attempts=1/4.
 
-## M3 — Front ends
+## M3 — Front end
 
 ### T-006 · Human input — `status: DONE` · `coder: sonnet` · `after: T-004`
 Wire arrow keys / WASD to `try_move()`; snap sprite positions on move. Route
@@ -323,167 +319,9 @@ failed`; making the handler return false without calling `try_move()` gave `52
 passed, 4 failed`; adding `+ 1` to `cell_to_position`'s x gave `55 passed, 1
 failed`. Gate green (editor pass exit 0, suite exit 0),
 `tools/check_runner_reports_failure.sh` still exits 0 with a clean tree after.
-Scope boundary held: no `ugt_bridge.gd`, no TCP, no
-`tools/tcp_smoke_check.py` (T-007/T-008), and no reset key binding, HUD, undo,
+Scope boundary held: no reset key binding, HUD, undo,
 animation or sound.
 Orchestration: graphify=none — no `graphify-out/graph.json` in the game dir or in the git root `_UGT Universal Game Tester/` (both checked); the task is also self-contained (one script · attempts=1/4.
-
-### T-007 · UGT TCP bridge — `status: DONE` · `coder: opus` · `after: T-004`
-`ugt_bridge.gd` autoload: `--ugt-bridge` / `UGT_BRIDGE=1` gate, `TCPServer` on
-`127.0.0.1:8910` (or `--ugt-port`), newline-delimited JSON per PRD's exact
-protocol, one connection at a time. Buffer incoming bytes across `_process()`
-polls and split on `\n` — do not assume one socket read equals one message.
-**Accept:** a test (or a short committed script) connects, sends `reset` then
-one `step`, and gets back the PRD's exact state shape; a single JSON message
-written to the socket **split across two separate writes** still parses
-correctly; an out-of-range `action_id` is a no-op (state unchanged) rather
-than an error or a crash.
-
-**Delivered (2026-07-26):** Added `scripts/ugt_bridge.gd` (registered as the
-`UgtBridge` autoload in `project.godot` — the only edit to that file) plus
-`tests/test_ugt_bridge.gd`, 28 cases, suite **56 → 84 passed, 0 failed**.
-`board.gd` / `level.gd` / `main.gd` / `main.tscn` / `levels/` / the runner were
-not touched. **The bridge contains zero game rules**: it frames bytes, turns a
-wire `action_id` into an `int`, calls `board.try_move()`, and hands
-`board.get_state()` back verbatim — no direction vector, no wall/push check, no
-`boxes_on_target` arithmetic, and **deliberately no range check on
-`action_id`** (T-004 documents an unknown direction as a silent no-op precisely
-so the wire value passes straight through), with `terminated` READ OUT of
-`state["all_levels_solved"]` rather than recomputed. Four layers, each
-independently testable: (1) pure statics `bridge_enabled(args, env)` /
-`port_from_args(args)` so the gate is asserted without touching `OS` —
-`_ready()` reads `get_cmdline_args() + get_cmdline_user_args()` because the
-documented launch puts the flag after `--`, and both `--ugt-port=N` and
-`--ugt-port N` are accepted with a non-numeric/out-of-range value falling back
-to 8910 (`"abc".to_int()` is 0, which would otherwise become a silently wrong
-port); (2) a public frame-independent `poll()` (with `_process()` as a
-one-liner) so the socket cases run inside the synchronous runner — it accepts
-one peer at a time and hangs up on a second, reads available bytes *before*
-judging peer status so a write-then-close client still gets served, and keeps
-listening when a client vanishes without `close`; (3) `feed_bytes()`, the
-buffer that makes "one socket read is not one message" true in both directions
-(split message, two-messages-in-one-read, CRLF, 1 MiB runaway-buffer guard);
-(4) pure `handle_line()` returning `{response, close}` with the PRD's exact
-shapes — `reset` replies `{"state": …}` and nothing else, `step` replies exactly
-`state`/`terminated`/`truncated`/`info`, and `close` writes **no reply at all**
-because `../integration/PRD.md` defines its right-hand side as "Godot process
-exits cleanly", i.e. the client observes EOF. Two traps hardened against:
-`_action_id_from()` must never be `int(msg["action_id"])` — GDScript's
-`int("up")` is `0`, a legal UP move, so a garbage wire value would *move the
-player*; it maps missing/String/null/bool/Array/Dictionary/fractional to `-1`
-while passing whole floats (JSON has one number type) and out-of-**range**
-integers through untouched. And `JSON.parse_string()` was swapped for
-`JSON.new().parse()` because the static helper pushes an engine error on bad
-input, which would let a garbage client spray the game's stderr (T-001's Accept
-requires it stay clean — re-verified: `godot4 --headless --path . --quit` still
-exits 0 with **0 bytes on stderr**, and prints no bridge line at all when the
-flag is absent). Malformed JSON / unknown commands answer `{"error": …}` with
-**no `state` key**, so an error can never be mistaken for a state response;
-blank lines are ignored. `_ensure_board()` prefers the board the human front
-end is already playing (`get_tree().current_scene.board`) over a shadow copy —
-the "drive the real running game" discipline — and only builds its own when
-there is no scene (tests, `-s` runs); `_shutdown()` guards `get_tree().quit()`
-behind `is_inside_tree()` so a `close` test cannot kill the test runner. Tests
-use no `await`, no signal, no `get_tree()` and add no node to a tree (the
-runner is synchronous — an `await` would be scored green while still running);
-every pump loop is bounded by a 2 s wall-clock deadline that asserts on expiry
-rather than leaning on the runner's 60 s watchdog; sockets bind upward from
-**18910, never 8910**, so a stale bridge cannot fail the suite for the wrong
-reason; and `after_each()` frees every bridge and disconnects every client so a
-failing case cannot leak a listening socket. All three Accept criteria are
-pinned twice — at the pure layer and over a **real socket**: `reset`+`step`
-returning the PRD's exact 8-key state (asserted as a sorted key SET, not a
-subset), one message in **two separate `put_data` calls** with a load-bearing
-mid-way assertion that *nothing* has come back yet (proving it buffered rather
-than mis-parsed), and `action_id` 42 over the wire leaving the state
-byte-identical with no `error`, a still-`STATUS_CONNECTED` peer and a working
-next step (no framing desync). Verified not vacuous with three mutations, each
-reverted byte-identically (md5-checked): dropping the framing buffer gave
-`80 passed, 4 failed`; the naive `int(msg.get("action_id", -1))` coercion gave
-`83 passed, 1 failed`; hardcoding `"terminated": false` gave `83 passed, 1
-failed`. Also driven live end-to-end (not committed as a script — that is
-T-008): `godot4 --headless --path . -- --ugt-bridge --ugt-port=18910` printed
-the single stable readiness line `UGT bridge listening on 127.0.0.1:18910`,
-then a Python client replayed all three `solutions.json` sequences over the
-socket to `all_levels_solved: true` / `terminated: true` at `moves_taken: 73`,
-and `{"command":"close"}` exited the process **0 with empty stderr**;
-`UGT_BRIDGE=1 godot4 --headless --path .` (no flag) came up on 8910
-identically. Gate green (editor pass exit 0, suite exit 0, stderr 0 bytes),
-`tools/check_runner_reports_failure.sh` still exits 0 with a clean tree after.
-Scope boundary: no `tools/tcp_smoke_check.py`, no UGT-side Python adapter or
-ladder scripts (T-008 / the integration side), no reset key binding and no HUD.
-Orchestration: graphify=none — no `graphify-out/graph.json` in the game dir (`examples/sokoban/game/`) or the git root (`_UGT Universal Game Tester/`); both checked. · attempts=1/4.
-
-### T-008 · End-to-end wire check (`tools/tcp_smoke_check.py`) — `status: DONE` · `coder: opus` · `after: T-005, T-007`
-Commit `tools/tcp_smoke_check.py` — a real, repo-tracked Python script (not a
-throwaway) that launches or attaches to the headless bridge, connects over
-TCP, replays all three `levels/solutions.json` sequences as `step` commands,
-and asserts `all_levels_solved: true`. This is the PRD's acceptance criteria
-checked through the real wire — the closest thing in this example to what UGT
-itself does.
-**Accept:** `python3 tools/tcp_smoke_check.py` exits 0; it exits non-zero with
-a readable message (not a traceback) if the bridge is not running; running
-`reset` then the same sequence twice reproduces byte-identical state,
-satisfying the PRD's determinism criterion.
-
-**Delivered (2026-07-26):** Added `tools/tcp_smoke_check.py` (mode 755,
-`#!/usr/bin/env python3`, **Python standard library only** — no pip install,
-nothing vendored, the same no-third-party discipline the GDScript runner is
-held to) and no other file. It runs five phases over the real socket:
-**(0)** validate `levels/solutions.json` *before* opening anything — exactly
-the three level keys, each a non-empty list of whole numbers in 0..3 — so a
-missing or `{}` file is a loud exit-2, never a vacuous pass with nothing
-replayed; **(1)** `reset`, asserting the reply key set is exactly `{state}`
-(the PRD's reset carries no `terminated`/`info`) and the state key set is
-exactly the PRD's 8 keys, with `bool` checked *before* `int` since Python's
-`bool` is an `int`; **(2)** replay all 73 committed actions as `step`
-commands with **no filler move between levels** (board.gd advances a solved
-level at the start of the next move and applies that move in the new level),
-asserting on **every** step that `terminated` mirrors `all_levels_solved`,
-`truncated` is false, `info` is `{}`, `boxes_on_target <= boxes_total` and
-`moves_taken` never decreases — then per level that it ended `level_solved`,
-and finally `all_levels_solved: true` with `moves_taken == 73` (proving no
-step was silently dropped by framing); **(3)** determinism by comparing the
-**raw response bytes** of two `reset`+replay passes, stronger than comparing
-parsed dicts and literally what "byte-identical" asks for; **(4)** `close`
-must produce **no reply**, EOF, and process exit 0. 2959 assertions per run.
-Phase 3 reads its level out of the `reset` reply instead of assuming level 1:
-`reset_level()` KEEPS `level_index`, so after phase 2 the board is on level 3
-— assuming otherwise would have replayed the wrong sequence. Client-side
-framing (`read_line()` buffers across `recv()` and splits on `\n`) is the
-mirror image of the bridge's own `feed_bytes()`; one `recv()` is not one
-message in either direction. Three modes: **auto** (default — one connect
-attempt, attach if it lands, else launch), **`--attach`** (never launches;
-this is the Accept's "bridge not running" path) and **`--launch`** (refuses a
-port already in use rather than driving someone else's process). The probe
-socket *is* the connection that gets used, because the bridge accepts one
-peer at a time and a probe-then-reconnect could race its accept loop. Attach
-mode never sends `close` and leaves the foreign bridge running (verified:
-still alive after an exit-0 run); a launched bridge is terminated in a
-`finally` on every path, including failures. Exit codes: 0 pass · 1 check
-failed · 2 environment/usage · 3 unexpected · 130 interrupted; every path
-prints one readable line and no traceback (`--traceback` is the opt-in
-escape hatch). Gate green: editor pass exit 0, suite exit 0 at `84 passed, 0
-failed` with 0 bytes on stderr, `python3 tools/tcp_smoke_check.py` exit 0,
-`tools/check_runner_reports_failure.sh` still exit 0. Also verified:
-`--attach` with nothing listening → exit 2, `Traceback` count 0, and a
-copy-pasteable start command (`shlex.quote`d — this repo's path contains
-spaces, which the first draft printed unquoted); `--attach` against a
-*mid-game* bridge → readable exit-2 naming the level; `--launch` on an
-occupied port → exit 2; `--godot nosuchgodot` → exit 2 with the Homebrew
-symlink hint; run from `/` → exit 0 (cwd-independent); run twice
-back-to-back → 0 both times with `pgrep -f ugt-bridge` empty. Verified not
-vacuous with four mutations, each reverted **md5-identically**: flipping
-`level_02`'s last action `3`→`0` gave exit 1 naming that level (`1/2 boxes on
-target`) and left no stray process; `solutions.json` → `{}` and a fractional
-`2.5` action both gave readable exit-2s rather than a pass; hardcoding
-`"terminated": false` in `ugt_bridge.gd` went red on the per-step mirror
-check at `level_03 step 44/44`. Scope boundary held: **no `.gd` script, no
-`levels/`, no `tests/`, no `main.tscn` and no `project.godot` were touched** —
-no game-side change proved necessary, T-007's live drive-through already
-having exercised this exact path. `git status --porcelain` shows only
-`TASKS.md` + the new tool.
-Orchestration: graphify=none — no `graphify-out/graph.json` in the game dir (`examples/sokoban/game/`) or the git root (`_UGT Universal Game Tester/`); both checked. · attempts=1/4.
 
 ---
 

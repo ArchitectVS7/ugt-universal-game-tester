@@ -1,32 +1,21 @@
 # Sokoban Mini — Game PRD
 
 **One-liner:** A minimal Sokoban clone — four-direction push-crate puzzles, 3
-bundled levels, no timer, no scoring beyond move count. Built in Godot to
-demonstrate UGT driving an engine UGT has no native adapter for.
+bundled levels, no timer, no scoring beyond move count.
 
 **Why this example exists:** Demonstrate `/tasklist` + `/orchestrate` building
-a small Godot game from a PRD, then a **hand-written, engine-first UGT
-adapter** (the `engine.type: custom` pattern, for engines no built-in adapter fits)
-driving it over a local TCP socket — because Godot's frame-based main loop
-doesn't fit a blocking-stdio subprocess bridge the way Python/Node do.
+a small Godot game from a PRD.
 
 ## Stack
 
 Godot 4.x, 2D, single scene, tile-based grid movement. One canonical move
-function, two front ends (mirrors the discipline in the other two examples):
+function behind the front end (mirrors the discipline in the other two
+examples):
 
 - **`res://scripts/board.gd`** — loads a level, holds `try_move(direction)`
   (the only place push/collision rules live), tracks solved state.
 - **Human input** — the four arrow keys / WASD call `try_move()` directly.
   This is the real, playable game.
-- **`res://scripts/ugt_bridge.gd`** — an autoload, active only when launched
-  with `--ugt-bridge` (or `UGT_BRIDGE=1`), that opens a local `TCPServer`,
-  accepts one connection, and maps a numeric `action_id` from a socket
-  message to a `try_move(direction)` call. **Never re-implements
-  push/collision logic.** `StreamPeerTCP` delivers raw bytes with no
-  built-in line framing, so the bridge must buffer incoming bytes across
-  `_process()` polls and split on `\n` itself — a message can legitimately
-  arrive split across two or more frames.
 
 ## Core mechanics
 
@@ -42,9 +31,8 @@ function, two front ends (mirrors the discipline in the other two examples):
   boxes_total`).
 - `moves_taken` increments only on a move that actually changes player or box
   position; a wall-blocked or box-blocked no-op does not increment it.
-- No lose state — a player can always retry; add a `reset_level` action (or
-  the bridge's `reset` command) for a stuck position. No move limit, no
-  timer.
+- No lose state — a player can always retry; add a `reset_level` action for a
+  stuck position. No move limit, no timer.
 
 ## Content: 3 bundled levels
 
@@ -53,20 +41,9 @@ grids in the legend above, increasing in box count (1 → 2 → 3 boxes) and gri
 size. Solving a level advances to the next automatically; solving the third
 sets `all_levels_solved: true`.
 
-## UGT hooks required (the game/integration contract)
+## Game state
 
-When launched with the bridge flag, `ugt_bridge.gd` listens on
-`127.0.0.1:8910` (configurable via `--ugt-port=N`) for newline-delimited
-JSON, same message shape as UGT's subprocess protocol (see
-`../integration/PRD.md`):
-
-- `{"command": "reset"}` → reloads the current level from scratch →
-  `{"state": {...}}`
-- `{"command": "step", "action_id": N}` → one `try_move()` call →
-  `{"state": {...}, "terminated": bool, "truncated": bool, "info": {}}`
-- `{"command": "close"}` → clean shutdown
-
-State shape:
+`board.gd` exposes a snapshot of exactly this shape:
 
 ```json
 {
@@ -79,25 +56,20 @@ State shape:
 }
 ```
 
-`terminated` mirrors `all_levels_solved`.
+`reset_level` reloads the current level from scratch, keeping `level_index`.
 
 ## Verification
 
-Two layers, both runnable headless with nothing installed but Godot itself:
+Runnable headless with nothing installed but Godot itself:
 
 - **`tests/run_tests.gd`** — a ~40-line GDScript test runner (discovers
   `res://tests/test_*.gd`, runs `test_*` methods, prints PASS/FAIL per case,
   exits non-zero if any failed or if it discovered no tests). Deliberately
-  **not** GUT or any other third-party addon: this example ships inside UGT's
-  own repo to demonstrate UGT's methodology, and vendoring ~100 files of
+  **not** GUT or any other third-party addon: vendoring ~100 files of
   someone else's test framework to check a three-level demo would be a
   heavier dependency than the game. A runner this small is only trustworthy
   with a negative control, so `tools/check_runner_reports_failure.sh` proves
   it can actually fail — a suite that cannot go red is worse than no suite.
-- **`tools/tcp_smoke_check.py`** — drives the finished game over the real TCP
-  bridge and replays the committed solutions for all 3 levels. This is the
-  layer that checks the acceptance criteria below, and it is the same shape
-  as what UGT's own ladder does.
 
 ## Non-goals
 
@@ -109,10 +81,10 @@ addons.
 ## Acceptance criteria
 
 - Runs in the Godot editor, and headless by running the project directly
-  (`godot4 --headless --path . -- --ugt-bridge`) — no exported binary is
-  required for this example.
+  (`godot4 --headless --path .`) — no exported binary is required for this
+  example.
 - All 3 levels are solvable (a documented solution move sequence exists for
   each).
-- Same level + same action sequence from `reset` reproduces identical state
+- Same level + same move sequence from `reset_level` reproduces identical state
   (the game has no randomness at all, so this should hold trivially — worth
   asserting anyway).

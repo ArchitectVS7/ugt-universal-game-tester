@@ -6,19 +6,15 @@ apply net damage. War-game flavor text over a deliberately small, fully
 deterministic ruleset — built to be tested, not to be deep.
 
 **Why this example exists:** Demonstrate `/tasklist` + `/orchestrate` building a
-small React game from a PRD, then UGT driving it through a **browser** adapter
-(Playwright + `window` hooks). Its sibling `examples/sokoban` drives a Godot
-game over TCP and `examples/escape-room` a Node subprocess, so the three
-together cover all three transports UGT supports.
+small React game from a PRD.
 
 ## Stack
 
 - React + Vite, no backend, no router, no external state library (plain
   `useState`/`useReducer` is enough).
 - All game logic in a single pure module (`src/engine.js`) — the UI only renders
-  state and dispatches actions. This mirrors UGT rule M1 (adapter/UI never
-  re-implements rules) one level up: **the React component tree must not
-  contain rules, only the engine module does.**
+  state and dispatches actions: **the React component tree must not contain
+  rules, only the engine module does.**
 
 ## Core loop
 
@@ -50,45 +46,24 @@ together cover all three transports UGT supports.
   - **Reinforcements:** exactly once, at the start of round 3, each side
     independently gains +2 dice added to whichever pool *that side*
     allocated the most to that round (a tie splits toward Attack).
-- **RNG discipline (required for UGT R3 determinism):** dice rolls must be a
+- **RNG discipline (required for deterministic replay):** dice rolls must be a
   pure function of `(seed, roll_counter)`, with `roll_counter` stored in game
   state and incremented once per die rolled — never call the platform RNG
   (`Math.random`) directly. This RNG-in-state pattern is what makes a same-seed
-  replay byte-identical, which R3 asserts.
+  replay byte-identical.
 - **AI opponent:** deterministic heuristic — allocate defense dice
   proportional to `1 - own_FS/STARTING_FS` (rounded to nearest preset), rest to attack.
   No hidden state, no RNG in the decision.
 
-## UGT hooks required (the game/integration contract)
+## UI
 
-Exposed on `window` for the Playwright adapter:
-
-- `window.__GET_STATE__()` →
-  ```json
-  {
-    "player": {"force_strength": 8, "bonus_dice": 0},
-    "enemy":  {"force_strength": 8, "bonus_dice": 0},
-    "round_number": 0,
-    "battle_over": false,
-    "winner": null
-  }
-  ```
-  `winner` ∈ `null | "player" | "enemy" | "draw"`, set only when `battle_over`
-  is true.
-- `window.__SEND_ACTION__(actionId)` — `actionId` 0-6 maps to the 7 allocation
-  presets above (0 = all-attack `(6,0)` … 6 = all-defense `(0,6)`); resolves
-  one full round (both sides act, dice roll, damage applies) and returns the
-  structured envelope `{state, terminated, truncated, info}`, where `state` is
-  the projection above and `terminated` mirrors `state.battle_over`.
-  **Revised 2026-07-26.** It originally returned the bare state; that put UGT's
-  browser adapter on a legacy branch which reads `terminated` off the state
-  dict, a key this game never sent, so a black-box driver never observed a
-  battle ending. `__GET_STATE__` and `__RESET__` still return the bare
-  projection — only the action hook is wrapped.
-- `window.__RESET__(seed)` — new battle, FS reset to `STARTING_FS` both sides, `roll_counter`
-  reset, RNG reseeded.
-- A visible round log in the UI (for human readability) is expected but not
-  part of the UGT contract.
+- FS bars for both sides and 7 allocation buttons.
+- A visible round log, newest round first, with flavor text derived from what
+  the engine recorded that round (bonuses granted, damage taken, posture).
+- `winner` ∈ `null | "player" | "enemy" | "draw"`, surfaced as an outcome
+  banner only once `battle_over` is true, plus a reset control that starts a
+  new battle with FS back to `STARTING_FS` on both sides and `roll_counter`
+  reset.
 
 ## Non-goals
 
@@ -98,10 +73,8 @@ accessibility pass, no mobile layout.
 
 ## Acceptance criteria
 
-- `npm run build` produces a static bundle servable by any static file server
-  (`integration/serve.py` serves it; the ladder refuses to run against a `dist/`
-  older than `src/`).
+- `npm run build` produces a static bundle servable by any static file server.
 - A full battle (12 rounds or a decisive FS ≤ 0) completes without console
   errors.
-- Same seed + same action sequence (via `__SEND_ACTION__`) reproduces
-  byte-identical state at every round.
+- Same seed + same allocation sequence reproduces byte-identical state at every
+  round.

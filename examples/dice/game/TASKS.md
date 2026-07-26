@@ -16,9 +16,6 @@ Build the React game per `PRD.md` in this folder.
   and dispatch actions (no rules in JSX/handlers).
 - Dice rolls are a pure function of `(seed, roll_counter)`; `roll_counter` is
   part of state. Never call `Math.random()` outside the seeded RNG.
-- `window.__GET_STATE__` / `window.__SEND_ACTION__` / `window.__RESET__` must
-  match `PRD.md`'s UGT hooks contract exactly — the integration side is written
-  against this shape and cannot be changed independently.
 
 Statuses: `TODO` | `IN-PROGRESS` | `DONE` | `BLOCKED(reason)`
 
@@ -81,7 +78,7 @@ Attack).
 
 **Delivered (2026-07-25):** Added the round-resolution layer to `src/engine.js`
 below T-002's RNG layer (T-002's exports untouched): the frozen `ALLOCATIONS`
-table of the 7 presets in `__SEND_ACTION__` id order, `createInitialState(seed)`,
+table of the 7 presets in preset-id order, `createInitialState(seed)`,
 a single symmetric `sideBonuses()` helper both sides call (so player and enemy
 rules cannot drift), and `resolveRound(state, playerPresetIndex,
 enemyPresetIndex)` — which reads every bonus off the pre-damage round-start
@@ -108,7 +105,7 @@ reinforcement round): all six mutants were killed by the suite, so nothing is
 vacuously green. Scope held to this layer — `battle_over`/`winner` are carried
 through unchanged with the entry guard deliberately left off (T-004), the enemy
 allocation is an explicit parameter with no placeholder AI (T-005), and no UI
-or `window.__*__` hook was touched (T-006/T-007). Gate: `npm test -- --run`
+was touched (T-006). Gate: `npm test -- --run`
 70/70 green, `npm run build` and `npm run lint` both clean.
 Orchestration: graphify=none — no `graphify-out/graph.json` exists in the repo root (`examples/dice/game`) or anywhere above it; the task area is two files (`src/engine.js`, its test)  · attempts=1/4.
 
@@ -130,16 +127,16 @@ rather than `===` so a hand-built or rewound state is still handled correctly.
 Also added a post-battle no-op guard (D10) to `resolveRound`: once
 `battle_over` is true, further calls return the same state object unchanged
 (no throw), which keeps `roll_counter` frozen for same-seed replay and matches
-the PRD's no-console-errors acceptance bar for a black-box `__SEND_ACTION__`
-driver that may keep sending actions after the battle ends. New
+the PRD's no-console-errors acceptance bar when an action arrives after the
+battle has already ended. New
 `src/battle.test.js` (28 tests) covers `evaluateOutcome` in isolation
 (decisive win/loss, the D9 mutual-destruction draw, `<=`/`>=` boundary
 correctness) plus `resolveRound` integration (draw-by-round-cap, winner stays
 `null` while in progress, the post-battle no-op by reference equality);
 `src/round.test.js` was updated to point its old "leaves battle_over to
 T-004" placeholder at the real behavior. Scope was held to this layer only —
-the AI opponent's allocation heuristic (T-005) and all UI/`window.__*__` hook
-work (T-006/T-007) were deliberately left untouched. Gate: `npm test -- --run`
+the AI opponent's allocation heuristic (T-005) and all UI work (T-006) were
+deliberately left untouched. Gate: `npm test -- --run`
 green, `npm run build` and `npm run lint` both clean.
 Orchestration: graphify=none — no `graphify-out/graph.json` exists in this
 repo root (`examples/dice/game`) or above it, so there is no graph to query; I
@@ -170,12 +167,12 @@ wiring identity against `resolveRound`, pre- vs post-round FS timing,
 post-battle inertness, invalid-action-id throwing, and a `Math.random`-throws
 discipline check plus same-seed replay. Scope was held to this layer only —
 `src/engine.js`'s existing state shape, `resolveRound`, and `evaluateOutcome`
-were not touched, and no UI or `window.__*__` hook work (T-006/T-007) was
+were not touched, and no UI work (T-006) was
 done. Gate: `npm test -- --run` green, `npm run build` and `npm run lint`
 both clean.
 Orchestration: graphify=none — no `graphify-out/graph.json` exists in this repo root (`examples/dice/game`) or anywhere above it; I grounded the plan in `PRD.md`, `TASKS.md`, `src/engi · attempts=1/4.
 
-## M2 — UI + UGT hooks
+## M2 — UI
 
 ### T-006 · Round log + HP display — `status: DONE` · `coder: sonnet` · `after: T-004, T-005`
 Build the React UI: FS bars for both sides, a scrolling round log with flavor
@@ -189,7 +186,7 @@ a scripted multi-round battle and asserts zero calls.
 tree over a new `useBattle` hook (`src/useBattle.js`) that owns the only
 `createInitialState`/`applyAction` calls in the UI layer — a `useRef` mirror
 alongside `useState` so `sendAction` can return the freshly-applied state
-synchronously, which T-007's `window.__SEND_ACTION__` will need. The screen
+synchronously rather than one render behind. The screen
 renders a `ForceBar` per side (FS number + percentage bar + a bonus-dice
 callout when `bonus_dice > 0`), the 7 `AllocationButtons` read straight off
 `ALLOCATIONS` (no hardcoded labels), a `RoundLog` listing newest-round-first,
@@ -208,51 +205,9 @@ asserting zero calls — plus opening-state rendering, single- and
 multi-round log stacking/ordering, the disabled-buttons-plus-reset
 post-battle state, and flavor-line content per bonus/damage combination.
 Scope was held to the UI/flavor layer only — no rule in `src/engine.js` or
-`src/ai.js` was touched, and the `window.__GET_STATE__` /
-`__SEND_ACTION__` / `__RESET__` hooks are deliberately NOT here (T-007, on
-the `useBattle` seam this task built for it). Gate: `npm test -- --run`
+`src/ai.js` was touched. Gate: `npm test -- --run`
 green, `npm run build` and `npm run lint` both clean.
 Orchestration: graphify=none — no `graphify-out/graph.json` exists in this repo root (`examples/dice/game`) or anywhere above it in `_UGT Universal Game Tester/`, so there is no graph  · attempts=1/4.
-
-### T-007 · Window hooks for UGT — `status: DONE` · `coder: opus` · `after: T-006`
-Expose `window.__GET_STATE__`, `window.__SEND_ACTION__(actionId)`,
-`window.__RESET__(seed)` per PRD's exact shape.
-**Accept:** unit/integration test drives a full 12-round battle via
-`__SEND_ACTION__` only (no UI clicks) and matches `__GET_STATE__` at each
-step; same seed + same action sequence reproduces identical state twice in a
-row.
-
-**Delivered (2026-07-25):** Added `src/ugtHooks.js`, a React-free
-serialization + installation layer over the `useBattle` seam that T-006 built
-for it: `toContractState(state)` projects engine state down to the PRD's
-exact seven-field shape (`player`/`enemy` `force_strength`+`bonus_dice`,
-`round_number`, `battle_over`, `winner`), copying each field verbatim with no
-arithmetic and no `??` fallbacks, and `installUgtHooks(target, seam)` wires
-`__GET_STATE__`/`__SEND_ACTION__`/`__RESET__` (plus a `__RESET_GAME__` alias
-for the adapter's optional soft-reset probe) onto `target` and returns an
-identity-checked uninstall closure. `src/useBattle.js` grew a `getState()`
-reader off the existing `stateRef` mirror (not the render `state`, which goes
-stale between two synchronous hook calls in one tick), and `App.jsx` mounts
-the hooks from a `useCallback`-stable `useEffect` over that seam so the
-screen and a black-box UGT driver can never diverge. `__SEND_ACTION__`
-returns the bare projected state (not a `{state, terminated, truncated,
-info}` envelope) per the PRD's literal wording and `ugt/adapters/playwright.py`'s
-legacy branch; an out-of-range action id propagates the engine's `RangeError`
-unvalidated, and a post-battle action is the engine's existing no-op, so a
-full battle plus trailing blind actions stays console-clean. New
-`src/ugtHooks.test.js` (React-free, jsdom-free) covers the projection's
-shape/order/isolation and the install/uninstall contract including the
-StrictMode-safe stale-cleanup guard; new `src/hooks.integration.test.jsx`
-drives a full 12-round battle through `__SEND_ACTION__` only, asserts
-`__GET_STATE__` agreement at every step, exercises all three `winner` values,
-and confirms same-seed-plus-same-actions replay is byte-identical while a
-different seed diverges. Scope was held to this hook/wiring layer only — no
-rule in `src/engine.js`, `src/ai.js`, or `src/flavor.js` was touched, and the
-deliberately-deferred `window.__STEP_COMPLETE__` pacing flag and URL `?seed=`
-plumbing noted in `src/ugtHooks.js`'s header comment stay out of scope, per
-PRD Non-goals. Gate: `npm test -- --run` green, `npm run build` and
-`npm run lint` both clean.
-Orchestration: graphify=none — no `graphify-out/graph.json` exists in this repo root (`examples/dice/game`) or anywhere above it in `_UGT Universal Game Tester/`; I grounded the plan i · attempts=1/4.
 
 ---
 
