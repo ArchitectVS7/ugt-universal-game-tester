@@ -65,7 +65,7 @@ was verified against the two `godot4 --headless` Accept commands, not against
 the project's own test suite (which does not exist yet).
 Orchestration: graphify=none — no `graphify-out/graph.json` in the repo root (checked); scaffold task is self-contained anyway. · attempts=1/4.
 
-### T-002 · Headless test runner — `status: TODO` · `coder: opus` · `after: T-001`
+### T-002 · Headless test runner — `status: DONE` · `coder: opus` · `after: T-001`
 Write `tests/run_tests.gd`, run as `godot4 --headless --path . -s
 tests/run_tests.gd`. Implement **exactly this contract** — it is small on
 purpose, and it is the gate every later task is judged by:
@@ -94,6 +94,39 @@ runner, asserts it exited **non-zero**, and removes the temp file via a
 (proving the runner can actually fail); `git status --porcelain` is empty
 after running it. A runner that cannot report failure is worse than no
 runner — this task is not DONE until that negative control passes.
+
+**Delivered (2026-07-25):** `tests/run_tests.gd` (SceneTree script, no
+third-party addon, nothing fetched) implements the contract exactly:
+filename-sorted discovery of `res://tests/test_*.gd`, `test_*` methods in
+declaration order (deduped, never sorted), optional `before_each()` /
+`after_each()`, one `PASS <script>::<method>` / `FAIL <script>::<method> — <msg>`
+line per case, a final `N passed, M failed`, and exit 0 **iff** `M == 0 and
+N > 0` (verified by hand: with `test_sanity.gd` moved aside the runner prints
+`0 passed, 0 failed` and exits 1). Assert helpers live in
+`tests/assertions.gd` (inherited by path — no `class_name`, and not named
+`test_*.gd` so it is never discovered as a suite); they only append to
+`failures`, never `assert()`/`push_error()`/`quit()`, so an assertion can
+never abort the run. `tests/test_sanity.gd` holds exactly one test with one
+assertion, pinning the `1 passed, 0 failed` gate line.
+`tools/check_runner_reports_failure.sh` (repo-tracked, mode 755,
+cwd-independent, `GODOT` overridable) injects a failing `test_*.gd` and
+requires **both** a non-zero exit **and** a matching `FAIL` line — so a crash
+or an empty discovery cannot masquerade as a working negative control; an
+`EXIT` trap installed before the file is written removes both the `.gd` and
+any `.gd.uid` (this repo tracks `.uid` sidecars), leaving `git status
+--porcelain` clean on every path. Three environment findings hardened against
+on Godot 4.7.1: `OS.set_exit_code()`/`OS.exit_code` do not exist (plain
+`quit(code)` does propagate); a test script with a parse error `load()`s as a
+non-null GDScript whose `new()` raises a fatal error that **aborted
+`_initialize()` and hung the run forever** — now gated on `can_instantiate()`
+and reported as a `FAIL <script>::<load>` case, with a 60s `_process()`
+watchdog as a last-resort "print red and quit 1" net so the Gate can never
+hang; and `==` between unrelated Variant types raises at runtime, so the
+helpers compare `typeof()` first (`assert_true`/`assert_false` are
+strict-boolean — `1` does not pass). `tests/.gitkeep` removed (the directory
+now has real content). Scope boundary: no game logic — no `board.gd`, no
+levels, no bridge.
+Orchestration: graphify=none — no `graphify-out/graph.json` in the repo root or in `examples/sokoban/game/` (checked); the task is also self-contained (two new files + one shell script · attempts=1/4.
 
 ## M1 — Rules engine
 
