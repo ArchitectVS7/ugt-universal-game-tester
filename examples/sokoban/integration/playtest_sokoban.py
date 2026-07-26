@@ -33,6 +33,13 @@ derived from the action log. The moves-against-the-committed-optimum ratio is
 **withheld unless every level was solved**: its denominator is the cost of
 FINISHING, so on a partial run it is not a worse score, it is not a score.
 
+**Scoring is GATED on the core interaction having happened at all.** A run in
+which no crate ever moved and no crate ever reached a target is a proof about the
+transport and no evidence at all about the game, so it reports
+`CHANNEL PROVEN / GAME UNMEASURED` and exits non-zero instead of printing a
+competence line. Exit codes: 0 scored, 1 unmeasured (or no report), 2 the log
+contradicts itself and is refused.
+
 Two model-free entry points, so scoring is re-runnable without a bridge:
 
     python3 examples/sokoban/integration/playtest_sokoban.py --score results/<r>.json
@@ -46,6 +53,7 @@ import itertools
 import json
 import os
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
@@ -213,11 +221,13 @@ def assert_prompt_shows_a_player_view(config: UgtConfig, guide: str, adapter,
 
 # ── Competence ───────────────────────────────────────────────────────────────
 #
-# Everything below reads a report and prints. It touches no game, no model and
-# no network, so it is re-runnable for free against any report on disk
-# (`--score`) and self-provable against synthetic ones (`--prove-scoring`).
+# Everything below reads a report, prints, and decides an exit code. It touches no
+# game, no model and no network, so the whole gate is re-runnable for free against
+# any report on disk (`--score`) and self-provable against synthetic ones
+# (`--prove-scoring`).
 
-CRATE_GLYPHS = "$*"   # PRD legend: `$` box, `*` box-on-target
+CRATE_GLYPHS = "$*"      # PRD legend: `$` box, `*` box-on-target
+ON_TARGET_GLYPH = "*"    # a box STANDING ON a target — the game's whole objective
 WALL_GLYPH = "#"
 
 _ARROW = " → "         # exactly how `_compute_delta` joins a non-numeric before/after
@@ -328,6 +338,72 @@ def count_crate_moves(report: dict) -> dict:
     return counts
 
 
+def count_target_arrivals(report: dict) -> dict:
+    """Did a crate ever REACH a target, and does the log agree with itself?
+
+    Read off the action log only, in two independent ways so they can be made to
+    argue:
+
+      * the scalar the game keeps (`boxes_on_target`), accumulated from the signed
+        diffs `_compute_delta` writes;
+      * the rendered board (`*` cells GAINED between the two halves of one delta).
+
+    An ARRIVAL is a step where the count ROSE, not a high-water mark of the count
+    itself, and the difference is load-bearing. Two things can raise
+    `boxes_on_target` without the pilot achieving anything: a reload, which
+    restores the level's own starting arrangement, and a level advance, which
+    replaces the board wholesale. Neither is a crate arriving anywhere, so BOTH
+    readings exclude those steps — the same two exclusions `count_crate_moves`
+    applies, for the same reason. On the three shipped levels the exclusions are
+    currently unobservable (none starts with a `*`, so a restore can only take the
+    count DOWN or leave it), but authoring one level that ships a crate already on
+    a target would otherwise hand every run a free arrival the moment the board was
+    replaced, and a gate must not rest on a content fact a level author can change.
+
+    `max_boxes_on_target` is reported alongside as evidence, and it is relative to
+    the START of the run — the running value begins at 0 rather than at
+    `baseline_state`'s, and an `episode_reset` rewinds it to 0 (the same fact
+    `count_levels_solved` uses) while the high-water mark stands. Reading a
+    baseline would add a branch no fixture and no real report could take the other
+    way; and because it is a level's arrangement rather than the pilot's work, it
+    is exactly what the gate must NOT be conditioned on.
+    """
+    out = {"max_boxes_on_target": 0,
+           "scalar_arrival_steps": [], "grid_arrival_steps": [],
+           "advances_excluded": 0, "reloads_excluded": 0}
+    running = 0
+    for entry in report.get("action_log") or []:
+        step = entry.get("step")
+        if entry.get("action_type") == "episode_reset":
+            running = 0               # back to level 1; the high-water mark stands
+            continue
+        delta = entry.get("state_delta") or {}
+        diff = (_signed(delta["boxes_on_target"], "boxes_on_target", step)
+                if "boxes_on_target" in delta else 0)
+        running += diff
+        out["max_boxes_on_target"] = max(out["max_boxes_on_target"], running)
+
+        pair = _grid_delta(entry)
+        excluded = False
+        if pair is not None and _wall_cells(pair[0]) != _wall_cells(pair[1]):
+            out["advances_excluded"] += 1
+            excluded = True
+        elif entry.get("action") == "reload":
+            out["reloads_excluded"] += 1
+            excluded = True
+        if excluded:
+            continue                  # neither reading may claim an arrival here
+
+        if diff > 0:
+            out["scalar_arrival_steps"].append(step)
+        if pair is not None and (_cells(pair[1], ON_TARGET_GLYPH)
+                                 - _cells(pair[0], ON_TARGET_GLYPH)):
+            out["grid_arrival_steps"].append(step)
+    # Both lists are built in log order, so they are directly comparable without
+    # sorting — and no sort key has to guess what a `step` field might contain.
+    return out
+
+
 def count_levels_solved(report: dict, total: int) -> int:
     """The high-water mark of levels solved, from the log and the final states.
 
@@ -419,17 +495,143 @@ def competence_lines(report: dict) -> list:
     return out
 
 
-def report_competence(report_path: str) -> None:
-    """Say what the run is worth, in the only currency this game has.
+def core_interaction_verdict(report: dict, report_path: str = None):
+    """`(verdict, lines)` — may this run be scored at all?
 
-    No rate, no confidence interval, and that is not modesty: with no RNG
-    anywhere, N episodes are N replays of one puzzle set, so a percentage over
-    them has a denominator of N and a sample size of 1 (§B P9/P13).
+    `verdict` is one of:
+
+      * `"SCORE"`          — the core interaction happened; score it.
+      * `"UNMEASURED"`     — the pilot walked around. The transport is proven and
+                             the game was never played, so there is nothing to
+                             score and a competence line would misrepresent that.
+      * `"CONTRADICTION"`  — the two independent readings of "a crate reached a
+                             target" disagree. Refused rather than resolved.
+
+    Two conditions, ANDed, both read off the ACTION LOG rather than the summary
+    block or `final_state` (a summary can say `all_levels_solved` while the log
+    shows nothing ever moved; the log is the primary evidence and the one a wire
+    defect shows up in):
+
+      * `crates_moved > 0` — a crate moved at all, grid-derived, so a push along
+        open floor counts;
+      * at least one ARRIVAL — a step where `boxes_on_target` rose and the board
+        gained a `*`, excluding the two steps that can raise the count without the
+        pilot doing anything (see `count_target_arrivals`).
+
+    Neither implies the other and neither alone is enough. A crate can be shoved
+    around for a hundred moves without ever landing on a target (the second
+    condition is what makes the gate about the OBJECTIVE), and `boxes_on_target`
+    is blind to any push that does not cross a target (the first is what makes it
+    about the MECHANIC). Requiring both is what the reasoning channel cannot fake.
+
+    The contradiction branch comes first, because scoring across untrusted
+    evidence reports a number derived from two different games. On honest wire
+    data the two readings name the SAME steps: one push per step, and a crate
+    landing on a target both increments the counter and turns `$` into `*` on the
+    board. The comparison is like-for-like because the two exclusions are applied
+    to both readings, not just to the board (`count_target_arrivals`). A
+    disagreement is therefore the wire-only defect class the
+    `grid_matches_scalar_state` invariant exists to catch — the counter and the
+    render having drifted apart — and it is filed, not tuned away.
+    """
+    crates = count_crate_moves(report)
+    arrivals = count_target_arrivals(report)
+    solutions = _committed_solutions()
+    total = len(solutions)
+    solved = count_levels_solved(report, total)
+
+    scalar_steps = arrivals["scalar_arrival_steps"]
+    grid_steps = arrivals["grid_arrival_steps"]
+
+    evidence = [
+        f"  crates_moved: {crates['moved']}     "
+        f"({crates['grid_changes']} grid-changing steps; "
+        f"{crates['level_advances']} excluded as level advances, "
+        f"{crates['reloads']} as reloads)",
+        f"  max boxes_on_target over the log: {arrivals['max_boxes_on_target']}",
+        f"  crate-on-target steps: scalar {scalar_steps} / board {grid_steps}     "
+        f"({arrivals['advances_excluded']} steps excluded as level advances, "
+        f"{arrivals['reloads_excluded']} as reloads)",
+        f"  levels_solved: {solved}/{total}",
+    ]
+    if report_path:
+        evidence.append(f"  report (written, unscored): {report_path}")
+
+    if scalar_steps != grid_steps:
+        return "CONTRADICTION", (
+            ["=" * 70, "REFUSING TO SCORE — CONTRADICTORY LOG"]
+            + [f"  boxes_on_target rose on steps : {scalar_steps}",
+               f"  the board gained a `*` on step: {grid_steps}"]
+            + evidence
+            + ["", "  The counter and the render disagree about the game's own",
+               "  objective, so one of them is describing a different game. This is",
+               "  a wire defect to file against whoever owns the game (the",
+               "  `grid_matches_scalar_state` invariant is the one that guards it),",
+               "  not a scoring threshold to loosen.",
+               "=" * 70])
+
+    # Past the contradiction check the two readings agree, so either one IS the
+    # arrival list. `scalar_steps` is named for the reader; `grid_steps` is the
+    # same list.
+    a_crate_moved = crates["moved"] > 0
+    a_crate_reached_a_target = len(scalar_steps) > 0
+    if a_crate_moved and a_crate_reached_a_target:
+        return "SCORE", []
+
+    return "UNMEASURED", (
+        ["=" * 70, "CHANNEL PROVEN / GAME UNMEASURED",
+         f"  a crate moved at all      : {'YES' if a_crate_moved else 'NO'}",
+         f"  a crate reached a target  : "
+         f"{'YES' if a_crate_reached_a_target else 'NO'}",
+         ""]
+        + evidence
+        + ["",
+           "  The pilot took its turns, the board came back, no invariant broke —",
+           "  and the game's one interaction never happened. That is a result about",
+           "  the TRANSPORT, which is proven, and no evidence whatever about the",
+           "  puzzles, so no competence figure is printed: refusing to score is not",
+           "  a claim that the pilot played badly, it is a refusal to publish a",
+           "  number with nothing behind it.",
+           "",
+           "  The reasoning channel is not a substitute, and this tier has already",
+           "  paid to learn it: on the recorded 100-action stage-1 run the pilot",
+           "  said \"push\" on 96 of 100 steps and pushed 0 times. A §B P7 keyword",
+           "  grep scores that a clean pass, while the one objective observable sat",
+           "  unread in the report — which is why this is a machine check.",
+           "=" * 70])
+
+
+def score_lines(report: dict, report_path: str = None):
+    """`(exit_code, lines)` for a loaded report. Pure — prints nothing.
+
+    Say what the run is worth, in the only currency this game has: no rate, no
+    confidence interval, and that is not modesty — with no RNG anywhere, N
+    episodes are N replays of one puzzle set, so a percentage over them has a
+    denominator of N and a sample size of 1 (§B P9/P13).
+
+    And say nothing at all when the run has no worth to report. The competence
+    block is REPLACED by the banner rather than printed beside it: a scoreline
+    next to "the game was never played" is exactly the flattering-by-accident
+    reading this gate exists to remove.
+    """
+    verdict, lines = core_interaction_verdict(report, report_path)
+    if verdict == "SCORE":
+        return 0, competence_lines(report)
+    return (2 if verdict == "CONTRADICTION" else 1), lines
+
+
+def report_competence(report_path: str) -> int:
+    """Print the verdict for a report on disk and return its EXIT CODE.
+
+    A gate, not a printout: 0 scored, 1 unmeasured or absent, 2 contradictory.
+    A missing report is 1 too — "nothing to score" has never been a pass.
     """
     if not os.path.exists(report_path):
         print(f"[!] no report at {report_path} — nothing to score.")
-        return
-    print("\n" + "\n".join(competence_lines(json.load(open(report_path)))))
+        return 1
+    code, lines = score_lines(json.load(open(report_path)), report_path)
+    print("\n" + "\n".join(lines))
+    return code
 
 
 # ── Proving the scorer can fail ───────────────────────────────────────────────
@@ -517,13 +719,21 @@ def _fixture_excluded() -> dict:
 
 def _fixture_all_solved(moves: int = 94) -> dict:
     """Every level solved, through the lazy advance, exactly as the game emits
-    it: `level_solved` flips on the solving move, `level_index` on the next."""
+    it: `level_solved` flips on the solving move, `level_index` on the next.
+
+    Every step that claims `boxes_on_target` rose carries the BOARD that rose with
+    it, because the core-interaction gate refuses a log whose counter and render
+    disagree — and an abridged fixture that raised the counter without drawing the
+    `*` would be asserting the wire defect it is meant to be a clean control for.
+    """
     solved1 = ["#######", "#   * #", "#   @ #", "#     #", "#######"]
+    solved2 = ["#########", "#   #   #", "#   # * #", "#   @   #", "#     * #",
+               "#   #   #", "#########"]
     log = [
         _step(1, "up", L1, solved1, level_solved="+1", boxes_on_target="+1"),
         _step(2, "left", solved1, L2, level_index="+1", level_solved="-1"),
-        _step(3, "up", None, None, level_solved="+1", boxes_on_target="+2"),
-        _step(4, "left", L2, L3, level_index="+1", level_solved="-1"),
+        _step(3, "up", L2, solved2, level_solved="+1", boxes_on_target="+2"),
+        _step(4, "left", solved2, L3, level_index="+1", level_solved="-1"),
         _step(5, "up", None, None, level_solved="+1", all_levels_solved="+1"),
     ]
     return _report(log, moves, all_solved=True, level_index=2, level_solved=True,
@@ -596,6 +806,50 @@ def _fixture_reset_replays_level_one() -> dict:
     return rep
 
 
+def _fixture_preplaced_target_restored() -> dict:
+    """A hypothetical level that SHIPS a crate already on a target, pushed off it
+    and then reloaded.
+
+    None of the three shipped levels starts with a `*`, so this cannot be recorded
+    today — and that is the point: it is the control for the arrival exclusions,
+    which are otherwise conditioned on a content fact any level author could
+    change. On the reload, `boxes_on_target` rises by 1 AND the board gains its
+    `*` back, both honestly, and no crate arrived anywhere: the level simply
+    returned to how it was authored. The run also contains one real push, so
+    `crates_moved` is 1 and only the arrival condition stands between this and a
+    scored run.
+    """
+    start = ["#######", "#     #", "#  *  #", "#  @  #", "# $ . #", "#######"]
+    pushed = ["#######", "#  $  #", "#  @  #", "#  .  #", "# $ . #", "#######"]
+    return _report([
+        _step(1, "up", start, pushed, player_y="-1", boxes_on_target="-1"),
+        _step(2, "reload", pushed, start, player_y="+1", boxes_on_target="+1"),
+    ], 2, grid=start)
+
+
+def _fixture_scalar_without_grid() -> dict:
+    """The counter says a crate reached a target; the board never shows a `*`.
+
+    A wire defect, not a scoring edge case — and the direction that matters most,
+    because `boxes_on_target` is the field a lazy gate would trust on its own.
+    """
+    before = ["#######", "#   . #", "# $@  #", "#     #", "#######"]
+    after = ["#######", "#   . #", "#$@   #", "#     #", "#######"]
+    return _report([_step(1, "left", before, after, player_x="-1",
+                          boxes_on_target="+1")], 1)
+
+
+def _fixture_grid_without_scalar() -> dict:
+    """The board shows a crate landing on a target; the counter never moves.
+
+    The reverse direction, so the check cannot be satisfied by only ever
+    distrusting one of the two sources.
+    """
+    before = ["#######", "#   . #", "#   $ #", "#   @ #", "#######"]
+    after = ["#######", "#   * #", "#   @ #", "#     #", "#######"]
+    return _report([_step(1, "up", before, after, player_y="-1")], 1)
+
+
 def _fixture_malformed() -> dict:
     log = [{"step": 1, "action_type": "action_id", "action": "up",
             "state_delta": {"grid": "['#'] -> not a board"}}]
@@ -619,7 +873,7 @@ def prove_scoring() -> int:
         if not ok:
             failures += 1
 
-    print("PROVE SCORING — the competence block's own controls")
+    print("PROVE SCORING — the competence block's and the gate's own controls")
 
     # A — the real defect's shape: a long walk that solved and pushed nothing.
     rep = _fixture_walk()
@@ -736,6 +990,116 @@ def prove_scoring() -> int:
         check("J malformed grid delta fails closed", "UNPARSEABLE" in str(exc),
               "SystemExit naming the step and the raw value")
 
+    # ── The core-interaction gate ────────────────────────────────────────────
+    # Below the threshold the run must refuse to score. Each case names the
+    # condition it is the control for, so a mutation has an obvious victim.
+    _BANNER = "CHANNEL PROVEN / GAME UNMEASURED"
+    _COMP = "COMPETENCE — what this run is worth"
+
+    # K — the real defect's shape: 100 legal moves, nothing touched.
+    rep = _fixture_walk()
+    verdict, lines = core_interaction_verdict(rep)
+    text = "\n".join(lines)
+    check("K walk trips the gate", verdict == "UNMEASURED", verdict)
+    check("K walk prints the banner and no competence block",
+          _BANNER in text and _COMP not in text,
+          "the banner REPLACES the scoreline rather than sitting beside it")
+    code, printed = score_lines(rep)
+    check("K walk exits non-zero", code == 1, f"exit {code}")
+    check("K refusal still carries the evidence",
+          "crates_moved: 0" in text and "levels_solved: 0/3" in text
+          and "max boxes_on_target over the log: 0" in text,
+          "no figure is lost by declining to score")
+
+    # L — one crate reaching one target is enough to be scored.
+    rep = _fixture_push_onto_target()
+    verdict, _ = core_interaction_verdict(rep)
+    check("L one target-reaching step passes the gate", verdict == "SCORE",
+          f"{verdict} for {count_target_arrivals(rep)}")
+
+    # M — the two conditions are ANDed: a real push that reached nothing.
+    rep = _fixture_push_off_target()
+    verdict, _ = core_interaction_verdict(rep)
+    check("M a push that reaches no target still trips the gate",
+          verdict == "UNMEASURED" and count_crate_moves(rep)["moved"] == 1,
+          f"{verdict} with crates_moved=1 — crates_moved alone cannot open the gate")
+
+    # N — the exclusions carry into the gate: a reload and a level advance both
+    # change the board and neither is the pilot playing.
+    rep = _fixture_excluded()
+    verdict, _ = core_interaction_verdict(rep)
+    arrivals = count_target_arrivals(rep)
+    check("N reload + level advance do not open the gate",
+          verdict == "UNMEASURED" and not arrivals["grid_arrival_steps"],
+          f"{verdict}; advances={arrivals['advances_excluded']} "
+          f"reloads={arrivals['reloads_excluded']}")
+
+    # N2 — and they are excluded from the ARRIVAL reading too, not just from
+    # `crates_moved`: restoring a level that ships a crate on a target raises the
+    # counter and redraws the `*`, both honestly, with nothing achieved.
+    rep = _fixture_preplaced_target_restored()
+    verdict, _ = core_interaction_verdict(rep)
+    arrivals = count_target_arrivals(rep)
+    check("N2 a reload that restores a pre-placed `*` is not an arrival",
+          verdict == "UNMEASURED" and count_crate_moves(rep)["moved"] == 1
+          and not arrivals["scalar_arrival_steps"]
+          and not arrivals["grid_arrival_steps"],
+          f"{verdict} with a real push already counted (crates_moved=1), "
+          f"{arrivals['reloads_excluded']} reload excluded from both readings")
+
+    # O — the gate reads the LOG, not the summary. A report claiming
+    # all_levels_solved with an empty log is exactly what a broken wire or a
+    # hand-edited artifact looks like, and it must not be scored.
+    rep = _report([], 94, all_solved=True, level_index=2, level_solved=True)
+    verdict, _ = core_interaction_verdict(rep)
+    check("O a clean summary with an empty log does not open the gate",
+          verdict == "UNMEASURED",
+          f"{verdict} despite final_state.all_levels_solved=True — the gate reads "
+          f"the action log")
+
+    # P — the end-to-end positive control: a real run scores, ratio and all.
+    rep = _fixture_all_solved()
+    code, printed = score_lines(rep)
+    text = "\n".join(printed)
+    moves = rep["final_state"]["moves_taken"]
+    check("P a finished run is scored", code == 0, f"exit {code}")
+    check("P a finished run prints the competence block",
+          _COMP in text and f"{_RATIO} {moves / optimum:.2f}x" in text
+          and _BANNER not in text, "scoreline and ratio, no banner")
+
+    # Q/R — the two sources are made to argue, in both directions.
+    rep = _fixture_scalar_without_grid()
+    verdict, lines = core_interaction_verdict(rep)
+    text = "\n".join(lines)
+    check("Q counter rose but the board shows no `*`",
+          verdict == "CONTRADICTION" and "scalar [1] / board []" in text
+          and "rose on steps : [1]" in text,
+          f"{verdict}; both step sets named in the message")
+    check("Q a contradiction is its own exit code", score_lines(rep)[0] == 2,
+          f"exit {score_lines(rep)[0]} — distinguishable from an unmeasured run")
+    rep = _fixture_grid_without_scalar()
+    verdict, lines = core_interaction_verdict(rep)
+    check("R board shows a `*` the counter never counted",
+          verdict == "CONTRADICTION" and "scalar [] / board [1]" in "\n".join(lines),
+          verdict)
+
+    # S — the exit code reaches the CLI, off a real file on disk. `--score` is
+    # the gate, not a viewer.
+    for name, fixture, want in (("walk", _fixture_walk, 1),
+                                ("push-onto-target", _fixture_push_onto_target, 0),
+                                ("contradiction", _fixture_scalar_without_grid, 2)):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
+            json.dump(fixture(), fh)
+            path = fh.name
+        try:
+            got = report_competence(path)
+        finally:
+            os.unlink(path)
+        check(f"S --score on a {name} report exits {want}", got == want, f"exit {got}")
+    check("S a missing report is not a pass",
+          report_competence(os.path.join(HERE, "results", "does-not-exist.json")) == 1,
+          "exit 1")
+
     print(f"\nPROVE SCORING — "
           f"{'MET' if not failures else f'NOT MET ({failures} failed)'}")
     return 1 if failures else 0
@@ -755,18 +1119,18 @@ def main() -> int:
     ap.add_argument("--output", default=None)
     ap.add_argument("--score", default=None, metavar="PATH",
                     help="re-score a report that already exists; no bridge, no model, "
-                         "no spend")
+                         "no spend. GATED: exit 0 scored, 1 the core interaction never "
+                         "happened (or no report), 2 the log contradicts itself")
     ap.add_argument("--prove-scoring", action="store_true", dest="prove_scoring",
-                    help="run the competence block's own controls against synthetic "
-                         "reports; no bridge, no model, no spend")
+                    help="run the competence block's and the gate's own controls "
+                         "against synthetic reports; no bridge, no model, no spend")
     args = ap.parse_args()
 
     # Model-free paths first, so scoring never needs Godot or a provider.
     if args.prove_scoring:
         return prove_scoring()
     if args.score:
-        report_competence(args.score)
-        return 0
+        return report_competence(args.score)
 
     if args.provider == "ollama" and args.max_actions > 100:
         raise SystemExit(
@@ -795,7 +1159,7 @@ def main() -> int:
     output = args.output or os.path.join(HERE, "results", "playtest-report.json")
     os.makedirs(os.path.dirname(output), exist_ok=True)
 
-    playtest_game_with_adapter(
+    summary = playtest_game_with_adapter(
         GodotTcpAdapter(config),
         provider=args.provider,
         strategy_guide=guide,
@@ -813,9 +1177,29 @@ def main() -> int:
         config=config,
     )
 
+    # The gate runs on the report that was just WRITTEN, so a tripped gate never
+    # loses the artifact — and `--score` reproduces this exact verdict for free.
     if args.runs == 1:
-        report_competence(output)
-    return 0
+        return report_competence(output)
+
+    # Every run is scored, and one unmeasured run is one unmeasured game: with no
+    # RNG anywhere, N runs are N replays, so "most of them pushed something" is
+    # not a thing this game can mean.
+    files = (summary or {}).get("run_report_files")
+    if not files:
+        raise SystemExit(
+            f"--runs {args.runs} produced no run_report_files in {output}, so the "
+            f"per-run reports cannot be located and the core-interaction gate has "
+            f"nothing to read. Refusing to report a batch as scored on the strength "
+            f"of an aggregate block."
+        )
+    worst = 0
+    for name in files:
+        path = os.path.join(os.path.dirname(output), name)
+        code = report_competence(path)
+        print(f"[gate] {name}: exit {code}")
+        worst = max(worst, code)
+    return worst
 
 
 if __name__ == "__main__":

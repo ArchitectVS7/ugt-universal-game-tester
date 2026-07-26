@@ -62,7 +62,8 @@ python3 examples/sokoban/integration/playtest_sokoban.py --provider ollama --max
 python3 examples/sokoban/integration/playtest_sokoban.py --provider anthropic \
     --model claude-haiku-4-5-20251001 --max-actions 150
 
-# scoring only — no bridge, no model, no spend
+# the model-free GATE — no bridge, no model, no spend. Exit 0 scored,
+# 1 the core interaction never happened, 2 the log contradicts itself.
 python3 examples/sokoban/integration/playtest_sokoban.py --score results/<report>.json
 python3 examples/sokoban/integration/playtest_sokoban.py --prove-scoring
 ```
@@ -91,11 +92,28 @@ was excluded is printed next to the total.
 The moves-against-the-committed-73 ratio is **withheld unless `all_levels_solved`
 is true** (see Finding 11). Its denominator is the cost of FINISHING, so on a
 partial run it is not a worse score — it is not a score, and the block prints an
-explicit line saying so instead of a number. `--prove-scoring` is that logic's own
-negative and positive control: synthetic reports for a walk that solves nothing, a
-push along open floor with `boxes_on_target` untouched, a reload, a level advance,
-a solve visible only in the log, an episode reset that replays level 1, and a
-finished run that *does* print the ratio. It needs no game and no model.
+explicit line saying so instead of a number.
+
+**Scoring is gated on the core interaction having happened at all** (Finding 12).
+Two conditions, ANDed and both read off the action log: a crate moved at least once
+(grid-derived, so a push along open floor counts), and a crate *reached a target*
+at least once (`boxes_on_target` rose on a step where the board gained a `*`,
+excluding the reload and level-advance steps that can raise the count with nothing
+achieved). Below that, the run prints **CHANNEL PROVEN / GAME UNMEASURED** and
+exits non-zero — the banner *replaces* the competence block rather than sitting
+beside it, and carries every figure the block would have printed plus the path of
+the report, which is still written. Exit codes: **0** scored, **1** unmeasured (or
+no report at all), **2** the two readings of "a crate reached a target" disagree,
+which is a wire defect to file rather than a threshold to loosen.
+
+`--prove-scoring` is all of that logic's own negative and positive control:
+synthetic reports for a walk that solves nothing, a push along open floor with
+`boxes_on_target` untouched, a reload, a level advance, a solve visible only in the
+log, an episode reset that replays level 1, a finished run that *does* print the
+ratio, a push that moves a crate but reaches no target, a clean `all_levels_solved`
+summary above an empty log, a hypothetical level that ships a crate already on a
+target and is reloaded, both directions of counter-vs-board disagreement, and the
+exit code `--score` returns off a real file on disk. It needs no game and no model.
 
 ### The §B pre-flight (2026-07-26)
 
@@ -135,6 +153,12 @@ was written. Finding 11 turned both into instrument output, so they were
 **re-derived rather than carried forward** — `--score` against all three reports
 agrees with every cell (0 crates, 0/3 levels, on 26/30/100 grid-changing steps).
 
+**All three rows now trip the core-interaction gate**, re-derived on this commit:
+`--score` exits **1** on each with the CHANNEL PROVEN / GAME UNMEASURED banner and
+prints no competence figure. That is the correct reading of a stage-1 result and
+costs nothing — per P12 no figure from these rows was quotable anyway; the gate is
+what makes that unquotability machine-enforced instead of remembered.
+
 **Row 1 → 2 is the Finding 7 fix, and it is worth more than it looks: 4 of 30
 actions — 13% of the pilot's budget — were destroyed by truncated replies, and the
 run summary had no field that said so.** All four show in the log as
@@ -172,7 +196,7 @@ Stage 2 (Haiku) is un-run and is a credit decision, not a blocked one.
 | `verify_round1.py` | Rung 3 — level 1 solved, F1–F6. |
 | `verify_round2.py` | Rung 4 — all 3 levels to `all_levels_solved`, no-op probes. |
 | `verify_round3.py` | Rung 5 — invariant fuzzer, illegal ids, replay determinism. |
-| `playtest_sokoban.py` | Tier 3 — the LLM runner. Owns the §B pre-flight, then hands the adapter to `playtest_game_with_adapter()`. Also owns the competence scoreline, re-runnable model-free via `--score` and self-proving via `--prove-scoring`. |
+| `playtest_sokoban.py` | Tier 3 — the LLM runner. Owns the §B pre-flight, then hands the adapter to `playtest_game_with_adapter()`. Also owns the competence scoreline and the core-interaction gate that refuses to score a run in which no crate ever moved — re-runnable model-free via `--score` and self-proving via `--prove-scoring`. |
 | `strategy-guide.md` | Tier 3 — the briefing the pilot reads. Teaches push geometry, corner deaths and when to reload; no solutions. |
 | `ugt.config.yaml` | `engine.type: custom` — env.py dispatches nothing, so the rungs and the tier-3 runner construct the adapter. 5 actions: four directions plus `4 = reload`. Also carries the `playtest.*` block, where every setting is justified inline. |
 
@@ -370,6 +394,72 @@ Like Finding 9, this changed only what is **REPORTED**, never what the pilot
 receives — no prompt, no redaction and no guard moved — so it creates **no §B P8
 boundary**, and the three stage-1 rows remain comparable to each other on exactly
 the terms they already were.
+
+**12. The tier could not tell "the pilot played the game" from "the pilot walked
+around for 100 turns". FIXED — it is a gate now, not a judgement call.** Finding 11
+made the two figures honest; nothing yet *acted* on them. A run that moved zero
+crates still printed a competence block, still said PLAYTEST MET, and still exited
+0 — so the only thing standing between a stage-1 walk and a quotable-looking result
+was a human reading the scoreline carefully.
+
+`LESSONS.md` §B P7 is the check that is supposed to catch this, and its literal
+form — grep the reasoning for the core mechanic — is **defeated by this exact
+run**. Re-derived on this commit from the recorded 100-action report (`results/` is
+generated, so this is evidence about that artifact and this commit only): the pilot
+said "push" in its reasoning on **96 of 100 steps** and pushed a crate **0** times.
+Word-matching the transcript scores that a clean pass. The one objective observable
+that contradicts it was sitting in the same file, unread. A keyword grep measures
+whether the pilot has learned the vocabulary; only the board says whether it played.
+
+So scoring is now conditional on two things, ANDed, both from the action log:
+
+* **a crate moved at all** — grid-derived (Finding 11), so a push along open floor
+  counts. `boxes_on_target` alone is blind to one, which is why this condition
+  cannot be built from the scalar;
+* **a crate reached a target at least once** — `boxes_on_target` rose on a step
+  where the rendered board also gained a `*`. `crates_moved` alone cannot stand in
+  for this: a pilot can shove a crate around for a hundred moves and never satisfy
+  the game's objective, and the tier's whole question is whether the *puzzles* are
+  any good.
+
+Neither implies the other, so the AND is the check; either alone is a weaker gate
+that the real report would have taught us to trust. Below the threshold the run
+prints `CHANNEL PROVEN / GAME UNMEASURED`, carries every figure the competence
+block would have carried plus the path of the report it declined to score, and
+exits non-zero. It is a refusal to publish a number with nothing behind it, not a
+claim the pilot played badly.
+
+Two subtleties are worth naming, because both are places a lazier gate would have
+been wrong:
+
+* **The arrival is a RISE, not a high-water mark.** A reload restores the level's
+  authored arrangement and a level advance replaces the board wholesale, and either
+  can raise `boxes_on_target` without the pilot achieving anything — the moment a
+  level ships a crate already on a target. None of the three shipped levels does, so
+  the exclusion is unobservable *today*; a gate resting on a content fact a level
+  author can silently change is not a gate, and `--prove-scoring` carries a
+  hypothetical such level as its control.
+* **The two readings are made to argue.** A crate landing on a target increments the
+  counter *and* turns `$` into `*` on the same step, so on honest wire data the two
+  step lists are identical. When they are not, the run is **refused with its own
+  exit code (2)** rather than scored: that disagreement is the wire-only defect
+  class the ninth invariant (`grid_matches_scalar_state`) exists to catch, and
+  scoring across it would publish a figure derived from two different games.
+
+Proven able to fail, four ways, each mutation applied by hand and the file restored
+byte-identically (sha256 compared before and after, never `git checkout`):
+inverting the arrival threshold turns the scored fixtures red (and lets the walk
+"pass"); inverting the crate-moved threshold does the same, so neither condition is
+being carried by the other; neutering the contradiction branch turns both
+disagreement fixtures red; and neutering the arrival exclusions makes the
+pre-placed-target reload score a run that pushed nothing.
+
+Like Findings 9 and 11, this changed only what is **REPORTED** — and the exit code —
+never what the pilot receives: no prompt, no redaction and no guard moved, so it
+creates **no §B P8 boundary**, and the three stage-1 rows stay comparable on exactly
+the terms they already were. The generalisable half of this — that P7 needs an
+objective observable and not a keyword grep — belongs in `LESSONS.md` §B and is not
+written here.
 
 ## Corrections to this harness
 
