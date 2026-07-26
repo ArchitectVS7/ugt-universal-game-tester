@@ -39,6 +39,14 @@ TASKS.md
 # catches node_modules symlinks pointing at an upstream game's dependencies.
 node_modules
 
+# Godot (examples/sokoban). `.godot/` is the editor/import cache — it is regenerated
+# on every headless run and would otherwise re-dirty the tree after each commit,
+# which halts /orchestrate (it requires a clean tree before every task). `*.import`
+# and export_presets.cfg are machine-local import metadata / export paths.
+.godot/
+*.import
+export_presets.cfg
+
 # Virtual environments
 venv/
 .venv/
