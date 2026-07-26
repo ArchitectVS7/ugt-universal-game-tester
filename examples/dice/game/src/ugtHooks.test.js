@@ -12,8 +12,9 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
-import { HOOK_NAMES, installUgtHooks, toContractState } from './ugtHooks.js'
+import { HOOK_NAMES, installUgtHooks, renderRoundLog, toContractState } from './ugtHooks.js'
 import { applyAction, createInitialState } from './engine.js'
+import { flavorLines } from './flavor.js'
 
 /** The exact top-level keys PRD.md's `__GET_STATE__` sample carries. */
 const CONTRACT_KEYS = ['player', 'enemy', 'round_number', 'battle_over', 'winner']
@@ -218,5 +219,70 @@ describe('installUgtHooks', () => {
     for (let id = 0; id < 7; id += 1) {
       expect(target.__SEND_ACTION__(id).state.round_number).toBe(1)
     }
+  })
+})
+
+describe('renderRoundLog (D19)', () => {
+  it('renders the panel\'s own sentence before any round has resolved', () => {
+    // Not "" — a blank channel and "nothing has happened yet" read very
+    // differently to a black-box pilot, and the panel says the latter.
+    expect(renderRoundLog(createInitialState('empty'))).toBe(
+      'The armies face off across the valley.',
+    )
+  })
+
+  it('is the UI\'s own prose, round for round, with nothing invented', () => {
+    const state = play('dispatches', [0, 6, 3])
+    const text = renderRoundLog(state)
+
+    expect(state.log).toHaveLength(3)
+    for (const record of state.log) {
+      expect(text).toContain(`Round ${record.round}`)
+      // Every line is `flavorLines`' own output — the hook adds no sentence of
+      // its own, so anything a reader learns here, a human at the page learns.
+      for (const line of flavorLines(record)) expect(text).toContain(line)
+    }
+  })
+
+  it('emits rounds OLDEST first, so a tail-truncating reader keeps the recent ones', () => {
+    // The consumer is `PlaywrightAdapter.get_terminal_text`, which returns
+    // `text[-chars:]`. Newest-first would truncate away exactly the rounds that
+    // matter. Assert the ORDER, not just the presence.
+    const state = play('order', [0, 0, 0])
+    const text = renderRoundLog(state)
+    expect(text.indexOf('Round 1')).toBeLessThan(text.indexOf('Round 2'))
+    expect(text.indexOf('Round 2')).toBeLessThan(text.indexOf('Round 3'))
+    // …and the LAST round is literally the tail, so any `text[-chars:]` wide
+    // enough to hold one round keeps the newest one. Sized from the record
+    // rather than a guessed constant — a bonus-heavy round is longer.
+    const lastBlock = ['Round 3', ...flavorLines(state.log[2])].join('\n')
+    expect(text.slice(-lastBlock.length)).toBe(lastBlock)
+  })
+
+  it('leaks nothing the Field dispatches panel withholds', () => {
+    // §B P5: the prompt must not carry what the real client hides. The panel
+    // shows hits/blocks/damage and a posture BAND; raw die faces, preset
+    // indices and the seed stay engine-internal.
+    const state = play('leak', [1, 5])
+    const text = renderRoundLog(state)
+    expect(text).not.toContain('preset_index')
+    expect(text).not.toContain('attack_rolls')
+    expect(text).not.toContain(String(state.seed))
+    expect(text).not.toContain('roll_counter')
+  })
+
+  it('is installed as a hook and reads through the same seam as __GET_STATE__', () => {
+    const state = play('seam', [2])
+    const seam = {
+      getState: vi.fn(() => state),
+      sendAction: vi.fn(() => state),
+      reset: vi.fn(() => state),
+    }
+    const target = {}
+    installUgtHooks(target, seam)
+
+    expect(HOOK_NAMES).toContain('__GET_TERMINAL_TEXT__')
+    expect(target.__GET_TERMINAL_TEXT__()).toBe(renderRoundLog(state))
+    expect(seam.getState).toHaveBeenCalledTimes(1)
   })
 })

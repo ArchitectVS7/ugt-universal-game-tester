@@ -53,6 +53,32 @@
  *   it every adapter-side `reset()` is a full page reload. It is an alias, not
  *   a fourth behaviour, and changes none of the three contract hooks.
  *
+ * D19 (2026-07-26) — `__GET_TERMINAL_TEXT__` EXPOSES THE FIELD DISPATCHES.
+ *
+ *   Found by the LESSONS.md §B P2 pre-flight ("the adapter must pass through
+ *   every field the game marks PUBLIC"): `App.jsx` renders `state.log` through
+ *   `flavorLines()` into the "Field dispatches" panel, so a human reads, every
+ *   round, how many attack hits each side landed, how many were blocked, which
+ *   bonus dice fired and which posture the enemy took. D15's seven-field
+ *   projection drops `log` and `last_round` entirely, and `PlaywrightAdapter.
+ *   get_terminal_text()` found no `__GET_TERMINAL_TEXT__` hook and no
+ *   `.xterm-rows`/`#terminal` element, so it returned `""`. An LLM pilot was
+ *   therefore playing with strictly LESS information than a human at the page —
+ *   it could see force strength move, but never why.
+ *
+ *   This is a SERIALIZATION of what the page already shows, not a widening of
+ *   the contract: it calls the same `flavorLines()` the UI calls, on the same
+ *   `state.log`, and emits nothing the panel does not display (no raw dice
+ *   rolls, no preset indices, no seed — those stay engine-internal, and
+ *   emitting them would be a §B P5 leak of what the real client hides).
+ *   `__GET_STATE__`, `__SEND_ACTION__` and `__RESET__` are untouched.
+ *
+ *   ORDER IS OLDEST-FIRST, deliberately opposite to the UI's newest-first
+ *   scroll. `get_terminal_text(chars)` returns `text[-chars:]` and the
+ *   playtester's `_fit(..., tail=True)` keeps the tail, so newest-first would
+ *   truncate away the RECENT rounds and keep the stale ones. Display order is a
+ *   UI affordance; a character-tail-truncated channel needs newest last.
+ *
  * Deliberately NOT built here: `window.__STEP_COMPLETE__` (a step-pacing flag
  * the adapter probes — it belongs with the integration's `step_delay_ms`
  * tuning; this game resolves a round synchronously, so the adapter's timeout
@@ -60,12 +86,15 @@
  * `__RESET__(seed)` through `page.evaluate`).
  */
 
-/** The three contract hook names, plus D18's alias. */
+import { flavorLines } from './flavor.js'
+
+/** The three contract hook names, plus D18's alias and D19's optional reader. */
 export const HOOK_NAMES = Object.freeze([
   '__GET_STATE__',
   '__SEND_ACTION__',
   '__RESET__',
   '__RESET_GAME__',
+  '__GET_TERMINAL_TEXT__',
 ])
 
 /**
@@ -95,6 +124,29 @@ export function toContractState(state) {
 }
 
 /**
+ * Render the round log exactly as the "Field dispatches" panel shows it (D19).
+ *
+ * Same source (`state.log`), same renderer (`flavorLines`), same per-round
+ * heading — the only difference from `App.jsx`'s `RoundLog` is the order (see
+ * D19: oldest-first, because the consumer truncates from the tail) and that the
+ * empty-log placeholder is the panel's own sentence rather than an empty
+ * string, so a pilot reading round 0 gets the same "nothing has happened yet"
+ * signal a human does instead of a blank box.
+ *
+ * No rules: every number printed was written by `resolveRound`, and every
+ * sentence is chosen by `flavor.js` from a field it already computed.
+ *
+ * @param {object} state engine state (see `createInitialState`)
+ * @returns {string}
+ */
+export function renderRoundLog(state) {
+  if (!state.log.length) return 'The armies face off across the valley.'
+  return state.log
+    .map((record) => [`Round ${record.round}`, ...flavorLines(record)].join('\n'))
+    .join('\n\n')
+}
+
+/**
  * Install the UGT hooks onto `target` (the real `window` in the app).
  *
  * The hooks are one-liners over the seam because `__SEND_ACTION__` must return
@@ -121,6 +173,10 @@ export function installUgtHooks(target, { getState, sendAction, reset }) {
       return { state, terminated: state.battle_over, truncated: false, info: {} }
     },
     __RESET__: (seed) => toContractState(reset(seed)),
+    // D19: the same prose the "Field dispatches" panel renders, oldest round
+    // first. Read through the SAME seam as `__GET_STATE__`, so it can never
+    // report a different round than the state alongside it.
+    __GET_TERMINAL_TEXT__: () => renderRoundLog(getState()),
   }
   // D18: the adapter's optional soft-reset name, same function object.
   hooks.__RESET_GAME__ = hooks.__RESET__
