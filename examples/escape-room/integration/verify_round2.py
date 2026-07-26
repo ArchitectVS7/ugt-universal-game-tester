@@ -76,6 +76,17 @@ KNOWS_HOUR = HOLD_COG + ["go_east", "take_ledger", "use_ledger"]  # in R08
 CLOCK_SET = KNOWS_HOUR + ["go_west", "use_cog_bronze"]          # in R07
 IN_R09 = CLOCK_SET + ["go_north"]                               # stone mural
 
+# Holding a place-bound object OUTSIDE the room it belongs to, with its flag
+# prerequisite already satisfied where it has one — so a refusal can only be
+# about PLACE. Staging these without the flag would let the wrong-room check
+# pass for the wrong reason.
+HOLD_ROUTES = {
+    "key_iron":     TO_R04 + ["take_key_iron"],                 # in R04, door is in R02
+    "valve_wheel":  HOLD_VALVE + ["go_south"],                  # lit, but back in R02
+    "cog_bronze":   KNOWS_HOUR,                                 # knows_hour, but in R08
+    "key_skeleton": CLOCK_SET + ["go_east", "take_key_skeleton"],  # clock_set, but in R08
+}
+
 ROUTE_TO = {
     "R01": [], "R02": TO_R02, "R03": TO_R03, "R04": TO_R04, "R05": IN_R05,
     "R06": IN_R06, "R07": IN_R07, "R08": IN_R08, "R09": IN_R09,
@@ -91,8 +102,12 @@ GATES = [
     ("ledger",       "has_cog",      "knows_hour",   IN_R08 + ["take_ledger"],
                                                      HOLD_COG + ["go_east", "take_ledger"]),
     ("cog_bronze",   "knows_hour",   "clock_set",    HOLD_COG,      KNOWS_HOUR + ["go_west"]),
-    ("key_skeleton", "clock_set",    "gate_open",    IN_R08 + ["take_key_skeleton"],
-                                                     CLOCK_SET + ["go_east", "take_key_skeleton"]),
+    # Both arms stand in R09, because key_skeleton is bound to the gate's room.
+    # Staging the refusal anywhere else would make it pass for the WRONG reason
+    # (wrong place, not missing prerequisite) and quietly stop testing the flag.
+    ("key_skeleton", "clock_set",    "gate_open",
+     IN_R08 + ["take_key_skeleton", "go_west", "go_north"],
+     CLOCK_SET + ["go_east", "take_key_skeleton", "go_west", "go_north"]),
 ]
 
 gate = GateRunner()
@@ -261,6 +276,30 @@ def main() -> int:
         check(not unexaminable,
               f"all {len(objects)} objects are examinable in their start room",
               f"not examinable: {unexaminable}" if unexaminable else "")
+
+        # ── every place-bound puzzle refuses from the wrong room ─────────────
+        # `use_requires_room` was added 2026-07-26 after the engine was found to
+        # resolve every puzzle from anywhere: you could unlock the banded iron
+        # door while still locked in your cell, and be told "the door swings
+        # open" where you stood. Content-derived, so a newly bound object is
+        # covered the moment it is authored.
+        print("\n  -- place-bound puzzles refuse from the wrong room --")
+        bound = [o for o in objects if o["use_verb"] and o["use_requires_room"]]
+        check(len(bound) > 0, "the content still ships place-bound puzzles",
+              f"{len(bound)} bound: {[o['object_id'] for o in bound]}")
+        for obj in bound:
+            oid, home = obj["object_id"], obj["use_requires_room"]
+            route = HOLD_ROUTES[oid]
+            d.reset()
+            d.run(route)
+            check(oid in d.state["inventory"] and d.state["current_room"] != home,
+                  f"{oid}: staged holding it OUTSIDE {home}",
+                  f"held={oid in d.state['inventory']} at={d.state['current_room']}")
+            b = d.state
+            d.step(f"use_{oid}")
+            check(d.state == b,
+                  f"{oid}: refused away from {home} — nothing at all changed",
+                  f"in {b['current_room']}")
 
         # ── every use-gate: refused, then granted ────────────────────────────
         # The same call, two different answers. The feature map can only make

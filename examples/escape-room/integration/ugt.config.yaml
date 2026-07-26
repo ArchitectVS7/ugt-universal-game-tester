@@ -124,11 +124,17 @@ playtest:
   # game has 41 fixed actions, 10 rooms and 8 flags; the same budget would be
   # padding, and padding costs latency on a local model without adding knowledge.
   # Measured, not guessed — re-measure with `wc -c` when the guide changes:
-  #   strategy-guide.md   3,206 chars  (budget 6,000 leaves room to edit)
-  #   one state dump      ~450 chars   (6 keys, 8 flags, <= 9 inventory items)
+  #   strategy-guide.md   6,584 chars  (budget 8,000 leaves room to edit)
+  #   one state dump      ~480 chars   (7 keys, 8 flags, <= 9 inventory items)
   #   one narration line  ~120-260 chars
-  # Total per call lands around 8,000 chars / ~2,000 tokens.
-  guide_char_budget: 6000
+  # Total per call lands around 10,000 chars / ~2,500 tokens.
+  #
+  # The budget was 6,000 while the guide was 3,206. The Finding 7 rewrite took it
+  # to 5,813 — still under, but with 187 chars of headroom, and P3's whole point
+  # is that crossing that line TRUNCATES SILENTLY from the bottom, which is where
+  # the "how to play well" section lives. A budget only protects you while it has
+  # slack, so it gets raised with the guide rather than after the starvation.
+  guide_char_budget: 8000
   # ~6-9 recent narration lines: enough to hold a room description plus the
   # examines that followed it, which is what a human has on screen.
   terminal_char_budget: 1400

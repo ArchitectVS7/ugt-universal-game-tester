@@ -34,7 +34,7 @@ for _p in (HERE, REPO):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from invariants import PREDICATES, SUITE  # noqa: E402
+from invariants import PREDICATES, ROOM_NAMES, SUITE  # noqa: E402
 from ugt.adapters.subprocess import SubprocessAdapter  # noqa: E402
 from ugt.core.generic_checks import run_generic_checks  # noqa: E402
 from ugt.core.invariant_fuzzer import InvariantFuzzer  # noqa: E402
@@ -134,16 +134,23 @@ def main() -> int:
     # Every predicate must be capable of firing. One that stays silent here is
     # decoration, and a suite of decorations is a green light wired to nothing.
     print("\n  -- negative control (every invariant MUST be able to fail) --")
-    good = {"current_room": "R02", "inventory": ["lantern"],
+    # room_name is read from the content rather than typed, so these fixtures
+    # cannot drift from rooms.csv the way a hardcoded "Guard Corridor" would.
+    good = {"current_room": "R02", "room_name": ROOM_NAMES["R02"],
+            "inventory": ["lantern"],
             "flags": {"has_oil": True, "lantern_lit": False},
             "moves_taken": 5, "rooms_visited": 3, "escaped": False}
-    won = {**good, "current_room": "R10", "escaped": True}
+    won = {**good, "current_room": "R10", "room_name": ROOM_NAMES["R10"],
+           "escaped": True}
     corrupt = {
         "moves_never_decrease":            {**good, "moves_taken": 4},
         "moves_advance_by_at_most_one":    {**good, "moves_taken": 9},
         "rooms_visited_never_decreases":   {**good, "rooms_visited": 2},
         "rooms_visited_within_the_map":    {**good, "rooms_visited": 99},
         "current_room_is_real":            {**good, "current_room": "R99"},
+        # The id/name pair disagreeing is the exact shape of Finding 7b: an LLM
+        # pilot that believed R04 was the Guard Corridor. Here it is forced.
+        "room_name_agrees_with_the_room_id": {**good, "room_name": ROOM_NAMES["R07"]},
         "a_move_goes_to_an_adjacent_room": {**good, "current_room": "R09",
                                             "moves_taken": 6},
         "inventory_holds_only_real_objects": {**good, "inventory": ["excalibur"],
@@ -166,7 +173,8 @@ def main() -> int:
           "" if not silent else f"silent (cannot fail): {silent}")
 
     # ...and must NOT fire on a legitimate one, or every run is noise.
-    legit = {**good, "current_room": "R03", "moves_taken": 6, "rooms_visited": 4}
+    legit = {**good, "current_room": "R03", "room_name": ROOM_NAMES["R03"],
+             "moves_taken": 6, "rooms_visited": 4}
     noisy = [p.__name__ for p in PREDICATES if p(good, legit, "go_east", {})]
     check(not noisy, "no invariant fires on a legitimate transition",
           "" if not noisy else f"false positives: {noisy}")

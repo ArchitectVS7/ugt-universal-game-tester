@@ -19,6 +19,11 @@ Every action is one of these verbs, applied to a direction or an object:
 | `examine <object>` | Read an object's description — this is where most hints are |
 | `use <object>` | Apply an object's special verb (unlock, light, turn, fit, read) |
 
+**A puzzle is solved where it lives.** A key works at its door, a wheel at its
+pipe, a cog at the works it belongs to. If you `use` the right thing in the
+wrong room you are told so and nothing is spent — so a refusal that mentions
+*here* means "carry this somewhere else", not "you need another item".
+
 An action that cannot apply right now — walking into a wall, taking something
 that isn't here, using something you aren't carrying — is simply refused. It
 changes nothing at all, not even your move count. Refusals are free; they are
@@ -54,9 +59,16 @@ refused, and that sentence names what you are missing. Read it.
 You see the last few lines of that text, newest at the bottom. It scrolls, so
 anything you want to keep, you have to act on.
 
+You are given the opening room's description before your first move, so you do
+not need to spend one looking around to find out where you started.
+
 The **state** is the structured summary, and it includes:
 
-- `current_room` — which room you are in
+- `current_room` — the room's internal id, like `R04`
+- `room_name` — the same room's actual name, like `Storeroom`. **Trust this pair
+  over your own memory.** The ids are not in any meaningful order and they are
+  easy to mix up; if you think you are somewhere the state disagrees with, the
+  state is right and you are lost.
 - `inventory` — the objects you are carrying
 - `moves_taken`, `rooms_visited`
 - `escaped` — `true` only when you have won
@@ -89,6 +101,21 @@ objective.
 Sweep each new area before moving on: `look` to see what is here, then `examine`
 and `take` what is portable. The room text lists both the exits and the objects
 present, so one `look` usually tells you everything the room has.
+
+**Read the `Exits:` line before you move.** It is exhaustive — a direction that
+is not listed is a wall, not a locked door, and going that way will never work
+however many times you try it. A locked door *is* listed as an exit and refuses
+you with a reason; a wall just says you can't go that way. Those two are
+different messages and they mean different things: one is a puzzle, the other is
+the edge of the map. If you have tried a direction twice and nothing happened,
+`look` and re-read the exits rather than trying it a third time.
+
+**A locked door tells you what kind of lock it is — read it.** "Its ward is deep
+and cold, and a door like that wants a key" means go and find a key. "You would
+be boiled before the third step, unless that pipe were stopped" means deal with
+the pipe. The door names the obstacle, never the solution, and the answer is
+usually something you have already walked past. Trying the same door again
+without doing anything in between will always give the same refusal.
 
 When a `use` is refused, read the refusal — it is written to tell you what is
 missing. "The wick is bone dry, without oil it will never catch" is the game

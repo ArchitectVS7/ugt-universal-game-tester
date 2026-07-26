@@ -47,8 +47,15 @@ def _objects_from_content() -> set:
         return {row["object_id"] for row in csv.DictReader(fh)}
 
 
+def _room_names_from_content() -> dict:
+    """room_id -> the player-facing name, straight from the CSV."""
+    with open(os.path.join(GAME, "content", "rooms.csv"), newline="") as fh:
+        return {row["room_id"]: row["name"] for row in csv.DictReader(fh)}
+
+
 ROOMS = _rooms_from_content()
 OBJECTS = _objects_from_content()
+ROOM_NAMES = _room_names_from_content()
 
 
 def moves_never_decrease(before: dict, after: dict, command: str, result: dict) -> Optional[str]:
@@ -88,6 +95,27 @@ def current_room_is_real(before: dict, after: dict, command: str, result: dict) 
     room = after.get("current_room")
     if room not in ROOMS:
         return f"current_room {room!r} is not one of {sorted(ROOMS)}"
+    return None
+
+
+def room_name_agrees_with_the_room_id(before: dict, after: dict, command: str, result: dict) -> Optional[str]:
+    """`room_name` is the player-facing name of `current_room`, always.
+
+    The state carries both an internal id and the name a human is shown, and the
+    only way that helps is if they cannot disagree. This checks the pair against
+    rooms.csv on every single transition — the id/name mismatch is precisely the
+    confusion that cost an LLM pilot twelve moves in a room with no north exit
+    (integration README, Finding 7b), and it must fail loudly rather than be
+    inferred from prose again.
+    """
+    room = after.get("current_room")
+    name = after.get("room_name")
+    if name is None:
+        return "room_name is missing from the state — the player-facing name is not on the wire"
+    expected = ROOM_NAMES.get(room)
+    if name != expected:
+        return (f"room_name {name!r} does not match current_room {room!r} "
+                f"(rooms.csv says {expected!r})")
     return None
 
 
@@ -212,6 +240,7 @@ PREDICATES = [
     rooms_visited_never_decreases,
     rooms_visited_within_the_map,
     current_room_is_real,
+    room_name_agrees_with_the_room_id,
     a_move_goes_to_an_adjacent_room,
     inventory_holds_only_real_objects,
     inventory_changes_by_at_most_one,

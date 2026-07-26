@@ -39,8 +39,11 @@ from ugt.core.trial import GateRunner  # noqa: E402
 BRIDGE = os.path.abspath(os.path.join(HERE, "..", "game", "src", "bridge.js"))
 CONFIG = os.path.join(HERE, "ugt.config.yaml")
 
-# The PRD's state shape — exactly these six keys, no more.
-STATE_KEYS = {"current_room", "inventory", "flags",
+# The PRD's state shape — exactly these seven keys, no more. `room_name` joined
+# on 2026-07-26: `current_room` is an internal id no player is ever shown, so a
+# snapshot carrying only the id told a machine client less than the screen tells
+# a person (README Finding 7b).
+STATE_KEYS = {"current_room", "room_name", "inventory", "flags",
               "moves_taken", "rooms_visited", "escaped"}
 
 gate = GateRunner()
@@ -147,12 +150,25 @@ def main() -> int:
         print("\n  -- reset --")
         w.send({"command": "reset"})
         r = w.recv()
-        check(isinstance(r, dict) and set(r) == {"state"},
-              "reset returns exactly {'state': {...}}",
+        check(isinstance(r, dict) and set(r) == {"state", "info"},
+              "reset returns exactly {'state': ..., 'info': ...}",
               f"keys={sorted(r) if isinstance(r, dict) else r}")
+        # The other half of the narration defect, found by the local-model
+        # channel check on 2026-07-26. reset used to answer with state alone, so
+        # a wire client's FIRST decision was made with an empty text panel while
+        # a human's first screen is the cell itself. Asserted, not assumed: this
+        # is the one response a client cannot recover by acting, because there is
+        # no earlier turn to have learned it from.
+        r0_msg = ((r or {}).get("info") or {}).get("message")
+        check(isinstance(r0_msg, str) and len(r0_msg) > 20,
+              "reset narrates the opening room (no blind first move)",
+              f"{len(r0_msg or '')} chars")
         s0 = (r or {}).get("state", {})
-        check(set(s0) == STATE_KEYS, "state carries exactly the PRD's 6 keys",
+        check(set(s0) == STATE_KEYS, "state carries exactly the PRD's 7 keys",
               f"missing={sorted(STATE_KEYS - set(s0))} extra={sorted(set(s0) - STATE_KEYS)}")
+        check(isinstance(s0.get("room_name"), str) and s0["room_name"] in (r0_msg or ""),
+              "state's room_name is the SAME name the narration prints",
+              f"room_name={s0.get('room_name')!r}")
         check(s0.get("moves_taken") == 0 and s0.get("escaped") is False,
               "a fresh reset starts at 0 moves, not escaped",
               f"moves={s0.get('moves_taken')} escaped={s0.get('escaped')}")

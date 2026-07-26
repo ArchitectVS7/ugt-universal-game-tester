@@ -36,7 +36,7 @@ from ugt.core.trial import GateRunner  # noqa: E402
 from ugt.utils.config_parser import UgtConfig  # noqa: E402
 
 CONFIG = os.path.join(HERE, "ugt.config.yaml")
-STATE_KEYS = {"current_room", "inventory", "flags",
+STATE_KEYS = {"current_room", "room_name", "inventory", "flags",
               "moves_taken", "rooms_visited", "escaped"}
 
 gate = GateRunner()
