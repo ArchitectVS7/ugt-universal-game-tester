@@ -293,7 +293,83 @@ defect one rung before it would have corrupted R3's replay criterion.)
 
 ---
 
-## D. Adding a lesson
+## D. Deciding a design change — the mechanics bake-off
+
+**When a balance finding is a *design* question rather than a constant to tune, do not argue it and do not
+guess it. Get independent opinions, synthesize on agreement, then simulate every candidate before touching
+code.** This section is a decision procedure, not a testing tier — it runs *before* an edit exists, which is
+exactly why it is cheap.
+
+The whole loop below cost ~2 minutes of compute and one session on a browser dice-combat prototype (React/JS),
+and it killed the recommendation that had looked best on paper. The alternative — implement the plausible fix,
+discover it was wrong three rungs later, unpick the test churn — is the shape that puts projects in development
+hell for a year.
+
+**D1 · Get independent opinions, and make them genuinely independent.** Same prompt, isolated context, no
+shared scratchpad. Vary the *reviewer*, not the question: different models is one axis, but so is different
+persona (game designer vs. competitive player vs. casual player; full-stack dev vs. mobile user). Two is the
+minimum, not the target. This is a prompting discipline, not a coding one — the cost is a prompt, the return is
+an assumption you would not have questioned alone.
+*Instruct each reviewer to verify the framing rather than accept it. Both reviewers here corrected the premise
+they were handed: "allocation is not a trade-off" was over-stated (the decision was already worth +0.12 under
+state-aware play), and "mutual defense converges to zero" named the wrong mechanism.*
+
+**D2 · Synthesize on agreement; treat a lone claim as a hypothesis, not a finding.** Publish the agreement
+table first — where independent reviewers converge is the strongest signal available without running anything.
+Here both independently returned `STRUCTURAL`, both proved it with a 7×7 strategy matrix that removed the AI
+from the loop, both refuted the AI-is-the-culprit hypothesis, and both caught a stale PRD. All of that was safe
+to bank. Where they *diverged* — which fix — is precisely what had to be measured, and each had proposed a fix
+the other never tested.
+
+**D3 · Simulate before you code. Opinions are a prior; the engine is the evidence.** A reviewer's
+recommendation encodes training-data intuition about games in general, not *this* game's numbers. A
+deterministic engine is usually pure and dependency-free, so a candidate change can be measured in seconds
+without an edit, a migration, or a test rewrite. The dice bake-off ran **3.15 million battles across six rule
+variants in 50 seconds.**
+*This does not require a fully simulable game. Narrative and multi-branch games resist end-to-end simulation,
+but their **mechanical subsystems** — combat resolution, XP curves, drop tables, economy loops, NPC
+disposition — are almost always pure functions that can be swept in isolation. Sweep the subsystem, not the
+story.*
+
+**D4 · Generate variants from the real source by anchored substitution — never by re-implementing the rule.**
+M1 applies to measuring instruments too. Copy the shipped engine and patch it at named anchors; assert each
+anchor matched *exactly once* **and** that the output actually changed (O4). Assert the no-change control comes
+back byte-identical to production. A variant that silently diverged from the game produces confident numbers
+about a game nobody is shipping.
+
+**D5 · Validate the rig on a prediction it did not produce.** Before trusting a bake-off, make it reproduce a
+number some independent source called in advance. One reviewer predicted, blind, that a defense buff without a
+draw-rule change would give ~79% draws; the rig returned 81%. That single agreement is what licenses every
+other cell in the table. Without it a bake-off is just a spreadsheet of its own assumptions.
+
+**D6 · Pick metrics that separate *balanced* from *deep* — win rate cannot.** A flat game and a rich game both
+show ~50% win rates. The candidate that looked best on equal win rates turned out to have a 7×7 matrix that was
+a **wall of 0.50–0.51**: it removed the dominant strategy by removing the decision, dropping the value of
+choosing well to *half* the shipped game's. Measure at least:
+- **regret of the naive strategy** — what does playing the obvious line cost against a best response? `0.000`
+  means there is no decision.
+- **best-response vector** across opponent strategies — if it reads `[0,0,0,0,0,0,0]`, the game has one answer.
+- **dead options** — choices that beat nothing, at any opponent, ever.
+- **value of deciding per turn** — best state-aware play minus best constant play. This is the depth number.
+- **interior mass** — how often optimal play picks a genuine mix rather than a corner. The winning change moved
+  this **6.8% → 61.3%**; the losing one raised option variety while *lowering* decision value.
+- **how outcomes are reached**, not just who wins — the winning change had to be checked for quietly converting
+  a knockout game into a points game (it did; a constant tune bought the knockout rate back).
+
+**D7 · Sample size is a correctness property, not a performance tuning knob.** Cheap sims tempt small `n`, and
+small `n` reverses conclusions. One reviewer's first sweep at 400 seeds/cell called the dominant strategy "not
+dominant" in 33 of 42 configs — **every one reversed** at 2–3k. The losing candidate scored well at 200 seeds
+and collapsed at 5,000. Where the enemy policy is a pure function of state, skip sampling entirely and solve the
+MDP by backward induction — then **cross-validate the exact solve by playing its optimal policy back through
+the real engine** (all six agreed to three decimals here, which is what made the exact numbers usable).
+
+**D8 · A design verdict is the user's call, not the harness's.** The bake-off's job is to make the trade-off
+legible — "this fix is deepest but converts 85% of battles from knockouts to points decisions" — not to pick
+the game's identity. State the caveats and hand over the decision.
+
+---
+
+## E. Adding a lesson
 
 1. The finding lands in the game's integration findings log first, with its evidence.
 2. Promote it here only if it would have bitten a *different* game. Give it the next free ID in its section.

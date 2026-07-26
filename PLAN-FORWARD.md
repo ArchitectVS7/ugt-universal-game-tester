@@ -17,7 +17,8 @@ that game AND stress-tests the methodology, which is then reused on the next gam
 
 The principles that methodology is built on — every one learned the hard way — live in **`LESSONS.md`**, the
 canonical cross-game registry (§A core methodology, §B the mandatory LLM-playtest pre-flight audit, §C
-operational discipline). They are not restated here; read that file. The one worth stating up front, because
+operational discipline, §D the mechanics bake-off for deciding a *design* change with data before writing any
+code). They are not restated here; read that file. The one worth stating up front, because
 everything else follows from it:
 
 > **Play the game with the game.** The tester must drive the *real* running game, never a re-implementation of

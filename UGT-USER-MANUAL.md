@@ -11,9 +11,9 @@
 ## Methodology & Hard-Won Lessons (read before onboarding a new game)
 
 > **Canonical source: [`LESSONS.md`](LESSONS.md).** That file is the cross-game lessons registry — every rule
-> here plus the LLM-playtest pre-flight audit (section B) and the operational discipline rules (section C),
-> each with its evidence and source. Read it before onboarding a game, before advancing a ladder rung, and
-> before any LLM playtest run. New lessons go there, not here.
+> here plus the LLM-playtest pre-flight audit (section B), the operational discipline rules (section C), and
+> the mechanics bake-off (section D), each with its evidence and source. Read it before onboarding a game,
+> before advancing a ladder rung, and before any LLM playtest run. New lessons go there, not here.
 
 The nine core rules, as one-line index entries only — **the full text and the evidence behind each live in
 `LESSONS.md` §A**, the single canonical copy; if a line below ever disagrees with LESSONS, LESSONS wins:
@@ -95,6 +95,34 @@ R3 answers "does it work / does it break" — it does **not** answer "is it good
    onboarding clarity, and accessibility that no automated tier can see by construction (an engine-level or
    LLM-driven test can confirm the mechanics work; only a human can confirm the game *reads* well). Every
    integration's `HANDOFF.md` should carry a UAT status line once this tier is reached.
+
+### When a balance finding turns out to be a *design* question — run a bake-off
+
+Sooner or later a tier will hand you a finding that no constant can fix: *"aggression isn't a trade-off, it's
+just the right answer."* At that point you are choosing between candidate **rule changes**, and the usual
+instinct — pick the most plausible one, implement it, find out later — is what turns a month into a year.
+
+Don't guess and don't argue it. **`LESSONS.md` §D** is the full procedure; the short version:
+
+1. **Get independent opinions.** Same prompt, isolated context, two or more reviewers. Vary the reviewer, not
+   the question — different models, or different personas (game designer vs. competitive player vs. casual
+   player). Tell each to challenge the framing, not just answer it. Just ask for this in a prompt; there is no
+   command.
+2. **Synthesize on agreement.** What independent reviewers converge on is the strongest signal you can get
+   without running anything. Bank that; the disagreement is what needs measuring.
+3. **Simulate every candidate before writing any code.** Copy the shipped engine, patch it at named anchors
+   (assert each anchor matched exactly once *and* changed something), and sweep. A deterministic engine is
+   usually pure and dependency-free, so this needs no edit, no migration, and no test rewrite.
+4. **Validate the rig on a prediction it did not produce**, then read metrics that separate *balanced* from
+   *deep* — regret of the naive strategy, best-response vector, dead options, value of deciding per turn,
+   interior mass. **Win rate cannot tell a flat game from a rich one.**
+5. **Use enough samples.** Small `n` reverses conclusions; see §D7 before picking a number.
+
+This does **not** require a fully simulable game. Narrative and multi-branch games resist end-to-end
+simulation, but their mechanical subsystems — combat resolution, XP curves, drop tables, economy loops, NPC
+disposition — are nearly always pure functions you can sweep in isolation. Sweep the subsystem, not the story.
+
+Worked example, with the numbers and the rig: `examples/dice/README.md` and `LESSONS.md` §D.
 
 ---
 

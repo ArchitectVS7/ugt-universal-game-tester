@@ -117,4 +117,30 @@ The retune fixed draws. It did **not** fix strategic depth, and running the swee
 
 That's a deeper problem than the draw rate and it isn't a constant you can turn. It comes from the damage model — your defense hits subtract from their attack hits — which means two cautious players converge on nothing happening. Fixing it properly means changing how damage works, which is a design decision and a different day's work. Logged in the integration notes and in R2's output so it can't get quietly forgotten.
 
+## How we settled the depth problem — and the lesson I'm taking to every other project
+
+This is the part I'd want someone else to read.
+
+The depth problem wasn't a number I could turn, so there was nothing to test my way out of. It was a design call: change how damage works, or don't. Normally that's where I'd pick whichever fix sounded most convincing, build it, and find out in a week. I've got projects that have been in that loop for over a year.
+
+Instead we did three things, in order.
+
+**Got independent opinions.** Two reviewers, same prompt, separate context, neither able to see the other's answer. I used two different models here, but the axis doesn't have to be the model — "game designer" and "competitive card player", or "full-stack dev" and "casual mobile gamer", would work the same way. Getting several angles on a problem has always been how I iterate, and it turns out it's mostly a prompting habit rather than anything you build. Both were told to argue with the premise, not just answer the question — and both did, correcting something I'd got wrong in how I framed it.
+
+**Synthesised on agreement.** Where two independent reviewers land in the same place with different reasoning, that's the strongest signal you can get without running anything. They agreed it was structural, agreed no constant could fix it, both proved it with the AI taken out of the loop entirely, and both independently spotted that the PRD had gone stale. All of that I could just bank. What they *disagreed* on was the actual fix — and each had proposed one the other never tested. That disagreement is what needed measuring.
+
+**Simulated everything before writing a line of game code.** This was the first time I'd asked for this and it's the bit I'll reuse forever. We generated six variants of the engine — every combination of the two proposed rule changes — patched straight out of the real source rather than reimplemented, and ran **3.15 million battles in 50 seconds.** Before touching the game. No edits, no test churn, nothing to unpick if the answer came back "none of these."
+
+Three things came out of it that no amount of arguing would have:
+
+- **The fix that looked best was the worst one.** It equalised every strategy's win rate, which reads like balance until you look closer — the whole strategy grid came back a flat wall of 0.50. It didn't remove the dominant strategy, it removed the *decision*. Choosing well became worth half what it's worth in the shipped game. Its own author's numbers said so; they were just read as success.
+- **The other fix's first step, on its own, makes things worse** — because the game's only real decision today is "attack, or turtle for a draw", and killing draws deletes half of that before the replacement exists.
+- **Sample size was the whole ballgame.** At 200 games the losing fix looked like the winner. At 5,000 it collapsed. One reviewer had already been burned by exactly this and warned us — its own first pass called a dominant strategy "not dominant" in 33 of 42 configs, and every one reversed at higher counts. **If I'd run the 200 games I originally asked for, I'd have shipped the wrong fix.**
+
+The rig got checked before we trusted it, too: one reviewer had predicted, blind and in advance, that a particular variant would produce ~79% draws. The simulation returned 81%. That's what made the rest of the table believable.
+
+**The real lesson isn't about dice.** You can't simulate a branching narrative game end to end — but you can absolutely simulate its combat maths, its XP curve, its drop tables, its economy loop. Those are pure functions sitting inside games that aren't. Sweep the subsystem, not the story. Data instead of best-guess-then-fix-for-a-month is an enormous saving in time, in tokens, and in the specific misery of discovering three weeks later that the plausible fix was wrong.
+
+Written up properly as [`LESSONS.md` §D](../../LESSONS.md) so it applies to every game we test, not just this one.
+
 More will land here as we keep going. The full technical write-up, including the findings that are only useful to Claude, stays in [`integration/README.md`](integration/README.md).
