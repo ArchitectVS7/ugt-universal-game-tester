@@ -77,6 +77,11 @@ sweep). Two durable rules:
   the observed states. Make them **observations, not failures**: several are inherently dispositional ("is this
   a counter or a resource?" is a question, not a verdict), and a channel that turns existing green ladders red
   for unreviewed reasons gets disabled instead of read.
+*What is still MISSING, named so it is not mistaken for done:* detection is not search. A random policy can
+only stumble into a degenerate line; nothing in UGT yet goes LOOKING for one. That tier — novelty-driven
+search, profitable-cycle detection, replay minimization — is specced in `PLAN-FORWARD.md` under "TRUE exploit
+hunting". It answers a fourth question (gameability), and must not be bolted onto the fuzzer.
+
 *Corollary — measure at the right granularity or the check is silently vacuous.* The first monotone-growth
 implementation looked run-wide, so every episode reset registered as a fall and **nothing could ever flag**. It
 passed its own gate by being useless. Farming happens within one life; per-episode is the window. It was caught

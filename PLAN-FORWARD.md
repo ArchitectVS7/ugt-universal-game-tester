@@ -99,6 +99,55 @@ surface); this document keeps only the cross-game, framework-level priorities:
 
 Revisit when an item actually blocks the current game, not on a schedule:
 
+### ⭐ TRUE exploit hunting — the one genuinely missing tier
+
+**Status: not built. Deliberately named here so it is not mistaken for something we already have.**
+
+The robustness tier (`ugt/core/invariant_fuzzer.py`, renamed from `ExploitHunter` on 2026-07-26 — see
+LESSONS M10) drives *random* actions against an oracle. It has no notion of reward, score or progress, so it
+can only ever **stumble into** a degenerate line and have a check notice. It never goes looking. The generic
+checks added alongside the rename (`ugt/core/generic_checks.py`) raise the floor — they detect the *shapes* of
+degenerate play with no per-game config — but detection is not search.
+
+**The gap, concretely.** The original RL tier died because agents farmed reward without playing the game.
+Nothing in UGT today would find that class again on purpose. The proof is in-repo: a browser dice game held R3
+green at 11/11 for weeks while one allocation strictly dominated every other and the game's only decision was
+meaningless. It took two independent design reviews plus a 3.15M-battle simulation (LESSONS §D) to surface —
+no tier did it.
+
+**What a real exploit hunter would entail.** Roughly in order of cost:
+
+1. **A search policy instead of a random one.** The single biggest change. Coverage- or novelty-driven
+   (reward the agent for reaching *unseen* states, à la Go-Explore / curiosity search) rather than
+   reward-driven — critically, this needs **no game-specific reward function**, which is what made the RL tier
+   unmaintainable. Novelty is computable from the state hashes the fuzzer's `Trace` already records.
+2. **An objective to maximize, discovered rather than declared.** The generic checks already identify
+   candidate "resource-like" fields (monotone-growth). Feed those back in: once a field is nominated, search
+   for the action sequence that maximizes it per unit time. That closes the loop from *detect* to *exploit*.
+3. **Cycle exploitation, not just cycle detection.** `check_state_cycles` finds that a loop exists. The
+   hunter's job is to ask whether any loop is **net-profitable** — return to a near-identical state with a
+   resource strictly higher. That is the formal definition of a farm, and it is game-agnostic.
+4. **Replay minimization.** A 400-step exploit nobody can read is not a finding. Delta-debug the sequence down
+   to the shortest prefix that still reproduces the gain (standard ddmin), so the output is a 6-step repro a
+   designer can act on.
+5. **A budget-bounded runner.** Search is unbounded by nature; this tier needs a wall-clock/step ceiling and
+   must report what it did NOT cover (LESSONS: no silent caps).
+
+**Design constraints learned the hard way, which any implementation must honour:**
+- **No reward engineering per game.** The moment this needs a hand-written reward it becomes the RL tier that
+  already failed. Novelty and self-discovered resource fields are the way through.
+- **Findings must be reproducible.** Same seed, same sequence, byte-identical — the determinism discipline R3
+  already enforces.
+- **Observations, not verdicts, for anything dispositional** (LESSONS M10). "This loop gains 3 gold/turn" is a
+  fact; "this is an exploit" is a design judgement belonging to the user.
+- **It answers a THIRD question.** Correctness (`ugt verify`) / robustness (invariant fuzzer) / balance (LLM
+  playtester) / **gameability (this)**. Do not bolt it onto the fuzzer and re-blur the name we just fixed.
+
+**Cheapest first step if picked up:** a novelty-driven policy is a drop-in — `InvariantFuzzer` already accepts
+`policy=`, and `Trace` already carries the state hashes it would need. That alone, with no other change, turns
+random walking into directed exploration and is worth measuring before building anything larger.
+
+
 - **Config-driven CLI path for the trial ladder** — the per-game `verify_round*.py` scripts construct
   adapters directly; several adapters aren't registered under an `engine.type` in `env.py`. Worth a look now
   that every integration hand-rolls its own ladder scripts, and the direct-adapter playtest entry point was

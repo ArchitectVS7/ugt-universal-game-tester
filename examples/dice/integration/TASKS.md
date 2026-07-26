@@ -84,15 +84,67 @@ diff is empty (byte-identical).
 
 **Superseded (2026-07-26):** `exploit_hunt.py` has been replaced by the full trial ladder — `spike_dice.py`, `smoke_dice_adapter.py`, `verify_round1.py`, `verify_round2.py`, `verify_round3.py`. Everything it did is still covered and then some: its random walks and determinism check are now R3, its defense-vs-attack A/B and its knockout drive are now R2 (where they belong, since both are content-spine claims). Invariants moved into a shared `invariants.py` built on `InvariantSuite`, so R1/R2 and R3 assert the identical predicates instead of two hand-maintained copies.
 
-### T-006 · `strategy-guide.md` + playtest run — `status: BLOCKED(awaiting user approval to spend API credits)` · `coder: sonnet` · `after: T-004`
-Write the strategy guide per PRD (ruleset, 7 choices, win condition, no
-assumed context). Run `ugt playtest` once with `--max-actions 30` to confirm
-the LLM can play a full battle.
+### T-008 · LESSONS §B pre-flight audit — `status: TODO` · `coder: opus` · `after: T-007`
+**This is the prep, and it must happen BEFORE T-006 spends a single credit.** It
+costs no API calls, so it is not blocked by anything.
+
+`LESSONS.md` §B (P1–P11) is the mandatory information-integrity audit. Skipping
+it cost two multi-hour balance batches on another game that measured the wrong
+thing — both permanently unpoolable with anything measured afterwards. The
+failure mode is invisible in the output: the loop reports `PLAYTEST MET`, zero
+violations, and a confident-sounding win rate, while the pilot was playing
+blind.
+
+**Write a cited disposition for every check P1–P11.** The ones most likely to
+bite this game, based on what the D18 work already turned up:
+
+- **P6 (the guide must teach the RULES that create the skill)** — the live risk
+  here, and it has already happened once. Before D18 the guide taught "the cap
+  is a draw, so race for the kill". That is now *actively wrong advice*: the cap
+  decides on points. It was rewritten on 2026-07-26 — re-read it against
+  `game/PRD.md` and confirm it teaches the two-for-one block, the points
+  decision, and that all-out attack LOSES. A pilot reading a stale guide plays
+  the old game badly and the model gets the blame.
+- **P2 (adapter passes through every PUBLIC field)** — diff the normalized state
+  against `__GET_STATE__`'s projection. Note `bonus_dice` is the previous
+  round's grant, so confirm the pilot can tell what it will get NEXT round or
+  knows that it cannot.
+- **P3 (truncation is silent starvation)** — assert
+  `len(strategy-guide.md) <= playtest.guide_char_budget`. The guide grew in the
+  D18 rewrite; the budget was set before it.
+- **P1/P4 (identities, and the action channel sends what the LLM thinks)** —
+  this game's 7 actions are named `a6_d0`…`a0_d6`, which is legible, but confirm
+  the prompt shows the allocation and not a bare index.
+- **P11 (a prompt-level warning is advice, not a guarantee)** — the game refuses
+  out-of-range ids by THROWING (spike finding), unlike the other two examples.
+  Confirm the playtest loop survives that rather than counting it as a turn.
+
+**Accept:** a written disposition per check, each citing the specific file/line
+compared — "looks fine" is not a disposition (O7). Any gap fixed before T-006
+runs.
+
+### T-006 · `ugt playtest` run — `status: BLOCKED(awaiting user approval to spend API credits)` · `coder: sonnet` · `after: T-008`
+Run `ugt playtest` once with `--max-actions 30` to confirm the LLM can play a
+full battle.
 **Accept:** `ugt playtest` exits 0 and produces `results/playtest-report.json`
 with at least one completed battle (`battle_over: true` reached, or
 max-actions budget honestly reported as insufficient).
 
-**Prepared (2026-07-25):** `strategy-guide.md` is written — the 7 allocations, all three bonus-dice rules and how they stack, the observable state, and an explicit warning that the round-12 cap makes a draw the DEFAULT outcome (README Finding 1), so a playtest measures play rather than rediscovering the cap. The run itself is NOT done: `ugt playtest` bills a real Anthropic API call per action and this was built unattended overnight. Trigger with `ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md --max-actions 30`, then flip to DONE.
+**Guide status (rewritten 2026-07-26):** `strategy-guide.md` covers the 7
+allocations, all three bonus-dice rules and how they stack, the observable
+state, the two-for-one defense block, and the fact that the cap decides on
+points so surviving one point ahead is a full win.
+
+> ⚠️ The previous note here claimed the guide warned that "the round-12 cap
+> makes a draw the DEFAULT outcome". That was true when written and D18 made it
+> false — the cap now decides on force strength. The note survived the rule
+> change by four commits. **This is exactly the P6 drift T-008 exists to catch,
+> and it is recorded rather than quietly edited away.**
+
+The run itself is NOT done: `ugt playtest` bills a real Anthropic API call per
+action. After T-008 passes, trigger with
+`ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md --max-actions 30`,
+then flip to DONE.
 
 ---
 
