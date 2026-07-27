@@ -111,6 +111,8 @@ fabricating behavior.
   pre-flight information-integrity audit (read before any balance batch), and operational discipline. Read
   this before any test run.
 - **`UGT-USER-MANUAL.md`** — onboarding a new game, including the trial-ladder methodology in depth.
+- **`UGT-REFERENCE.md`** — the lookup half of the manual: the bridge/adapter contract, every
+  `ugt.config.yaml` key, and troubleshooting. Search it; don't read it.
 - **`PLAYTEST-DESIGN.md`** — design spec for the LLM balance-playtester tier.
 This README, and the four docs above it, are deliberately framework-level and game-agnostic. The concrete
 per-game integrations (which specific games have been run and how they scored) live under `integrations/`,

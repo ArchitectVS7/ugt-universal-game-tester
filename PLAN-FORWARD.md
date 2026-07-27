@@ -242,6 +242,7 @@ random walking into directed exploration and is worth measuring before building 
 |---|---|
 | Cross-game lessons registry (methodology + LLM pre-flight audit + operational discipline) | `LESSONS.md` |
 | Onboard a new game + methodology | `UGT-USER-MANUAL.md` |
+| Bridge contract, config keys, troubleshooting (lookup) | `UGT-REFERENCE.md` |
 | LLM playtest design spec (tier 3) | `PLAYTEST-DESIGN.md` |
 | Trial-ladder scaffold | `ugt/core/trial.py` (+ `ugt/core/invariant_fuzzer.py` for R3) |
 | Framework overview + install | `README.md` |

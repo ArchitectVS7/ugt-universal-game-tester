@@ -30,16 +30,18 @@ integrations/
 # by /orchestrate). It belongs in each game/project repo, not in the shared framework.
 TASKS.md
 
-# Exception: the planned-example TASKS.md files under examples/ are committed on
-# purpose — they're reference artifacts showing the Orchestrator's canonical format,
-# not a live per-project working file.
-!examples/**/TASKS.md
+# (An `!examples/**/TASKS.md` exception used to sit here so the sample games' task
+# lists were committed as reference artifacts. Removed 2026-07-27: the sample games
+# moved to their own repositories in `7b759b8`, so the rule matched nothing. Their
+# TASKS.md files are committed in those repos, where the blanket rule above does not
+# apply. Do not re-add this line unless an `examples/` directory comes back.)
 
 # Node (integration harnesses shell out to node). No trailing slash so this also
 # catches node_modules symlinks pointing at an upstream game's dependencies.
 node_modules
 
-# Godot (examples/sokoban). `.godot/` is the editor/import cache — it is regenerated
+# Godot (kept for any Godot-backed harness under integrations/). `.godot/` is the
+# editor/import cache — it is regenerated
 # on every headless run and would otherwise re-dirty the tree after each commit,
 # which halts /orchestrate (it requires a clean tree before every task). `*.import`
 # and export_presets.cfg are machine-local import metadata / export paths.

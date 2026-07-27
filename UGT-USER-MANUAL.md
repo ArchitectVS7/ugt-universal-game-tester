@@ -63,7 +63,7 @@ fail-closed gate scripts rather than the bare CLI commands — five rungs, each 
 |---|---|---|---|
 | **Spike** | `spike_<game>.py` | The raw protocol round-trips headlessly (create/auth → act → read state back) | Every raw-protocol check passes; no protocol quirk left unresolved before writing the adapter |
 | **Smoke** | `smoke_<game>_adapter.py` | The same round-trip works through UGT's `BaseAdapter` contract | Same checks pass via `connect()`/`reset()`/`step()`/`close()`, not the raw protocol directly |
-| | | *⚠️ Not the same as `ugt smoke-test` (§7, a CLI wiring check) and not the same as the LLM tier's local **channel check** (`LESSONS.md` §B P12). Three things, one word — always name the rung.* | |
+| | | *⚠️ Not the same as `ugt smoke-test` (§5, a CLI wiring check) and not the same as the LLM tier's local **channel check** (`LESSONS.md` §B P12). Three things, one word — always name the rung.* | |
 | **R1 — playability** | `verify_round1.py` | One scripted full loop of the core game, invariants checked after every command | Every invariant holds across the whole loop; the loop reaches a real, meaningful state change (not a no-op); same-seed reproducible |
 | **R2 — full spine** | `verify_round2.py` | Every major mode/system driven to a real outcome (e.g. an actual win), still under invariants | Every mode reaches a genuine terminal outcome under the same invariants; the check count (denominator) is disclosed honestly — no vacuous passes, none silently narrowed or widened |
 | **R3 — invariant-fuzzer** | `verify_round3.py` | Random/heuristic walks (`ugt/core/invariant_fuzzer.py`) asserting the SAME invariants after every step, across multiple seeded episodes | Zero invariant violations/crashes across every episode and step; every action in the vocabulary exercised at least once; a same-seed replay is byte-identical (determinism) |
@@ -87,7 +87,7 @@ inline, fail the gate, and get fixed upstream in the game.
 R3 answers "does it work / does it break" — it does **not** answer "is it good." A green ladder is the
 *prerequisite* for the next tier, not the end of testing:
 
-1. **Tier 3 — LLM playtest** (`ugt playtest`, §8 below). An LLM plays through a realistic input channel
+1. **Tier 3 — LLM playtest** (`ugt playtest`, §6 below). An LLM plays through a realistic input channel
    (keypresses, typed terminal commands, or a legal-action list for harness-style games with no terminal)
    and judges balance/strategy, producing `results/playtest-report.json` with state-delta-based bug reports.
    Only makes sense once the ladder is green — balance verdicts on a game that still crashes are noise.
@@ -127,32 +127,12 @@ Worked example, with the numbers and the rig: `dice/README.md` and `LESSONS.md` 
 
 ---
 
-## Table of Contents
 
-1. [What UGT Does](#1-what-ugt-does)
-2. [How It Works (The Big Picture)](#2-how-it-works-the-big-picture)
-3. [Installation](#3-installation)
-4. [Connecting Your Game — The Bridge](#4-connecting-your-game-the-bridge)
-   - 4a. Subprocess Bridge (headless / simulation games)
-   - 4b. Browser Bridge (browser / React / Phaser games)
-5. [Teaching UGT the Rules — `ugt.config.yaml`](#5-teaching-ugt-the-rules--ugtconfigyaml)
-   - 5a. Observation Space
-   - 5b. Action Space
-6. [Phase 1 — Verify (Correctness Testing)](#6-phase-1--verify-correctness-testing)
-   - 6a. Writing a Feature Map
-   - 6b. Running `ugt verify`
-   - 6c. Reading the Coverage Report
-   - 6d. Troubleshooting Verify
-7. [Quick Sanity Check — `ugt smoke-test`](#7-quick-sanity-check--ugt-smoke-test)
-8. [Phase 2 — Playtest (LLM Player)](#8-phase-2--playtest-llm-player)
-   - 8a. Writing a Strategy Guide
-   - 8b. Running `ugt playtest`
-   - 8c. Reading the Playtest Report
-9. [Frontend UI Testing (Browser Games)](#9-frontend-ui-testing-browser-games)
-10. [Configuration Reference](#10-configuration-reference)
-11. [Troubleshooting](#11-troubleshooting)
-
----
+> **Two documents, two jobs.** This is the **manual** — the path you walk once, in order, to get your
+> game under test. Its companion **[`UGT-REFERENCE.md`](UGT-REFERENCE.md)** is the lookup half: the
+> adapter contract, every `ugt.config.yaml` key, and troubleshooting. You do not read the reference;
+> you search it. Split out on 2026-07-27 because one 900-line file was serving both purposes and doing
+> neither well.
 
 ## 1. What UGT Does
 
@@ -233,301 +213,30 @@ playwright install chromium
 
 ---
 
-## 4. Connecting Your Game — The Bridge
+## The step between: connect your game
 
-The bridge is the only piece of code you write. It wraps your game engine in a standard protocol that UGT understands. Pick the engine type that matches how your game runs:
+Installing UGT does not yet let it *see* your game. Before any tier below will run, your game needs a
+**bridge** — a small transport layer that hands UGT a state dict and accepts an action. That is the one
+piece that is genuinely specific to your project, and it is written up in full, with copy-paste templates
+for both built-in transports, in **[`UGT-REFERENCE.md` §1 — Connecting Your Game](UGT-REFERENCE.md)**.
+Its companion **§2** covers writing the `ugt.config.yaml` that tells UGT what your state fields and
+actions mean.
 
-| Your game... | engine.type | Bridge pattern |
-|---|---|---|
-| ...is a headless subprocess (Python sim, TypeScript harness, Godot/Unity CLI build) | `simulation` | JSON-lines over stdin/stdout (`SubprocessAdapter`) |
-| ...runs in a browser (React, Phaser, Vue, vanilla JS, any web frontend) | `browser` | Headless Chromium via Playwright; your game exposes `window.__GET_STATE__` / `window.__SEND_ACTION__` hooks (`PlaywrightAdapter`) |
-| ...is anything else (a live server over HTTP/WebSocket, a TCP bridge into an engine's frame loop) | `custom` | You write a small transport-only `BaseAdapter` subclass; your ladder scripts construct it directly (`env.py` does not dispatch it). See `sokoban/integration/` |
+Do those two, then come back here and start with Verify. Everything from this point assumes a working
+bridge and a validating config.
 
-Not sure? **Subprocess is the most portable starting point** — `escape-room/` shows it end-to-end against a real Node game. If your game has a frontend you want to drive through UI interactions, use Browser. Reach for `custom` only when neither transport fits — it costs you a small adapter, but nothing else in the ladder changes.
-
-### 4a. Subprocess Bridge (headless / simulation games)
-
-The subprocess bridge communicates via **newline-delimited JSON on stdin/stdout**. UGT spawns your bridge as a child process, sends commands, and reads responses.
-
-**Protocol:**
-
-| UGT sends → | Your bridge responds → |
-|-------------|----------------------|
-| `{"command": "reset"}` | `{"state": {...}}` |
-| `{"command": "step", "action_id": 3}` | `{"state": {...}, "terminated": bool, "truncated": bool, "info": {}}` |
-| `{"command": "close"}` | *(no response required)* |
-
-**Minimal Python bridge template:**
-
-```python
-#!/usr/bin/env python3
-import sys
-import json
-import os
-
-# --- Your game import goes here ---
-# from my_game import create_game, apply_action
-
-class MyGameBridge:
-    def __init__(self):
-        self.game = None
-        # Read UGT_SEED for reproducible episode sequences
-        self.base_seed = int(os.environ.get("UGT_SEED", 12345))
-        self.episode_count = 0
-
-    def reset(self):
-        episode_seed = self.base_seed + self.episode_count
-        self.episode_count += 1
-        self.game = create_game(seed=episode_seed)
-        return self._build_state()
-
-    def step(self, action_id):
-        result = apply_action(self.game, action_id)
-        terminated = self.game.is_over()
-        truncated = self.game.turn_count >= 200  # step limit
-        return self._build_state(), terminated, truncated, {}
-
-    def _build_state(self):
-        """Return a flat or nested dict of game state values."""
-        return {
-            "player": {
-                "credits": self.game.player.credits,
-                "health":  self.game.player.health,
-            },
-            "turn": self.game.turn_count,
-            "player_won": self.game.winner == "player",
-        }
-
-
-def main():
-    bridge = MyGameBridge()
-    for line in sys.stdin:
-        msg = json.loads(line.strip())
-        command = msg.get("command")
-
-        if command == "reset":
-            state = bridge.reset()
-            print(json.dumps({"state": state}), flush=True)
-
-        elif command == "step":
-            state, terminated, truncated, info = bridge.step(msg["action_id"])
-            print(json.dumps({
-                "state": state,
-                "terminated": terminated,
-                "truncated": truncated,
-                "info": info,
-            }), flush=True)
-
-        elif command == "close":
-            break
-
-if __name__ == "__main__":
-    main()
-```
-
-**Key rules for your bridge:**
-- Always call `sys.stdout.flush()` (or use `flush=True` in `print`). UGT blocks waiting for a response — if you don't flush, it hangs forever.
-- `terminated` = the game reached a natural end state (win or loss). `truncated` = a step limit was hit.
-- Read `UGT_SEED` from the environment at startup and use it to seed your RNG. Increment per episode (`base_seed + episode_count`). This makes runs reproducible across identical configs.
-- The `state` dict can be nested (e.g., `state.player.credits`). Dot-notation paths in the config traverse nested dicts.
-- Never write anything to stdout except your JSON responses. Use stderr for debug output: `print("debug", file=sys.stderr)`.
-
-**TypeScript bridge template:**
-
-UGT can also spawn a TypeScript bridge using `tsx`:
-
-```typescript
-// sim_bridge.ts
-import * as readline from 'readline';
-import { createGame, applyAction } from './my_game.js';
-
-const rl = readline.createInterface({ input: process.stdin });
-let game = createGame();
-const baseSeed = parseInt(process.env.UGT_SEED ?? '12345', 10);
-let episodeCount = 0;
-
-function buildState() {
-    return {
-        player: { credits: game.player.credits },
-        turn:   game.turn,
-        player_won: game.winner === 'player',
-    };
-}
-
-rl.on('line', (line) => {
-    const msg = JSON.parse(line);
-
-    if (msg.command === 'reset') {
-        game = createGame({ seed: baseSeed + episodeCount++ });
-        process.stdout.write(JSON.stringify({ state: buildState() }) + '\n');
-
-    } else if (msg.command === 'step') {
-        applyAction(game, msg.action_id);
-        const terminated = game.isOver();
-        const truncated  = game.turn >= 200;
-        process.stdout.write(JSON.stringify({
-            state: buildState(), terminated, truncated, info: {}
-        }) + '\n');
-
-    } else if (msg.command === 'close') {
-        process.exit(0);
-    }
-});
-```
-
-In your config, set `engine.entry: "node --import tsx sim_bridge.ts"`.
+**One rule that is not negotiable, repeated here because it is the failure this whole framework was
+rebuilt around:** the bridge is a *transport*, never a re-implementation. It opens the connection, sends
+an action, reads state back. An action it cannot map raises `NotImplementedError` naming the action —
+it does not fabricate behaviour. A harness that reimplements the game is testing itself.
 
 ---
 
-### 4b. Browser Bridge (browser / frontend games)
-
-For browser games, UGT launches a headless Chromium browser and communicates through three global JavaScript functions that you inject into your game's frontend.
-
-**You must expose these three functions on `window`:**
-
-```javascript
-// 1. Returns the current game state as a plain JSON object
-window.__GET_STATE__ = function() {
-    return {
-        player: { credits: game.credits, health: game.health },
-        turn:   game.turn,
-        player_won: game.isWon(),
-    };
-};
-
-// 2. Executes an action and returns structured response
-window.__SEND_ACTION__ = function(actionId) {
-    // Apply the action to game state
-    game.applyAction(actionId);
-
-    const terminated = game.isOver();
-    const truncated  = game.turn >= 200;
-
-    return {
-        state:      window.__GET_STATE__(),
-        terminated: terminated,
-        truncated:  truncated,
-        info:       {},
-    };
-};
-
-// 3. (Recommended) Soft-reset without a full page reload
-//    Without this, UGT falls back to page.reload() which takes ~15 seconds per episode
-window.__RESET_GAME__ = function() {
-    game.reset();
-    window.__STEP_COMPLETE__ = false;
-};
-```
-
-**Optional: `__STEP_COMPLETE__` flag for async games**
-
-If your game processes actions asynchronously (animations, network calls), set `window.__STEP_COMPLETE__ = true` when the state is ready for reading. UGT will wait for this flag before moving on, instead of using a fixed delay.
-
-```javascript
-window.__SEND_ACTION__ = async function(actionId) {
-    window.__STEP_COMPLETE__ = false;
-    await game.applyAction(actionId);  // async operation
-    window.__STEP_COMPLETE__ = true;
-    return { state: window.__GET_STATE__(), terminated: game.isOver(), truncated: false, info: {} };
-};
-```
-
-**For React / Vue games:** inject the hooks in a `useEffect` or `onMounted` that runs after the game state is initialized:
-
-```javascript
-// React example
-useEffect(() => {
-    window.__GET_STATE__  = () => ({ ...gameState });
-    window.__SEND_ACTION__ = (id) => { dispatch({ type: 'ACTION', id }); ... };
-    window.__RESET_GAME__  = () => dispatch({ type: 'RESET' });
-}, [gameState]);  // re-register when state updates if closures need it
-```
-
-In your config, set `engine.type: "browser"` and `engine.entry: "http://localhost:8080"`.
-
----
-
-## 5. Teaching UGT the Rules — `ugt.config.yaml`
-
-The config file is the only place you describe your game to UGT. Start with a template:
-
-```bash
-ugt init   # creates ugt.config.yaml in the current directory
-```
-
-Then fill in the three sections below.
-
----
-
-### 5a. Observation Space
-
-**What it is:** The set of numeric values UGT can read from your game state. Think of this as "what the agent can see."
-
-```yaml
-observation_space:
-  type: "box"
-  shape: 6           # must equal the number of mappings below
-  mappings:
-    - path: "player.credits"    # dot-path into the state dict your bridge returns
-      min: 0
-      max: 100000               # the expected range; used to normalize inputs
-    - path: "player.health"
-      min: 0
-      max: 100
-    - path: "turn"
-      min: 0
-      max: 200
-    - path: "enemy.strength"
-      min: 0
-      max: 1000
-    - path: "player_won"        # boolean fields are fine: false=0, true=1
-      min: 0
-      max: 1
-    - path: "inventory.weapons" # lists can use an aggregator
-      aggregator: "count"       # options: count | sum | mean | min | max
-      min: 0
-      max: 20
-```
-
-**Practical guidance:**
-- **Include everything that affects a good player's decision.** If a good player would look at it, include it.
-- **Set `min`/`max` to the actual game range**, not just 0 and infinity. The agent learns faster when values are normalized. A credit balance of 50,000 in a range of 0–100 is extremely confusing; in a range of 0–100,000 it's normal.
-- **You can start with 4–8 features.** More is not always better. Start simple, add features when you see the agent making decisions that no reasonable player would make.
-- **Boolean flags** (is_in_combat, has_item) are valuable — include them.
-- **Don't include derived/redundant values.** If you have `health` and `max_health`, don't also include `health_percent` — the agent can reason about the ratio itself.
-
----
-
-### 5b. Action Space
-
-**What it is:** The set of discrete actions the agent can take. Think of this as "the buttons a player can press."
-
-```yaml
-action_space:
-  type: "discrete"
-  size: 5            # must equal the number of actions below
-  actions:
-    0: { name: "wait" }
-    1: { name: "attack_nearest" }
-    2: { name: "retreat" }
-    3: { name: "buy_health" }
-    4: { name: "end_turn" }
-```
-
-**Practical guidance:**
-- **Actions map to agent integer IDs.** When your bridge receives `{"command": "step", "action_id": 2}`, action 2 (`retreat`) should execute.
-- **Handle illegal actions in your bridge, not in the config.** If the player can't buy health when broke, your `step()` should treat action 3 as a no-op in that state (just return the current state unchanged). Don't crash.
-- **Keep the action space small to start** (5–15 actions). The agent learns faster with fewer choices. You can always expand it later.
-- **Parameterized actions must be pre-defined as macros.** If your game has "attack enemy X" where X is one of 5 enemies, you need 5 separate action IDs: `attack_enemy_0`, `attack_enemy_1`, etc. There is no built-in support for parameterized actions.
-- **Every action should be reachable.** If some action is never legal, remove it from the list — it wastes the agent's capacity.
-
----
-
-## 6. Phase 1 — Verify (Correctness Testing)
+## 4. Phase 1 — Verify (Correctness Testing)
 
 `ugt verify` drives your game through a feature map — a YAML file listing every testable behavior — and checks that each feature's state change is what you declared. Run this before playtesting.
 
-### 6a. Writing a Feature Map
+### 4a. Writing a Feature Map
 
 Create `feature-map.yaml` alongside your `ugt.config.yaml`. Each entry names an action (by the action name from your config), states what must be true after it runs, and optionally defines a precondition.
 
@@ -579,7 +288,7 @@ features:
     priority: major
 ```
 
-### 6b. Running `ugt verify`
+### 4b. Running `ugt verify`
 
 ```bash
 cd your-game/
@@ -589,7 +298,7 @@ ugt verify --config ugt.config.yaml --feature-map feature-map.yaml
 #   --output path.json custom output path (default: results/coverage-report.json)
 ```
 
-### 6c. Reading the Coverage Report
+### 4c. Reading the Coverage Report
 
 `results/coverage-report.json`:
 
@@ -624,7 +333,7 @@ ugt verify --config ugt.config.yaml --feature-map feature-map.yaml
 - **FAILED** — the assertion did not hold; there is a bug or your assertion is wrong
 - **NOT_REACHED** — the precondition was never met; either the feature is unreachable in the test window or the precondition expression is wrong
 
-### 6d. Troubleshooting Verify
+### 4d. Troubleshooting Verify
 
 | Symptom | Likely cause | Fix |
 |---------|-------------|-----|
@@ -636,7 +345,7 @@ ugt verify --config ugt.config.yaml --feature-map feature-map.yaml
 
 ---
 
-## 7. Quick Sanity Check — `ugt smoke-test`
+## 5. Quick Sanity Check — `ugt smoke-test`
 
 The smoke test verifies that your bridge responds correctly before you write a feature map. Takes ~10
 seconds, requires no model or feature map.
@@ -667,7 +376,7 @@ whether game features behave correctly — use `ugt verify` for that.
 
 ---
 
-## 8. Phase 2 — Playtest (LLM Player)
+## 6. Phase 2 — Playtest (LLM Player)
 
 `ugt playtest` runs an LLM agent through your game. Unlike the scripted verifier, the LLM player reads the game state and reasons about what to do next — it can find bugs that no scripted test would look for, because it plays like a real player would.
 
@@ -683,7 +392,7 @@ ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md \
   --provider ollama --model gemma4:26b --max-actions 30
 ```
 
-Drive a few basic game actions first, then a **30-action channel check** (up to 100 if the loop is long) — *called a "channel check" and not a "smoke test" on purpose: that word already names `ugt smoke-test` (§7) and ladder rung 2, neither of which proves anything this stage proves.* This is where you write and rewrite the strategy guide and the prompting *for this specific game*: run → read the logged `reasoning` → fix the guide → run again. Keep going until the pilot cleanly processes the basic game loop. Work the whole §B audit here — P1–P8 are all findable for free, because they are defects in what the pilot can **see**, not in how well it thinks.
+Drive a few basic game actions first, then a **30-action channel check** (up to 100 if the loop is long) — *called a "channel check" and not a "smoke test" on purpose: that word already names `ugt smoke-test` (§5) and ladder rung 2, neither of which proves anything this stage proves.* This is where you write and rewrite the strategy guide and the prompting *for this specific game*: run → read the logged `reasoning` → fix the guide → run again. Keep going until the pilot cleanly processes the basic game loop. Work the whole §B audit here — P1–P8 are all findable for free, because they are defects in what the pilot can **see**, not in how well it thinks.
 
 **Stop at ~100 actions.** Past roughly 200 local calls the run is not merely slow — the decisions get measurably worse than Haiku's. **Bad decisions do not equate to good tests.** A long local run buys degraded play, not more evidence, and any balance number read off it is noise. Local proves the *channel*; never quote it as a result.
 
@@ -698,7 +407,7 @@ ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md \
 
 **Then expect to iterate on the game as often as on the harness.** That loop turns around far faster than human testing, and that is the point: **the goal is for the first human UAT to be already relatively bug-free**, so a person's time goes on feel, readability and onboarding — the things no automated tier can see — instead of on defects a free 30-action local run would have caught.
 
-### 8a. Writing a Strategy Guide
+### 6a. Writing a Strategy Guide
 
 Create `strategy-guide.md` alongside your config. This is the single most important input: a 1–3 page document that teaches the LLM how your game works.
 
@@ -714,7 +423,7 @@ says plainly what the state will *not* tell you) and `dice/integration/strategy-
 combat game — teaches the scoring rules that create skill, while withholding the opponent's closed-form
 policy so the run measures play rather than exploitation of a leaked answer).
 
-### 8b. Running `ugt playtest`
+### 6b. Running `ugt playtest`
 
 > **Persistent-state games:** Set `diagnose_resets_episode: false` in your config before the first LLM
 > playtest run. By default the `diagnose` action resets the episode — in a game with persistent campaign
@@ -744,7 +453,7 @@ ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md
 
 Both figures include input context growth across the run. Pass `--model claude-haiku-4-5` to use Haiku. For a first run, use `--max-actions 30` to verify it's working before committing to a full run.
 
-### 8c. Reading the Playtest Report
+### 6c. Reading the Playtest Report
 
 `results/playtest-report.json`:
 
@@ -781,7 +490,7 @@ Both figures include input context growth across the run. Pass `--model claude-h
 
 ---
 
-## 9. Frontend UI Testing (Browser Games)
+## 7. Frontend UI Testing (Browser Games)
 
 The browser adapter drives your game's actual frontend through a real Chromium browser (headless). This tests:
 - That the JS hooks respond correctly
@@ -840,66 +549,3 @@ This lets you watch UGT play your game in real time. Useful when diagnosing why 
 
 ---
 
-## 10. Configuration Reference
-
-```yaml
-project:
-  name: "MyGame"         # Human-readable name
-  version: "1.0.0"
-
-engine:
-  type: "simulation"     # "simulation" (subprocess) or "browser" (Playwright)
-  entry: "python sim_bridge.py"  # Command to start bridge (simulation)
-                         # or URL for browser type: "http://localhost:8080"
-  step_delay_ms: 50      # Browser only: ms delay per step (use __STEP_COMPLETE__ instead if possible)
-
-observation_space:
-  type: "box"
-  shape: 6               # Must equal number of mappings
-  mappings:
-    - path: "state.path"   # Dot-path into state dict
-      min: 0
-      max: 100
-      aggregator: "count"  # Optional: count|sum|mean|min|max (for list values)
-
-action_space:
-  type: "discrete"
-  size: 5                # Must equal number of actions
-  actions:
-    0: { name: "wait" }
-    # ...
-
-evaluation:
-  victory_key: "player_won"   # State key that indicates a win (default: checks common names)
-
-playtest:
-  # diagnose_resets_episode (default: true)
-  # When the LLM playtester issues a `diagnose` action it signals confusion or a
-  # suspected broken state. By default UGT resets the entire episode at that point,
-  # which is safe for short/stateless games. For games with persistent campaign
-  # state (progress that spans many turns or sessions) set this to false — a reset
-  # will erase all accumulated progress, not just the current confusing moment.
-  # **Set this to false before the first run on any persistent-state game.**
-  # (A real run erased 310 turns of valid campaign play before this knob was added.)
-  diagnose_resets_episode: true   # set false for persistent-campaign games
-```
-
----
-
-## 11. Troubleshooting
-
-### Bridge hangs on reset / step
-
-Your bridge is not flushing stdout. Add `flush=True` to every `print()` call, or call `sys.stdout.flush()` after writing.
-
-### "Invalid JSON response"
-
-Something is printing to stdout before (or instead of) your JSON. Common culprits: import-time print statements, framework startup banners, Python warnings. Redirect everything non-JSON to stderr.
-
-### Browser: game doesn't mount / __GET_STATE__ not found
-
-UGT waits up to 10 seconds for `window.__GET_STATE__` to exist. If your game takes longer to initialize, the hook registration is in a component that mounts after a delay. Move it to the earliest possible lifecycle point, or add an explicit wait before registering hooks.
-
-### Reproducibility: two runs produce different results
-
-Check that your bridge reads `UGT_SEED` from the environment. Check that there's no `Math.random()` or `random.random()` call in your bridge that isn't seeded by `UGT_SEED`.
