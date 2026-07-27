@@ -28,7 +28,7 @@ done
 ```
 
 Recorded results — **whole ladder re-run 2026-07-26 (late), on the wire contract
-`b66f710` landed**, against the game at 89/89 tests green:
+`b66f710` landed**, against the game at 99/99 tests green:
 
 | Rung | Script | Result |
 |---|---|---|
@@ -93,10 +93,15 @@ was excluded is printed next to the total.
 The moves-against-the-committed-reference ratio (73 moves) is **withheld unless
 `all_levels_solved` is true** (see Finding 11). Its denominator is the cost of
 FINISHING, so on a partial run it is not a worse score — it is not a score, and the
-block prints an explicit line saying so instead of a number. **73 is a reference, not
-an optimum** (Finding 14): nothing in this repo pins that it is the shortest possible
-solution, so the ratio says "37% more moves than one known-working sequence" and
-never "37% off the theoretical floor".
+block prints an explicit line saying so instead of a number. **73 is the sum of three
+per-level minima, and it is still printed as "the committed reference"** — the first
+half is now proven (`game/tests/test_solution_optimality.gd` searches each level and
+asserts the committed sequence is a shortest solution: 6 + 23 + 44), the second half is
+a deliberate choice about the label rather than a hedge (Finding 14 and its follow-up).
+"1.37× optimum" reads as a verdict on the level design as much as on the pilot, and only
+the pilot is what this tier measures; the vocabulary control (case W) stays in for that
+reason, so no line the tier prints matches `/optim/i` even now that the word would be
+defensible in prose.
 
 **A paid run's budget is floored so that finishing is possible at all** (Finding 13).
 The floor is `2 ×` the committed 73-move reference — **146 actions** — derived from
@@ -137,7 +142,10 @@ than yielding a floor of 0, both sides of the refusal boundary plus the fact tha
 paid-only, the provider-dependent defaults, and §B P12's ceiling still refusing 101 on
 ollama. And it is the **denominator's own name**'s control: that no line the tier
 prints — on the scored path or the refused one — calls the 73-move reference an
-optimum. It needs no game and no model.
+optimum. That control is **kept on purpose now that minimality is proven** game-side
+(Finding 14's follow-up): it no longer guards an unproven claim, it guards the label
+against re-acquiring a reading that would make the scoreline a verdict on the level
+design. It needs no game and no model.
 
 ### The §B pre-flight (2026-07-26)
 
@@ -157,7 +165,7 @@ Run before spending anything, per P12. Everything below was free.
 | P10 | Pilot needs memory, not just state | **Configured** — `history_window: 12`, roughly one crate's worth of work including the walking. The default 5 forgets the plan halfway through executing it |
 | P11 | A prompt guard is part of the game | **WOULD HAVE MADE THE GAME UNPLAYABLE — FIXED.** The repeat guard blocks the 3rd identical proposal at its default. Pushing a crate five cells along a row *is* five consecutive `left`s, and the committed solutions contain runs of 5 and 6. Raised to 8, and `assert_repeat_guard_allows_real_play` derives the bound from `solutions.json` so authoring a longer push run re-checks it automatically |
 | P12 | Local model first | **DONE — `gemma4:26b`, zero API cost.** It paid for itself: P3, P11, and Findings 6–9 were all found free, and two of those are UGT-core defects that would otherwise have surfaced on a paid bill |
-| P14 | Content: solvable, and every obstacle teaches | **Solvable is PROVEN** — R1 and R2 replay the committed solutions through the live engine every run. "Teaching" works differently in this genre and needs saying: there is no authored refusal text because there is no text. A refused move returns byte-identical state, and the board itself is the explanation — a human sees the wall. The guide therefore has to teach *how to read a refusal* ("if the board comes back exactly as it was…"), which is the substitute for a spoken one |
+| P14 | Content: solvable, and every obstacle teaches | **Solvable is PROVEN, and each shipped sequence is the SHORTEST possible** — R1 and R2 replay the committed solutions through the live engine every run, and `game/tests/test_solution_optimality.gd` breadth-first-searches each level *through `board.gd::try_move()` itself* and asserts the committed length is minimal (6 / 23 / 44 = the 73-move reference; level_03 costs ~7.7e5 states and ~16 s, with an opt-out flag). That proof is game-side because minimality is a claim about authored CONTENT, and a solver in this harness would be a second rules engine next to the one it checks. "Teaching" works differently in this genre and needs saying: there is no authored refusal text because there is no text. A refused move returns byte-identical state, and the board itself is the explanation — a human sees the wall. The guide therefore has to teach *how to read a refusal* ("if the board comes back exactly as it was…"), which is the substitute for a spoken one |
 
 ### Stage 1 runs — local, free, and no number from here is quotable
 
@@ -608,6 +616,87 @@ already were and no run needs redoing. The generalisable half — *a scoring
 denominator must name what is actually pinned about it, and a control keyed on a
 label cannot outlive a rename* — is a `LESSONS.md` candidate and is not promoted
 here.
+
+**Follow-up (2026-07-26, T-005): the retracted claim was re-established by
+evidence, and the vocabulary control was deliberately kept.** The finding above is
+left exactly as written — the record of the mistake is the artifact, and "it turned
+out to be true" is not a reason to un-write a retraction that was correct at the
+time. What changed is that there is now a search: `game/tests/test_solution_optimality.gd`
+computes the true shortest solution for each level and asserts it equals the
+committed sequence's length. All three were already minimal — **6 / 23 / 44, summing
+to the 73-move reference** — so nothing about the content moved; what moved is that
+the claim is now *tested* rather than believed.
+
+Three deliberate decisions, so a later reader does not read them as oversights:
+
+* **The proof lives game-side, not here.** Minimality is a claim about authored
+  content, so it belongs to the repo that owns the levels. A BFS in
+  `playtest_sokoban.py` or in `godot_tcp_adapter.py` would be a second rules engine
+  standing beside the one it is meant to be checking — the exact drift the
+  transport-only adapter rule exists to prevent. Nothing under `integration/` gained
+  a solver, a frontier or a shortest-path anything.
+* **The search drives `board.gd::try_move()`, it does not re-implement pushing.** A
+  hand-rolled push/collision loop would answer a question about a copy of the game.
+  Driving the real engine costs ~16 s and 772,948 reached states for level_03 (0 ms /
+  66 states for level_01, 183 ms / 11,231 for level_02), which is affordable, so there
+  was no excuse. It also gives the check a property a private transition function
+  could not have: mutating `board.gd`'s push rule changes the searcher's answers.
+* **The scoreline still says "the committed reference", and case W stays.** The word
+  is now defensible in prose, and it has returned to prose — the §B P14 row, both
+  READMEs, the game's own delivery note. It has *not* returned to the instrument's
+  label, because "1.37× optimum" is heard as a verdict on two things at once (how far
+  off the best line the pilot played, and what the level design costs) and only the
+  first is what this tier measures. Trading a working control for a word buys nothing
+  measurable.
+
+Proven able to fail, five ways, each mutation applied by hand and every file
+restored byte-identically (sha256 compared before and after, never `git checkout`),
+against a 99/99 green baseline:
+
+* **the mutation this check exists for** — replacing `level_01`'s sequence with
+  `[0, 1, 2, 0, 2, 0, 3, 3]`, an honest **8-move** solution that solves the level,
+  contains no refused move and does not win early. All 10 cases in
+  `test_shipped_levels.gd` stay **green** (it satisfies every property that file
+  pins) and only the two new cases go red: `97 passed, 2 failed`, exit 1. That defect
+  was invisible to everything that existed before this suite, which is the whole
+  point of the task;
+* **the literal one-move pad** the Accept criterion names — appending a 7th action to
+  `level_01` gives `95 passed, 4 failed`. Worth being precise about who catches what:
+  no honest 7-move solution to `level_01` exists (a solved position is reachable at
+  depth 7 only by passing through one at depth 6, and the engine freezes on a solved
+  board), so a +1 pad is necessarily a *refused* move — it is caught by the
+  pre-existing unpadded / not-solved-early checks in `test_shipped_levels.gd` **and**
+  by the new length comparison. The 8-move case above is the one only the new suite
+  can see;
+* **one-sidedness** — weakening the searcher's goal test to
+  `boxes_on_target >= boxes_total - 1` so it can *under*-report gives
+  `93 passed, 6 failed`, with the per-level cases failing as `search < committed`
+  (level_01 found 1 vs 6, level_02 found 7 vs 23) and four of the six searcher
+  controls red alongside them. So the equality is two-sided, not "committed ≤ search";
+* **the state-key capacity guard** — lowering `MAX_NON_WALL_CELLS` to 5 fails every
+  level with its named message (`…holds at most 5 non-wall cells (this level has 32)…`)
+  rather than silently returning a wrong number, which for a test whose entire output
+  *is* a number is the failure mode that matters most;
+* **that the searcher really consumes the live rules engine** — making a push onto a
+  target illegal in `board.gd::try_move()` turns every fixture and both fast levels
+  red with "unsolvable" (`76 passed, 23 failed`, wide collateral redness across the
+  other suites, as expected). A searcher with its own private copy of the rules would
+  have gone on answering 6 / 23 / 44.
+
+**Two skip-path facts, because a skippable check is where a vacuous green hides.**
+`SOKOBAN_SKIP_SLOW_TESTS=1` drops *only* level_03's search (suite back to ~0.7 s from
+~16.5 s) and is **opt-out**: nothing in the game's tooling, this harness's ladder or
+`tools/check_runner_reports_failure.sh` sets it, so the default is always the real
+search. And the skipped case still asserts the recorded length, so the 8-move mutation
+above is red with the flag **set** too (`97 passed, 2 failed`).
+
+**P8: no boundary.** Nothing here touches `_build_prompt`, `redact_state_fields`, a
+guard threshold or a budget, and no ladder rung, invariant or adapter behaviour
+changed. The only edits under `integration/` are prose: three comments and the two
+printed lines that stated "no solver exists here", which this task made false. Like
+Findings 9, 11, 12, 13 and 14 it changes what is **tested and recorded**, never what
+the pilot receives — the three stage-1 rows stay comparable on exactly the terms they
+already were, and no run needs redoing. No stage-1 figure is quoted here.
 
 ## Corrections to this harness
 

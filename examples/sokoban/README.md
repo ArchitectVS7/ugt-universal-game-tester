@@ -19,7 +19,8 @@ Then:
 ```bash
 cd game
 godot4 --headless --editor --path . --quit     # regenerates the import cache on a fresh clone
-godot4 --headless --path . -s tests/run_tests.gd   # 89 tests
+godot4 --headless --path . -s tests/run_tests.gd   # 99 tests, ~17s (see below)
+SOKOBAN_SKIP_SLOW_TESTS=1 godot4 --headless --path . -s tests/run_tests.gd   # ~0.7s, drops one search
 godot4 --path .                                # play it yourself, arrow keys or WASD
 ```
 
@@ -196,7 +197,7 @@ once by throwing away a perfectly good comparison out of caution.
 
 ## Where it's up to
 
-**As of 2026-07-26**, ladder green at **18 · 11 · 14 · 15 · 7**, game suite **89/89**. Re-run from scratch rather than copied out of the table — the rule in this repo is that a number in a README is evidence about one commit, and a results table doesn't fail when it goes stale, it just quietly stops being true. Which it did: this section used to read `14 · 9 · 12 · 13 · 7` and `84/84`, both true when written, both wrong the moment the wire gained a field and the ladder grew checks to cover it. Two rungs got bigger, and per our own rule that's the point — a gate that returns its old count after the contract changed never tested the change.
+**As of 2026-07-26**, ladder green at **18 · 11 · 14 · 15 · 7**, game suite **99/99**. Re-run from scratch rather than copied out of the table — the rule in this repo is that a number in a README is evidence about one commit, and a results table doesn't fail when it goes stale, it just quietly stops being true. Which it did: this section used to read `14 · 9 · 12 · 13 · 7` and `84/84`, both true when written, both wrong the moment the wire gained a field and the ladder grew checks to cover it. Two rungs got bigger, and per our own rule that's the point — a gate that returns its old count after the contract changed never tested the change.
 
 Fail-closed is demonstrated on *these* scripts, not assumed from an older run: inverting R1's box-reached-a-target predicate gives `ROUND 1 NOT MET — 13/14 checks passed` and exit 1, and I compared the checksum afterwards to be sure the file went back exactly as it was. Every rung also feeds its invariant suite a deliberately corrupted transition and requires it to complain, because a suite that's never been seen to fail is decoration.
 
@@ -228,6 +229,14 @@ rather than a blocked one.** Everything before it is done: the briefing, the dri
 the fourteen-point checklist worked through and written down, four things it caught
 fixed. Two of those four were bugs in the tester rather than the game.
 
-What it'll measure when it runs is **competence, not balance**: solved or not, and moves against the committed 73-move reference. *Reference*, not optimum — and I had that wrong in three places before I noticed. There's no solver anywhere in this repo, and what the level tests actually pin is that each committed sequence solves its level, contains no no-op moves, and doesn't win before its own last action. Not that it's the shortest one that could. Calling it an optimum was a claim I hadn't earned, and by the time I looked it had already leaked out of a delivery note and into the scorer's own printed label, where "1.37× optimum" reads as a verdict on the puzzles as much as on the pilot. There's no win rate to quote — the game has no randomness at all, so every episode is the same three puzzles in the same order and the honest sample size is one however many you run. The config already says `seeding: deterministic` out loud for exactly that reason.
+What it'll measure when it runs is **competence, not balance**: solved or not, and moves against the committed 73-move reference. I called that 73 an *optimum* first, in three places, and I hadn't earned it. There was no solver anywhere in this repo, and what the level tests actually pinned was that each committed sequence solves its level, contains no no-op moves, and doesn't win before its own last action. Not that it's the shortest one that could. By the time I looked, the word had already leaked out of a delivery note and into the scorer's own printed label, where "1.37× optimum" reads as a verdict on the puzzles as much as on the pilot. So I retracted it — a claim with nothing behind it comes out, even when it's probably true.
+
+**Then I went and earned it back.** The right place for that turned out not to be the tester: minimality is a claim about the *levels*, so it belongs to the game, and a solver living in the harness would be a second copy of the rules sitting next to the one it's supposed to be checking. `game/tests/test_solution_optimality.gd` breadth-first-searches each level for its true shortest solution and asserts the committed sequence matches — and the transition function it searches with is `board.gd::try_move()` itself, not a re-implementation of pushing. All three sequences came back optimal on the first run: **6, 23, 44**. Which is the outcome I expected, and is exactly why it was worth doing properly rather than asserting; the interesting part isn't the answer, it's that a level author can no longer quietly break it.
+
+It isn't free. Level 3's reachable space is **772,948 states** and searching it through the real engine takes about **16 seconds**, so the game's suite went from 0.4 s to 16.5 s. That's a ~35× regression on a suite I run constantly, so there's an opt-out — `SOKOBAN_SKIP_SLOW_TESTS=1` drops that one search and nothing else, and even then the case still asserts the recorded length, so a padded `solutions.json` is red either way. Opt-*out*, never opt-in: no script, gate or ladder sets it, so the default is always the real thing.
+
+And the scorer still prints "the committed reference". That's deliberate now rather than leftover: the number is a proven minimum, but "1.37× optimum" still reads as a verdict on the level design and not just on the pilot, and only the second is what this tier measures. The control that keeps the word out of the instrument stayed in. It may live in prose, where a reader can see what proves it; it may not be a label on a scoreline.
+
+There's no win rate to quote — the game has no randomness at all, so every episode is the same three puzzles in the same order and the honest sample size is one however many you run. The config already says `seeding: deterministic` out loud for exactly that reason.
 
 The full technical write-up, including the findings only useful to Claude, stays in [`integration/README.md`](integration/README.md).

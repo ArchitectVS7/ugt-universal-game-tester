@@ -552,11 +552,17 @@ def competence_lines(report: dict) -> list:
     """Build the competence block. Pure — returns lines, prints nothing."""
     solutions = _committed_solutions()
     total = len(solutions)
-    # The committed REFERENCE, not a proven optimum: nothing in this repo pins
-    # minimality (there is no solver) — `tests/test_shipped_levels.gd` pins that
-    # each sequence solves, is unpadded and does not win early. One derivation
-    # for the whole file, so the scoreline and the budget floor cannot drift, and
-    # a truncated solutions.json fails closed instead of scoring against 0.
+    # The committed REFERENCE — and since the game grew
+    # `tests/test_solution_optimality.gd`, each of the three sequences is also
+    # known to be the SHORTEST possible for its level (BFS through the live
+    # rules engine, in the game's own suite; `tests/test_shipped_levels.gd`
+    # separately pins that each solves, is unpadded and does not win early).
+    # The proof is game-side on purpose: minimality is a claim about authored
+    # content, and a solver in this harness would be a second rules engine.
+    # The LABEL below stays "reference" anyway — see case W in
+    # `--prove-scoring` for why. One derivation for the whole file, so the
+    # scoreline and the budget floor cannot drift, and a truncated
+    # solutions.json fails closed instead of scoring against 0.
     reference = reference_moves(solutions)
 
     crates = count_crate_moves(report)
@@ -588,8 +594,9 @@ def competence_lines(report: dict) -> list:
 
     out.append("")
     out.append(f"  reference for all {total} levels: {reference} moves")
-    out.append("      (the committed levels/solutions.json sequences — a known-working")
-    out.append("       reference, not a proven minimum; no solver exists here)")
+    out.append("      (the committed levels/solutions.json sequences. Each is the")
+    out.append("       SHORTEST possible for its level — proven by search in the")
+    out.append("       game's own test suite, never by anything in this harness)")
     if moves is not None:
         out.append(f"  pilot's move count at the end : {moves}")
     if finished and moves and reference:
@@ -1306,15 +1313,18 @@ def prove_scoring() -> int:
         check("V the ceiling itself is allowed", False, f"refused: {exc}")
 
     # ── The scoring denominator's own name ───────────────────────────────────
-    # W — 73 is the committed REFERENCE, not a proven optimum. No solver exists
-    # anywhere in this repo: `tests/test_shipped_levels.gd` pins that each
-    # committed sequence SOLVES its level, is UNPADDED (`moves_taken ==
-    # actions.size()`) and does NOT solve early — three properties, none of them
-    # minimality. So no line this tier prints may claim otherwise, on the scored
-    # path or on the refused one. This is a vocabulary control because the word
-    # is what leaked: it started in a delivery note, reached two READMEs, and
-    # ended up as the LABEL of the denominator, where it reads as a quotable
-    # verdict on both the pilot's play and the level design.
+    # W — 73 is printed as the committed REFERENCE, and that stays true even
+    # though the denominator is now a proven per-level minimum: the game's
+    # `tests/test_solution_optimality.gd` searches each level and asserts the
+    # committed sequence is the shortest possible. So this is no longer a
+    # control against an UNPROVEN claim; it is a control against the LABEL
+    # re-acquiring a reading it should not have. "1.37x <that word>" is heard as
+    # a verdict on two things at once — how far off the best line the pilot
+    # played, AND what the level design costs — and only the first is what this
+    # tier measures. Keeping the control is also what keeps the vocabulary
+    # permanent: the word leaked once already, from a delivery note into two
+    # READMEs and then into the denominator's label. It may live in prose, where
+    # a reader can see what proves it; it may not be a printed scoreline label.
     _CLAIM = re.compile(r"optim", re.I)
     for label, fixture in (("a finished run", _fixture_all_solved),
                            ("a walk", _fixture_walk)):

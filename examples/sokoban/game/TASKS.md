@@ -270,6 +270,19 @@ not-solved-early only. The 73 moves are the committed **reference**, not a
 proven minimum; a shorter solution may exist for any of the three levels. See
 the integration findings log, Finding 14.
 
+**Correction to the correction (2026-07-26, integration T-005):** there is a
+solver now, and the original "BFS-optimal" claim is true *and tested*.
+`tests/test_solution_optimality.gd` breadth-first-searches each level for its
+true shortest solution — using `board.gd::try_move()` itself as the transition
+function, so it drives the real rules engine rather than a copy — and asserts the
+committed length matches. All three already were minimal: **level_01 6, level_02
+23, level_03 44** (73 total), found over 66 / 11,231 / 772,948 reached states in
+0 ms / 0.2 s / 15.7 s. Suite 89 → **99 passed, 0 failed**; `SOKOBAN_SKIP_SLOW_TESTS=1`
+drops level_03's search alone (~0.7 s) and still asserts its recorded length.
+Minimality is asserted here rather than in the tester because it is a claim about
+authored content: a solver in the harness would be a second rules engine beside
+the one it checks.
+
 ## M3 — Front end
 
 ### T-006 · Human input — `status: DONE` · `coder: sonnet` · `after: T-004`

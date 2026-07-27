@@ -6,7 +6,7 @@ Three games, three tech stacks, three ways of talking to a tester. **The numbers
 |---|---|---|---|---|---|---|
 | [**dice**](dice/README.md) | Dice Duel — allocate six dice between attack and defense, twelve rounds | React + Vite | `browser` (Playwright) | 162/162 | 19 · 9 · 12 · 14 · 13 | local stages done; paid run is a credit decision |
 | [**escape-room**](escape-room/README.md) | Tiny Escape Room — ten rooms, an eight-link chain of locks | Node.js | `simulation` (stdio) | 104/104 | 30 · 12 · 18 · 56 · 10 | local pilot **escaped**; paid run not started |
-| [**sokoban**](sokoban/README.md) | Sokoban Mini — push three levels' worth of crates onto targets | Godot 4 | `custom` (TCP, hand-written adapter) | 89/89 | 18 · 11 · 14 · 15 · 7 | local stage done — transport proven, model below the floor; paid run not started |
+| [**sokoban**](sokoban/README.md) | Sokoban Mini — push three levels' worth of crates onto targets | Godot 4 | `custom` (TCP, hand-written adapter) | 99/99 | 18 · 11 · 14 · 15 · 7 | local stage done — transport proven, model below the floor; paid run not started |
 
 The ladder column is spike · smoke · R1 · R2 · R3, which the rest of this file explains. Each game's own README is a build diary; each `integration/README.md` is the technical write-up, with the per-rung tables and the findings.
 
