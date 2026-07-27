@@ -433,6 +433,14 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
     # O-23: regions of a command's output that are ONE-SHOT EVENTS, not durable facts, and
     # so must never enter recall. See _strip_recall_events for the failure this prevents.
     _recall_strip_markers = list((playtest_cfg or {}).get("recall_strip_markers") or [])
+    # O-24: retain what the pilot SAW each step. Defaults ON — a diagnostic that is off by
+    # default is the one that is missing on the day the run goes wrong, which is exactly
+    # what happened with O-23. `retain_prompt_chars` 0 = NO CAP (the default): a cap keeps
+    # the TAIL, and the blocks that explain a perception bug (recall, ledger, quest) sit in
+    # the MIDDLE of the prompt — a 6000-char tail would have missed the whole of O-23.
+    _retain_prompts = bool((playtest_cfg or {}).get("retain_prompts", True))
+    _retain_prompt_chars = int((playtest_cfg or {}).get("retain_prompt_chars", 0))
+    _retain_terminal_text = bool((playtest_cfg or {}).get("retain_terminal_text", True))
     # Immediate-adjacency guard: distinct from noop_streaks (material-delta-gated, and
     # bypassed entirely for display_only_verbs so legitimate repeatable recon like a terminal RPG's
     # `ls` never trips it). This tracks ONLY whether the literal previous step picked the
@@ -810,6 +818,23 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         if is_novel:
             log_entry["is_novel"] = True
             novel_behaviors.append(log_entry)
+        # O-24: retain WHAT THE PILOT SAW, not only what it decided. Without this a run
+        # whose failure is "the pilot read the wrong thing" cannot be diagnosed after the
+        # fact at all — O-23 took reading two codebases by hand because the trace recorded
+        # `reasoning` and `state_delta` but never the prompt that produced them. Records
+        # only; it does not alter the prompt, the request, or the pilot's behaviour, so it
+        # is NOT a §B P8 re-baseline.
+        if _retain_prompts and prompt:
+            _snap = prompt if _retain_prompt_chars <= 0 else prompt[-_retain_prompt_chars:]
+            log_entry["prompt_snapshot"] = _snap
+            if len(_snap) < len(prompt):
+                # Never let a truncated snapshot read as the whole prompt (LESSONS: no
+                # silent caps) — say what was dropped, in the record itself.
+                log_entry["prompt_snapshot_truncated"] = {
+                    "kept_chars": len(_snap), "full_chars": len(prompt), "kept": "tail",
+                }
+        if _retain_terminal_text:
+            log_entry["terminal_text"] = terminal_text
 
         # Mechanical contradiction detector (Gate-C fix): the surprise heuristic only sees
         # deltas that HAPPENED — it is blind to expected deltas that DIDN'T. If the same
