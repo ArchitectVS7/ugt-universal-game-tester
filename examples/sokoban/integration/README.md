@@ -59,8 +59,9 @@ asserted per command by the ladder's own rungs.
 # stage 1 — local, free, proves the CHANNEL and never produces a number
 python3 examples/sokoban/integration/playtest_sokoban.py --provider ollama --max-actions 30
 # stage 2 — paid, the only stage allowed to produce a quotable figure. NOT RUN.
+# No --max-actions: the paid default IS the derived budget floor (see below).
 python3 examples/sokoban/integration/playtest_sokoban.py --provider anthropic \
-    --model claude-haiku-4-5-20251001 --max-actions 150
+    --model claude-haiku-4-5-20251001
 
 # the model-free GATE — no bridge, no model, no spend. Exit 0 scored,
 # 1 the core interaction never happened, 2 the log contradicts itself.
@@ -94,6 +95,19 @@ is true** (see Finding 11). Its denominator is the cost of FINISHING, so on a
 partial run it is not a worse score — it is not a score, and the block prints an
 explicit line saying so instead of a number.
 
+**A paid run's budget is floored so that finishing is possible at all** (Finding 13).
+The floor is `2 ×` the committed 73-move reference — **146 actions** — derived from
+`levels/solutions.json` rather than written down, so a re-authored level re-checks it
+by itself. That is also the paid provider's *default*: `--provider anthropic` with no
+`--max-actions` runs at 146, and an explicit value below the floor is refused with a
+non-zero exit before the guide is read, before Godot starts and before a token is
+spent. `2 ×` is stated rather than tuned: `1 ×` demands a pilot that has never seen
+the puzzles make zero wasted moves, and *below* the reference `all_levels_solved` is
+unreachable by construction — the whole spend would buy the refusal above. Stage 1 is
+deliberately untouched and the two policies are disjoint: ollama keeps its 30-action
+default and §B P12's 100 ceiling, with **no** floor, because stage 1 is priced to
+prove the channel and not to finish the game.
+
 **Scoring is gated on the core interaction having happened at all** (Finding 12).
 Two conditions, ANDed and both read off the action log: a crate moved at least once
 (grid-derived, so a push along open floor counts), and a crate *reached a target*
@@ -113,7 +127,12 @@ log, an episode reset that replays level 1, a finished run that *does* print the
 ratio, a push that moves a crate but reaches no target, a clean `all_levels_solved`
 summary above an empty log, a hypothetical level that ships a crate already on a
 target and is reloaded, both directions of counter-vs-board disagreement, and the
-exit code `--score` returns off a real file on disk. It needs no game and no model.
+exit code `--score` returns off a real file on disk. It is the **budget floor's**
+control too: a synthetic level set that moves the reference and the floor with it (the
+case a hard-coded 73 cannot pass), a truncated `solutions.json` failing closed rather
+than yielding a floor of 0, both sides of the refusal boundary plus the fact that it is
+paid-only, the provider-dependent defaults, and §B P12's ceiling still refusing 101 on
+ollama. It needs no game and no model.
 
 ### The §B pre-flight (2026-07-26)
 
@@ -196,7 +215,7 @@ Stage 2 (Haiku) is un-run and is a credit decision, not a blocked one.
 | `verify_round1.py` | Rung 3 — level 1 solved, F1–F6. |
 | `verify_round2.py` | Rung 4 — all 3 levels to `all_levels_solved`, no-op probes. |
 | `verify_round3.py` | Rung 5 — invariant fuzzer, illegal ids, replay determinism. |
-| `playtest_sokoban.py` | Tier 3 — the LLM runner. Owns the §B pre-flight, then hands the adapter to `playtest_game_with_adapter()`. Also owns the competence scoreline and the core-interaction gate that refuses to score a run in which no crate ever moved — re-runnable model-free via `--score` and self-proving via `--prove-scoring`. |
+| `playtest_sokoban.py` | Tier 3 — the LLM runner. Owns the §B pre-flight, then hands the adapter to `playtest_game_with_adapter()`. Also owns the competence scoreline and the core-interaction gate that refuses to score a run in which no crate ever moved — re-runnable model-free via `--score` and self-proving via `--prove-scoring`. Also owns the **paid action-budget floor** — derived from `levels/solutions.json`, so a paid run that could not reach `all_levels_solved` is refused before anything is spent. |
 | `strategy-guide.md` | Tier 3 — the briefing the pilot reads. Teaches push geometry, corner deaths and when to reload; no solutions. |
 | `ugt.config.yaml` | `engine.type: custom` — env.py dispatches nothing, so the rungs and the tier-3 runner construct the adapter. 5 actions: four directions plus `4 = reload`. Also carries the `playtest.*` block, where every setting is justified inline. |
 
@@ -460,6 +479,63 @@ creates **no §B P8 boundary**, and the three stage-1 rows stay comparable on ex
 the terms they already were. The generalisable half of this — that P7 needs an
 objective observable and not a keyword grep — belongs in `LESSONS.md` §B and is not
 written here.
+
+**13. A paid run could not reach the win condition, and nothing refused it.
+FIXED.** `--max-actions` defaulted to **30 for both providers**. The committed
+reference solution for all three levels is **73 moves**, so at the default budget
+`all_levels_solved` was unreachable *by construction* — not unlikely, impossible.
+And after Findings 11 and 12 that is worse than a low score: the ratio is withheld
+on a partial run and the core-interaction gate refuses to score one that pushed
+nothing, so the entire spend would have bought a **CHANNEL PROVEN / GAME UNMEASURED
+banner**. A budget that cannot finish is not a cheap measurement, it is a purchased
+refusal, and the tier had no opinion about it.
+
+The paid provider now has a floor, and the floor is also its default: `2 ×` the
+committed reference, **146 actions**. `--provider anthropic` with no `--max-actions`
+runs at 146; an explicit value below the floor exits non-zero naming the requested
+value, the 73-move reference and where it was read from, the required 146, and why —
+before the guide is read, before Godot is started, before a token is spent.
+
+The multiple is *stated*, not tuned. 73 is what playing three known puzzles perfectly
+costs; a pilot that has never seen them pays for every exploratory step, every walk to
+line up behind a crate, and every `reload` (which costs an action *and* rewinds the
+level). At `1 ×` finishing demands zero waste; below `1 ×` it is impossible. `2 ×` is
+the smallest floor that leaves a non-zero error allowance. Rejected: a
+`playtest.paid_budget_multiple` config knob — `playtest.*` carries per-game *game*
+facts, and how much credit a run may spend is a harness policy that stays in the
+harness.
+
+**Derived, not typed** — the same discipline `assert_repeat_guard_allows_real_play`
+already uses (Finding 11's neighbour, P11): `reference_moves()` sums the sequences in
+`levels/solutions.json`, so authoring a longer level re-floors the budget without
+anyone remembering to. It also **fails closed** on an empty or zero-move solutions
+file, because a truncated artifact must not silently hand a paid run an unbounded
+default. `--prove-scoring` proves the derivation with a synthetic level set (10 + 5
+moves → floor 30), which is precisely the case a hard-coded 73 cannot pass.
+
+**Stage 1 is untouched, and the two policies are deliberately disjoint** (the floor,
+146, sits above the ceiling, 100): ollama keeps its 30-action default and §B P12's ~100
+cap and gets **no** floor. They price different jobs — stage 1 proves the CHANNEL and
+may not spend; stage 2 measures the GAME and must be able to finish it. A floor applied
+to ollama would make stage 1 unrunnable.
+
+Proven able to fail, four ways, each mutation applied by hand and the file restored
+byte-identically (sha256 compared before and after, never `git checkout`): hard-coding
+73 into the floor turns the synthetic-level-set case red; weakening the comparison to
+`< 0` turns both refusal cases red; returning the stage-1 default for anthropic turns
+the paid-default case red; and dropping the `provider == "anthropic"` guard turns the
+paid-only case red, so the scoping is asserted rather than incidental.
+
+**P8: no boundary.** `max_actions` is a loop bound, recorded in the report and absent
+from `_build_prompt` — no prompt, redaction or guard moved, so like Findings 9, 11 and
+12 this changes only what is *spent and recorded*, never what the pilot receives. Two
+caveats that are about arithmetic rather than information: runs at different budgets
+answer different questions and are not poolable on their own terms (the stage-1 table
+already treats row 3 that way), and the three recorded stage-1 rows are unaffected
+because the stage-1 default and ceiling are unchanged. The generalisable half — derive
+the pilot's action budget from the game's own committed reference, and refuse a paid run
+that cannot reach the win condition — belongs in `LESSONS.md` §B and is not written
+here.
 
 ## Corrections to this harness
 

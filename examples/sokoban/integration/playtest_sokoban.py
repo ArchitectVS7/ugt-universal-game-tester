@@ -22,7 +22,14 @@ Staging (§B P12) — local proves the CHANNEL, paid measures the GAME:
     python3 examples/sokoban/integration/playtest_sokoban.py --provider ollama
     # stage 2  paid — the only stage allowed to produce a quotable figure
     python3 examples/sokoban/integration/playtest_sokoban.py --provider anthropic \
-        --model claude-haiku-4-5-20251001 --max-actions 150
+        --model claude-haiku-4-5-20251001
+
+**The PAID action budget defaults to, and is floored at, twice the committed
+reference solution** — derived from `levels/solutions.json`, not written down here,
+so a re-authored level re-checks it. Below that floor `all_levels_solved` is
+unreachable by construction, so the run is refused before anything is spent rather
+than allowed to buy a partial result the core-interaction gate then declines to
+score. Stage 1 is untouched: 30 actions by default, §B P12's ~100 ceiling.
 
 **What this tier measures here is COMPETENCE, never a rate.** The game has no
 randomness at all — three fixed levels in a fixed order — so every episode is a
@@ -81,6 +88,110 @@ def _pt(config) -> dict:
 def _committed_solutions() -> dict:
     """The game side's own artifact — never a copy kept here, or the two drift."""
     return json.load(open(SOLUTIONS))
+
+
+# ── Action budget ────────────────────────────────────────────────────────────
+#
+# A paid run that cannot reach `all_levels_solved` even by playing the committed
+# reference perfectly is not a cheap measurement, it is a purchased refusal: the
+# core-interaction gate and the withheld ratio both key on finishing, so the whole
+# spend buys a CHANNEL PROVEN / GAME UNMEASURED banner. The floor below is what
+# makes that unbuyable, and it is DERIVED from the game's own committed solutions
+# so a re-authored level re-checks it by itself — the same discipline
+# `assert_repeat_guard_allows_real_play` uses for the repeat guard.
+
+# Why 2x and not 1x, since the task requires the multiple to be STATED: the
+# reference is the cost of playing three known puzzles perfectly. A pilot that has
+# never seen them pays for every exploratory step, every walk to line up behind a
+# crate, and every `reload` (which costs an action AND rewinds the level). At 1x,
+# finishing demands zero wasted moves; at anything below 1x, `all_levels_solved`
+# is unreachable by construction, which is the defect this floor removes. 2x is
+# the smallest floor that leaves a non-zero error allowance.
+# Rejected: a `playtest.paid_budget_multiple` config knob. `playtest.*` holds
+# per-game GAME facts (with a curated "DELIBERATELY UNSET" list); how much credit
+# a run may spend is a harness policy and stays in the harness.
+PAID_BUDGET_MULTIPLE = 2
+
+# Stage 1 is priced for a different job and the two policies are deliberately
+# disjoint (the paid floor of 146 is above this ceiling): stage 1 proves the
+# CHANNEL and may not spend, stage 2 measures the GAME and must be able to finish
+# it. Applying the floor to ollama would make stage 1 unrunnable; applying the
+# ceiling to anthropic would make finishing impossible. §B P12.
+STAGE1_DEFAULT_ACTIONS = 30
+STAGE1_CEILING = 100
+
+
+def reference_moves(solutions: dict = None) -> int:
+    """Total moves in the committed reference solution for every level.
+
+    `solutions=` exists so a control can prove this is COMPUTED rather than typed:
+    pass a synthetic level set and the answer has to move with it.
+
+    Fail-closed on an empty or zero-move set — a truncated `solutions.json` must
+    not silently disable the floor and hand a paid run an unbounded default.
+    """
+    solutions = _committed_solutions() if solutions is None else solutions
+    total = sum(len(seq) for seq in solutions.values())
+    if total <= 0:
+        raise SystemExit(
+            f"levels/solutions.json carries no moves ({len(solutions)} level(s), "
+            f"{total} moves), so the paid action budget cannot be derived from it. "
+            f"Refusing to run: the floor exists precisely so a paid run cannot be "
+            f"launched at a budget that makes all_levels_solved unreachable, and a "
+            f"floor of 0 would be no floor at all."
+        )
+    return total
+
+
+def paid_budget_floor(solutions: dict = None) -> int:
+    """The smallest paid budget at which finishing is possible with slack."""
+    return PAID_BUDGET_MULTIPLE * reference_moves(solutions)
+
+
+def resolve_max_actions(provider: str, requested, solutions: dict = None) -> int:
+    """The budget this run will actually use. An explicit `--max-actions` always
+    wins; `None` means "no flag", and the default is provider-dependent."""
+    if requested is not None:
+        return int(requested)
+    if provider == "anthropic":
+        return paid_budget_floor(solutions)
+    return STAGE1_DEFAULT_ACTIONS
+
+
+def assert_stage1_ceiling(provider: str, max_actions: int) -> None:
+    """§B P12 — a longer local run buys worse play, not more evidence."""
+    if provider == "ollama" and max_actions > STAGE1_CEILING:
+        raise SystemExit(
+            f"--max-actions {max_actions} on a local model: LESSONS.md §B P12 caps "
+            f"stage 1 at ~{STAGE1_CEILING}. Past ~200 local calls the decisions degrade "
+            f"below Haiku's, so a longer run buys worse play, not more evidence. Use "
+            f"--provider anthropic."
+        )
+
+
+def assert_budget_can_finish(provider: str, max_actions: int,
+                             solutions: dict = None) -> None:
+    """Refuse a PAID run whose budget cannot reach the win condition.
+
+    Paid-only on purpose: stage 1 is free and is not trying to finish.
+    """
+    if provider != "anthropic":
+        return
+    reference = reference_moves(solutions)
+    floor = paid_budget_floor(solutions)
+    if max_actions < floor:
+        raise SystemExit(
+            f"--max-actions {max_actions} with --provider anthropic is below the budget "
+            f"floor of {floor}. The committed {reference}-move reference — the sum of the "
+            f"three sequences in levels/solutions.json — is what FINISHING costs when "
+            f"played perfectly, so at {max_actions} actions all_levels_solved is "
+            f"unreachable by construction. The run would spend credit to produce a "
+            f"partial result the core-interaction gate then declines to score, i.e. a "
+            f"purchased refusal.\n"
+            f"    Drop --max-actions to take the derived default ({floor} = "
+            f"{PAID_BUDGET_MULTIPLE}x the {reference}-move reference), or pass "
+            f"--max-actions {floor} or more."
+        )
 
 
 # ── §B pre-flight ────────────────────────────────────────────────────────────
@@ -860,8 +971,9 @@ _RATIO = "moves/optimum ratio:"
 
 
 def prove_scoring() -> int:
-    """Negative and positive controls for every rule in the scorer. Exit 1 if
-    any case fails, so this is a gate and not a demo."""
+    """Negative and positive controls for every rule in the scorer AND for the
+    action-budget policy. Exit 1 if any case fails, so this is a gate and not a
+    demo."""
     solutions = _committed_solutions()
     total = len(solutions)
     optimum = sum(len(v) for v in solutions.values())
@@ -873,7 +985,8 @@ def prove_scoring() -> int:
         if not ok:
             failures += 1
 
-    print("PROVE SCORING — the competence block's and the gate's own controls")
+    print("PROVE SCORING — the competence block's, the gate's and the budget "
+          "floor's own controls")
 
     # A — the real defect's shape: a long walk that solved and pushed nothing.
     rep = _fixture_walk()
@@ -1100,6 +1213,86 @@ def prove_scoring() -> int:
           report_competence(os.path.join(HERE, "results", "does-not-exist.json")) == 1,
           "exit 1")
 
+    # ── The paid budget floor ────────────────────────────────────────────────
+    # A budget below the committed reference makes all_levels_solved unreachable
+    # by construction, so a paid run at one buys a refusal. These are the controls
+    # for the floor that forbids it — including that it is DERIVED.
+
+    # T — the floor is computed from solutions.json, never typed.
+    committed_total = sum(len(seq) for seq in solutions.values())
+    check("T reference_moves sums the committed sequences",
+          reference_moves() == committed_total,
+          f"{reference_moves()} moves across {total} levels")
+    check("T the floor is the stated multiple of the reference",
+          paid_budget_floor() == PAID_BUDGET_MULTIPLE * committed_total,
+          f"{paid_budget_floor()} = {PAID_BUDGET_MULTIPLE}x{committed_total}")
+    # The case that dies the moment anyone writes the number down: a synthetic
+    # level set has to move the answer.
+    synthetic = {"a": [0] * 10, "b": [0] * 5}
+    check("T a synthetic level set moves the reference and the floor",
+          reference_moves(synthetic) == 15 and paid_budget_floor(synthetic) == 30,
+          f"reference {reference_moves(synthetic)}, floor {paid_budget_floor(synthetic)} "
+          f"for a 10+5-move set — a hard-coded {committed_total} cannot produce this")
+    for label, empty in (("no levels", {}), ("a level with no moves", {"a": []})):
+        try:
+            reference_moves(empty)
+            check(f"T {label} fails closed", False, "no SystemExit raised")
+        except SystemExit as exc:
+            check(f"T {label} fails closed", "solutions.json" in str(exc),
+                  "SystemExit naming the artifact rather than a floor of 0")
+
+    # U — the refusal, on both sides of the boundary, and paid-only.
+    floor = paid_budget_floor()
+    try:
+        assert_budget_can_finish("anthropic", STAGE1_DEFAULT_ACTIONS)
+        check("U the old default is refused for a paid run", False, "no SystemExit")
+    except SystemExit as exc:
+        msg = str(exc)
+        check("U the old default is refused for a paid run",
+              str(committed_total) in msg and str(floor) in msg,
+              f"SystemExit naming the {committed_total}-move reference and the "
+              f"{floor}-action floor")
+    try:
+        assert_budget_can_finish("anthropic", floor - 1)
+        check("U one below the floor is refused", False, "no SystemExit")
+    except SystemExit:
+        check("U one below the floor is refused", True, f"{floor - 1} < {floor}")
+    for at in (floor, floor + 1):
+        try:
+            assert_budget_can_finish("anthropic", at)
+            check(f"U {at} is allowed", True, f"{at} >= {floor}")
+        except SystemExit as exc:
+            check(f"U {at} is allowed", False, f"refused: {exc}")
+    try:
+        assert_budget_can_finish("ollama", STAGE1_DEFAULT_ACTIONS)
+        check("U the floor is paid-only", True,
+              f"ollama at {STAGE1_DEFAULT_ACTIONS} is not held to the {floor}-action floor")
+    except SystemExit as exc:
+        check("U the floor is paid-only", False, f"stage 1 would be unrunnable: {exc}")
+
+    # V — the provider-dependent defaults, and P12's ceiling still bites.
+    check("V no --max-actions on anthropic resolves to the floor, not 30",
+          resolve_max_actions("anthropic", None) == floor
+          and resolve_max_actions("anthropic", None) != STAGE1_DEFAULT_ACTIONS,
+          f"{resolve_max_actions('anthropic', None)} actions")
+    check("V no --max-actions on ollama is unchanged",
+          resolve_max_actions("ollama", None) == STAGE1_DEFAULT_ACTIONS,
+          f"{resolve_max_actions('ollama', None)} actions")
+    check("V an explicit budget always wins",
+          all(resolve_max_actions(p, 55) == 55 for p in ("ollama", "anthropic")),
+          "55 for both providers — the floor refuses, it never silently rewrites")
+    try:
+        assert_stage1_ceiling("ollama", STAGE1_CEILING + 1)
+        check("V the §B P12 ceiling still refuses 101 on ollama", False, "no SystemExit")
+    except SystemExit as exc:
+        check("V the §B P12 ceiling still refuses 101 on ollama", "P12" in str(exc),
+              f"SystemExit citing P12 for {STAGE1_CEILING + 1}")
+    try:
+        assert_stage1_ceiling("ollama", STAGE1_CEILING)
+        check("V the ceiling itself is allowed", True, f"{STAGE1_CEILING} actions")
+    except SystemExit as exc:
+        check("V the ceiling itself is allowed", False, f"refused: {exc}")
+
     print(f"\nPROVE SCORING — "
           f"{'MET' if not failures else f'NOT MET ({failures} failed)'}")
     return 1 if failures else 0
@@ -1114,7 +1307,11 @@ def main() -> int:
                     help="local (free, proves the channel) or paid (produces the number)")
     ap.add_argument("--model", default=None,
                     help="default: gemma4:26b for ollama, the playtester's default for anthropic")
-    ap.add_argument("--max-actions", type=int, default=30, dest="max_actions")
+    ap.add_argument("--max-actions", type=int, default=None, dest="max_actions",
+                    help=f"default: {STAGE1_DEFAULT_ACTIONS} for ollama (§B P12 caps stage 1 "
+                         f"at {STAGE1_CEILING}); for anthropic, the derived floor — "
+                         f"{PAID_BUDGET_MULTIPLE}x the committed reference read from "
+                         f"levels/solutions.json — below which a paid run cannot finish")
     ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--output", default=None)
     ap.add_argument("--score", default=None, metavar="PATH",
@@ -1122,8 +1319,9 @@ def main() -> int:
                          "no spend. GATED: exit 0 scored, 1 the core interaction never "
                          "happened (or no report), 2 the log contradicts itself")
     ap.add_argument("--prove-scoring", action="store_true", dest="prove_scoring",
-                    help="run the competence block's and the gate's own controls "
-                         "against synthetic reports; no bridge, no model, no spend")
+                    help="run the competence block's, the gate's and the budget floor's "
+                         "own controls against synthetic reports and synthetic level "
+                         "sets; no bridge, no model, no spend")
     args = ap.parse_args()
 
     # Model-free paths first, so scoring never needs Godot or a provider.
@@ -1132,12 +1330,18 @@ def main() -> int:
     if args.score:
         return report_competence(args.score)
 
-    if args.provider == "ollama" and args.max_actions > 100:
-        raise SystemExit(
-            f"--max-actions {args.max_actions} on a local model: LESSONS.md §B P12 caps "
-            f"stage 1 at ~100. Past ~200 local calls the decisions degrade below Haiku's, "
-            f"so a longer run buys worse play, not more evidence. Use --provider anthropic."
-        )
+    # Budget policy next — it costs nothing, needs no config and must refuse
+    # BEFORE Godot is started, let alone a model contacted.
+    budget = resolve_max_actions(args.provider, args.max_actions)
+    assert_stage1_ceiling(args.provider, budget)
+    assert_budget_can_finish(args.provider, budget)
+    if args.provider == "anthropic":
+        print(f"[budget] anthropic: {budget} actions "
+              f"({PAID_BUDGET_MULTIPLE}x the committed {reference_moves()}-move reference "
+              f"across {len(_committed_solutions())} levels).")
+    else:
+        print(f"[budget] ollama: {budget} actions (stage 1; §B P12 ceiling "
+              f"{STAGE1_CEILING} — the paid floor of {paid_budget_floor()} does not apply).")
 
     guide = open(GUIDE).read()
     config = UgtConfig(CONFIG)
@@ -1163,7 +1367,7 @@ def main() -> int:
         GodotTcpAdapter(config),
         provider=args.provider,
         strategy_guide=guide,
-        max_actions=args.max_actions,
+        max_actions=budget,
         output_path=output,
         model=args.model,
         runs=args.runs,
