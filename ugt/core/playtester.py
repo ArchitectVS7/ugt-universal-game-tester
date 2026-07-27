@@ -185,6 +185,11 @@ def _run_and_write(adapter, llm, config, strategy_guide, max_actions, output_pat
         valid_action_names.add(action_def.get("name") if isinstance(action_def, dict) else str(action_def))
     if hasattr(llm, "valid_actions"):
         llm.valid_actions = valid_action_names
+    # The truncation salvage validates differently per channel: an action-id run
+    # matches the whole value against the vocabulary, a text run matches only the
+    # command's VERB (the rest is the model's own argument). See
+    # `_salvage_truncated_action`.
+    llm.action_mode = action_mode
 
     run_reports = []
     try:
@@ -322,7 +327,10 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
     # not just the ones whose author remembered to write a probe — the browser
     # dice game had to carry its own, which is how the check stayed a per-game
     # habit instead of a guarantee.
-    _probe_action = playtest_cfg.get("probe_action", 0)
+    # `probe_actions` (a LIST, driven verbatim) wins over `probe_action` (a single
+    # id, repeated). The list exists for games whose seed-sensitive action has a
+    # precondition — see ugt/core/seeding.py::as_sequence.
+    _probe_action = playtest_cfg.get("probe_actions", playtest_cfg.get("probe_action", 0))
     try:
         print(f"[*] {seeding.probe(adapter, seeding_mode, episode_seeds, _probe_action)}")
     except seeding.SeedingError as e:
@@ -413,6 +421,12 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
     _consecutive_repeat = 0
     repeat_streak = {}  # {noop_key: current back-to-back run length}, single active entry
     ended_early = None
+    # P15 bookkeeping: a turn the LOOP threw away (unparseable / truncated reply)
+    # is not a turn the pilot chose to pass on, and a silent discard is
+    # indistinguishable from a deliberate wait in every downstream number.
+    discarded_turns = 0
+    salvaged_turns = 0
+    truncated_replies = 0
     # Shared mutable context for stateful invariants (invariant-fuzzer semantics:
     # one ctx per episode — cleared whenever the game resets mid-run).
     inv_ctx = {}
@@ -475,6 +489,13 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
             print(f"  [Step {step_num}] LLM error: {api_err}")
             ended_early = f"llm_error: {api_err}"
             break
+
+        if llm_action.get("_discarded"):
+            discarded_turns += 1
+        if llm_action.get("_salvaged"):
+            salvaged_turns += 1
+        if llm_action.get("_truncated"):
+            truncated_replies += 1
 
         action_type   = llm_action.get("action_type", "wait")
         value         = llm_action.get("value", "")
@@ -897,6 +918,10 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         "invariant_violations": len(invariant_violations),
         "unexpected_delta_steps": unexpected_delta_steps,
         "back_to_back_repeat_steps": back_to_back_repeat_steps,
+        # P15: turns lost to the model<->loop channel rather than to the pilot.
+        "discarded_turns": discarded_turns,
+        "salvaged_turns": salvaged_turns,
+        "truncated_replies": truncated_replies,
         "forced_repeat_blocks": forced_repeat_blocks,
         # Episodes that reached a real ending, i.e. the only ones an outcome tally
         # may count. Kept separate from `episode_resets` (which counts resets of
@@ -1067,7 +1092,12 @@ class _AnthropicLLM:
     def choose_action(self, prompt):
         response = self._client.messages.create(
             model=self.model,
-            max_tokens=512,
+            # 4096, not the 512 this file was born with in 2026-07-05's first
+            # spike and never revisited. `max_tokens` is a CEILING, not an
+            # allocation — you are billed for tokens generated, so a bigger cap
+            # costs nothing unless replies genuinely run longer, while a cap that
+            # bites costs a whole pilot turn for a decision already made (P15).
+            max_tokens=4096,
             tools=[{
                 "name": "choose_action",
                 "description": "Choose the next game action",
@@ -1076,10 +1106,30 @@ class _AnthropicLLM:
             tool_choice={"type": "any"},
             messages=[{"role": "user", "content": prompt}],
         )
+        stop = getattr(response, "stop_reason", None)
         tool_block = next((b for b in response.content if b.type == "tool_use"), None)
         if tool_block is None:
-            raise RuntimeError("No tool_use block in Anthropic response")
-        return tool_block.input
+            raise RuntimeError(
+                f"No tool_use block in Anthropic response (stop_reason={stop!r}). "
+                f"If that is 'max_tokens', the cap cut the reply before the tool "
+                f"call completed — raise max_tokens in _AnthropicLLM."
+            )
+        data = dict(tool_block.input or {})
+        # This backend forces tool_use, so it never reaches `_parse_json_action`
+        # and its salvage. A cap hit mid-tool-input therefore arrives as an EMPTY
+        # or partial input dict, which the loop would silently read as a `wait` —
+        # a discarded turn indistinguishable from a deliberate one. `stop_reason`
+        # is authoritative regardless of how the SDK renders partial JSON, so
+        # diagnose from it and mark the turn so the summary can count it (P15).
+        if stop == "max_tokens" and not data.get("action_type"):
+            print("  [warn] provider truncated the reply at max_tokens before the "
+                  "decision was complete; turn discarded.")
+            return {"action_type": "wait", "value": "",
+                    "reasoning": "(provider truncated the reply at max_tokens)",
+                    "expected_outcome": "", "_discarded": True}
+        if stop == "max_tokens":
+            data["_truncated"] = True
+        return data
 
 
 class _OllamaLLM:
@@ -1150,10 +1200,11 @@ class _OllamaLLM:
             raise RuntimeError(f"Ollama HTTP {e.code}: {e.read().decode()[:200]}")
 
         raw = body.get("message", {}).get("content", "")
-        return _parse_json_action(raw, self.valid_actions)
+        return _parse_json_action(raw, self.valid_actions,
+                                  getattr(self, "action_mode", "action_id"))
 
 
-def _salvage_truncated_action(text, valid_actions):
+def _salvage_truncated_action(text, valid_actions, action_mode="action_id"):
     """Recover the decision from a reply the provider cut off mid-JSON.
 
     The response contract puts the action FIRST and the prose after it:
@@ -1170,27 +1221,49 @@ def _salvage_truncated_action(text, valid_actions):
     config actually declares, so this can never invent an action or coerce a
     hallucinated name onto a neighbouring id (§B P4). A salvage is also marked in
     the reasoning, so a transcript never implies the model said more than it did.
+
+    **`action_mode="text"` needs its own rule, and without it the whole mechanism
+    is inert for text-driven games.** There the value is a whole command LINE
+    ("connect 10.0.0.5"), which is never a member of `valid_actions`, so the
+    membership test above rejects every salvage and the turn burns as a `wait` —
+    exactly the P15 defect, surviving the P15 fix. Found on a terminal-hacking
+    RPG, the wordiest genre in the portfolio and the one likeliest to truncate.
+    The declared-vocabulary guarantee is kept by checking the command's VERB (its
+    first token) against the config instead of the whole line: `connect ...`
+    recovers, `frobnicate ...` still refuses. The arguments are the model's own
+    text and are never invented here.
     """
     if not valid_actions:
         return None
     m = re.search(r'"value"\s*:\s*"([^"]+)"', text)
-    if not m or m.group(1) not in valid_actions:
+    if not m:
         return None
+    value = m.group(1)
+    if action_mode == "text":
+        verb = value.strip().split(" ", 1)[0].lower()
+        if not verb or verb not in {str(a).lower() for a in valid_actions}:
+            return None
+        recovered_type = "type_text"
+    else:
+        if value not in valid_actions:
+            return None
+        recovered_type = "action_id"
     tail = text[m.end():]
     reasoning = ""
     rm = re.search(r'"reasoning"\s*:\s*"([^"]*)', tail)
     if rm:
         reasoning = rm.group(1)
     return {
-        "action_type": "action_id",
-        "value": m.group(1),
+        "action_type": recovered_type,
+        "value": value,
         "reasoning": (reasoning + " [reply truncated by the provider's token limit; "
                       "action recovered from the prefix]").strip(),
         "expected_outcome": "",
+        "_salvaged": True,
     }
 
 
-def _parse_json_action(raw_text, valid_actions=None):
+def _parse_json_action(raw_text, valid_actions=None, action_mode="action_id"):
     """Parse LLM JSON response, tolerating markdown fences and minor formatting.
 
     `valid_actions` (a set of the config's action names) enables salvaging two common
@@ -1201,7 +1274,8 @@ def _parse_json_action(raw_text, valid_actions=None):
     valid_actions = valid_actions or set()
     text = raw_text.strip()
     if not text:
-        return {"action_type": "wait", "value": "", "reasoning": "(empty response)", "expected_outcome": ""}
+        return {"action_type": "wait", "value": "", "reasoning": "(empty response)",
+                "expected_outcome": "", "_discarded": True}
     # Strip markdown code fences if present
     if text.startswith("```"):
         lines = text.splitlines()
@@ -1221,14 +1295,18 @@ def _parse_json_action(raw_text, valid_actions=None):
         if data is None:
             # Before burning the step: the reply may be a COMPLETE decision with an
             # incomplete tail. See `_salvage_truncated_action`.
-            salvaged = _salvage_truncated_action(text, valid_actions)
+            salvaged = _salvage_truncated_action(text, valid_actions, action_mode)
             if salvaged is not None:
                 print(f"  [salvaged] response was cut off mid-JSON; recovered "
-                      f"action_id={salvaged['value']!r} from the prefix.")
+                      f"{salvaged['action_type']}={salvaged['value']!r} from the prefix.")
                 return salvaged
             reason = "(parse error)" if start >= 0 and end > start else "(no json)"
             print(f"  [warn] Unparseable/absent JSON from LLM, skipping step: {text[:100]}")
-            return {"action_type": "wait", "value": "", "reasoning": reason, "expected_outcome": ""}
+            # `_discarded` marks a turn the LOOP threw away, not one the pilot
+            # chose to wait on. Without it the two are indistinguishable in the
+            # report and a silent discard reads as a deliberate pass (§B P15).
+            return {"action_type": "wait", "value": "", "reasoning": reason,
+                    "expected_outcome": "", "_discarded": True}
 
     # Validate required fields; salvage recognizable intents, else default gracefully
     atype = data.get("action_type")
