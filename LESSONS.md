@@ -526,6 +526,32 @@ what the pilot receives. A change to what gets *written down* invalidates nothin
 Both mistakes cost real work: pooling across a real information change produces a confident wrong number, and
 declaring a boundary that does not exist throws away a valid comparison out of caution.
 
+### P17 · A guard that validates against a vocabulary must be proven to fire in every CHANNEL you support
+P15 added a salvage so a truncated reply would stop costing a turn. It worked, shipped green, and was
+**completely inert for an entire class of game** — which is P15's own lesson recurring one level up: the fix
+was real, the failure survived, and nothing said so.
+
+The salvage recovered the action only if the value was a member of the declared action vocabulary. That is
+correct for an `action_id` channel, where the value IS an action name. In a **text channel** the value is a
+whole command line — `connect 10.0.0.5` — which is never a vocabulary member, so the membership test refused
+every salvage and every truncated reply still burned a turn. Measured on a terminal-hacking RPG
+(Next.js + Postgres) driven by typed command lines: the wordiest genre in the portfolio and therefore the one
+likeliest to truncate, i.e. the guard was absent exactly where it was most needed.
+
+- **Keep the guarantee, change the unit you check.** Do not relax the guard to "accept anything" — that is the
+  coercion P4 forbids. Match the part of the value that the config actually declares: for a command line,
+  the **verb** (`connect …` recovers, `frobnicate …` refuses); the arguments stay the model's own text and are
+  never invented by the recovery path.
+- **A second backend can bypass the guard entirely.** The same tier's hosted-API backend forced a structured
+  tool call and never reached the parser *or* its salvage, so a cap hit mid-call arrived as an empty argument
+  dict the loop silently read as a do-nothing turn. One provider's fix is not the tier's fix — enumerate the
+  backends, not just the modes.
+- **Pin the old behaviour in the test.** The proof harness asserts that the pre-fix rule *still* discards the
+  text-mode reply, so the regression cannot return quietly. 13/13, both directions, both channels.
+
+**The general rule: for every guard, list the modes and backends it runs under, and prove it fires in each.**
+A guard proven in one mode is evidence about that mode only.
+
 ---
 
 ## C. Operational discipline
@@ -590,6 +616,21 @@ games; a 4-action puzzle game does not. Fixes, in order of preference: drive a s
 of random ids, and assert the state moved; and compute the inert fraction inside the rung so it stays honest
 when the content changes. Corollary of O2 — an assertion that *can* fail but usually has nothing to fail
 against is only marginally better than one that cannot.
+
+**O12 · If a driver COMPOSES arguments, assert the composed command LANDS — a shape assertion cannot see a
+dead argument.** An adapter for a terminal-hacking RPG (Next.js + Postgres) filled two verbs from invented
+constants — plausible-looking Unix paths (`/etc/passwd`, `/etc/shadow`) that existed on no server in the
+game. Both commands came back `File not found`. The rung driving them asserted only that a well-formed
+4-tuple came back, which it always did, so the integration ran its **entire life** with `cat` — *the verb
+that completes missions* — testing a missing file. Its siblings worked (`exploit <real-vuln-type>`,
+`accept <mission-from-state>`), which is what hid it: spot-checking one composed argument tells you nothing
+about the others. The fix has two halves and the second is the durable one: (1) compose from what the game
+actually printed — cache the file listing the game already gave you, and when nothing is known send the verb
+**bare** so the game issues its own usage refusal, because an invented argument earns a refusal
+indistinguishable from a real answer about a real target; (2) **add the assertion that was missing** — drive
+the real prerequisite chain, then require every argument-taking verb to return success. That rung went 5/5 →
+7/7 and was mutation-proven both ways (restore the constant → 5/7 red; remove it → 7/7). Corollary of O2 and
+O11: the constants were the symptom, the absent assertion was the defect.
 
 ---
 

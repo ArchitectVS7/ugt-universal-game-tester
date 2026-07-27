@@ -74,7 +74,7 @@ files.
 
 The ladder answers *"does the game work / does it break?"* (tiers 1–2 of the three-tier model). The third
 tier — the **LLM balance playtester** (`ugt playtest`, spec in `PLAYTEST-DESIGN.md`) — answers *"is the game
-good?"*. **Before running it on any game, work through `LESSONS.md` §B (P1–P16)** — the pre-flight
+good?"*. **Before running it on any game, work through `LESSONS.md` §B (P1–P17)** — the pre-flight
 information-integrity audit that two balance batches paid for the hard way.
 
 ---

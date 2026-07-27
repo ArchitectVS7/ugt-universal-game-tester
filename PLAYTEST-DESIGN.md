@@ -12,7 +12,7 @@
 > **Status:** This document describes implemented behavior unless a section is explicitly marked as future work; where it diverges from the code, the code is authoritative.
 
 > **Before running this tier against any game, work through `LESSONS.md` §B — the pre-flight
-> information-integrity audit (P1–P16).** It is the accumulated cost of two real balance rounds: a playtest can
+> information-integrity audit (P1–P17).** It is the accumulated cost of two real balance rounds: a playtest can
 > report `PLAYTEST MET`, zero violations and a confident win rate while the pilot is blind to entity
 > identities, to the game's public read layer, or to the rules that create its skill. Every check there needs
 > a written, cited disposition before a batch is worth running.
