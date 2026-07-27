@@ -430,6 +430,9 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
     # whatever server the pilot happened to be on each time it checked. See _quest_block.
     quest_recall = {}
     _quest_commands = set((playtest_cfg or {}).get("quest_commands") or [])
+    # O-23: regions of a command's output that are ONE-SHOT EVENTS, not durable facts, and
+    # so must never enter recall. See _strip_recall_events for the failure this prevents.
+    _recall_strip_markers = list((playtest_cfg or {}).get("recall_strip_markers") or [])
     # Immediate-adjacency guard: distinct from noop_streaks (material-delta-gated, and
     # bypassed entirely for display_only_verbs so legitimate repeatable recon like a terminal RPG's
     # `ls` never trips it). This tracks ONLY whether the literal previous step picked the
@@ -508,12 +511,17 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
             terminal_text = adapter.get_terminal_text(terminal_budget)
             if _pending_recall and terminal_text:
                 _pk, _ps = _pending_recall
-                terminal_recall[_pk] = {"text": terminal_text, "step": _ps}
-                _pending_value = _pk[0] if isinstance(_pk, tuple) else _pk
-                _pending_verb = (_pending_value.split(None, 1)[0]
-                                 if isinstance(_pending_value, str) and _pending_value else None)
-                if _pending_verb in _quest_commands:
-                    quest_recall[_pending_verb] = {"text": terminal_text, "step": _ps}
+                # O-23: cache the DURABLE remainder, never a consumed one-shot event. The
+                # live `terminal_text` above is deliberately left intact — the pilot must
+                # still see an event when it actually fires.
+                _recall_text = _strip_recall_events(terminal_text, _recall_strip_markers)
+                if _recall_text:
+                    terminal_recall[_pk] = {"text": _recall_text, "step": _ps}
+                    _pending_value = _pk[0] if isinstance(_pk, tuple) else _pk
+                    _pending_verb = (_pending_value.split(None, 1)[0]
+                                     if isinstance(_pending_value, str) and _pending_value else None)
+                    if _pending_verb in _quest_commands:
+                        quest_recall[_pending_verb] = {"text": _recall_text, "step": _ps}
             _pending_recall = None
             if action_mode == "text":
                 prompt = _build_terminal_prompt(config, strategy_guide, current_state,
@@ -1527,6 +1535,72 @@ def _action_ledger_block(ledger, cap=24):
         "what you have already learned.)\n"
         + "\n".join(lines) + "\n\n"
     )
+
+
+def _strip_recall_events(text, specs):
+    """Remove ONE-SHOT EVENT segments from text before it is cached for recall.
+
+    Why this exists (NEXUS 2026-07-27, O-23 — a UGT-side defect that cost a real run its
+    last 39 steps). `_terminal_recall_block` retains the latest output per (action, context)
+    indefinitely, and tells the pilot those details "are still valid unless the game has
+    changed them since." That promise holds for the DURABLE read layer it was built for — a
+    server's security level, vulnerability names, a file list — and is FALSE for a one-shot
+    narrative event, which is consumed the moment it is answered.
+
+    The failure is not fixable by keying or by expiry, and both were tried on paper first:
+    an NPC interrupt is APPENDED to the output of whatever ordinary command triggered it, so
+    a single string mixes durable facts with a consumed event. In the recorded case the
+    invitation "Would you like to know what I've been building?" rode in the output of
+    `escalate` at one server. The pilot's `('reply 2', srv)` entry WAS correctly overwritten
+    with the game's refusal — same-key expiry already worked and changed nothing — while the
+    `('escalate', srv)` entry kept the invitation alive because that command was never re-run.
+    The pilot held the refusal and the invitation at once, and believed the invitation 23 times.
+
+    So the game declares where its events start, and UGT keeps the rest. `specs` comes from
+    `playtest.recall_strip_markers` and each entry is either:
+
+      * a string — a regex; strip from the first matching line to END of text (engines append
+        interrupts after the command's own output, so this is the common shape); or
+      * a mapping `{start: <regex>, end: <regex>}` — strip from the first line matching
+        `start` up to (not including) the next line matching `end`. Use this when durable
+        content follows the event in the same output.
+
+    Only the RECALL copy is stripped. The live terminal panel is untouched — the pilot must
+    still see the event when it actually happens, or it could never answer it at all.
+    """
+    if not text or not specs:
+        return text
+    lines = text.split("\n")
+    drop = [False] * len(lines)
+    for spec in specs:
+        if isinstance(spec, dict):
+            start_pat, end_pat = spec.get("start"), spec.get("end")
+        else:
+            start_pat, end_pat = spec, None
+        if not start_pat:
+            continue
+        try:
+            start_re = re.compile(start_pat)
+            end_re = re.compile(end_pat) if end_pat else None
+        except re.error:
+            # A bad pattern must not silently disable the guard for every other spec.
+            continue
+        i = 0
+        while i < len(lines):
+            if start_re.search(lines[i]):
+                j = i + 1
+                if end_re is not None:
+                    while j < len(lines) and not end_re.search(lines[j]):
+                        j += 1
+                else:
+                    j = len(lines)
+                for k in range(i, j):
+                    drop[k] = True
+                i = j
+            else:
+                i += 1
+    kept = [ln for ln, d in zip(lines, drop) if not d]
+    return "\n".join(kept).strip()
 
 
 def _terminal_recall_block(recall, budget):
