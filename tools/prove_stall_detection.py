@@ -21,6 +21,8 @@ handling in `ugt/core/playtester.py`.
 """
 from __future__ import annotations
 
+import argparse
+import json
 import os
 import random
 import sys
@@ -167,7 +169,160 @@ def story_gated_trace(n=400, seed=3):
     return log
 
 
+# ── loading a REAL retained trace (O-2) ──────────────────────────────────────
+def load_trace(report_path, config_path=None):
+    """Read a retained `playtest-report-<UTC>.json` into the trace shape above.
+
+    Why this exists: every threshold in this file was tuned on SYNTHETIC shapes, and the
+    file says so — "a threshold has to be re-checked against a real retained trace". Until
+    2026-07-27 there was no way to do that, because this harness had no loader and no CLI.
+    Retention (L-033) made real traces exist; this makes them usable.
+
+    Returns (rows, meta). `rows` are exactly the dicts the detectors above consume, so a
+    real trace and a synthetic one go through identical code — that equivalence is the
+    whole point, and it is why no detector below is allowed to special-case a real run.
+
+    NOTE the report is NOT self-describing: it records `state_delta` but not the
+    `display_only_verbs` / `ignore_delta_fields` that decide what a *material* delta is.
+    Pass --config to read them from the game's `ugt.config.yaml`; otherwise this falls
+    back to the module constants and says so, loudly, because silently scoring a trace
+    with the wrong materiality rule is exactly the vacuous-metric shape O2 warns about.
+    """
+    with open(report_path) as fh:
+        report = json.load(fh)
+    log = report.get("action_log") or []
+    rows, forced, empty = [], 0, 0
+    for e in log:
+        action = (e.get("action") or "").strip()
+        if e.get("forced_by_repeat_block"):
+            forced += 1
+        if not action:
+            empty += 1
+        rows.append({"step": e.get("step"), "action": action,
+                     "state_delta": e.get("state_delta") or {}})
+    meta = {
+        "path": os.path.basename(report_path),
+        "steps": len(rows),
+        "forced_by_repeat_block": forced,
+        "empty_actions": empty,
+        "summary": report.get("summary") or {},
+        "config_source": "module defaults (NO --config given)",
+    }
+    if config_path:
+        try:
+            sys.path.insert(0, REPO)
+            from ugt.utils.config_parser import UgtConfig
+            pt = (UgtConfig(config_path).data or {}).get("playtest") or {}
+            global DISPLAY_ONLY, IGNORE_FIELDS
+            DISPLAY_ONLY = set(pt.get("display_only_verbs") or DISPLAY_ONLY)
+            IGNORE_FIELDS = set(pt.get("ignore_delta_fields") or IGNORE_FIELDS)
+            meta["config_source"] = os.path.basename(config_path)
+        except Exception as e:
+            meta["config_source"] = f"FAILED to read {config_path}: {type(e).__name__}"
+    return rows, meta
+
+
+def report_real_trace(rows, meta) -> int:
+    """Score a real trace and say plainly where it DIVERGES from the synthetic model.
+
+    This is a report, not a gate. A real run is evidence, not a specification — it cannot
+    "fail". What it CAN do is show that the synthetic trace no longer models the failure
+    being designed against, which is a much more useful thing to learn early.
+    """
+    print(f"Replaying a REAL retained trace: {meta['path']}\n")
+    print(f"  steps                     : {meta['steps']}")
+    print(f"  materiality rule from     : {meta['config_source']}")
+    print(f"    display_only_verbs      : {sorted(DISPLAY_ONLY)}")
+    print(f"    ignore_delta_fields     : {sorted(IGNORE_FIELDS)}")
+    print(f"  forced by repeat-block    : {meta['forced_by_repeat_block']}")
+    print(f"  empty/no-op action rows   : {meta['empty_actions']}")
+
+    fires = stall_signal(rows)
+    adj = adjacency_guard(rows)
+    dead = dead_targets(rows)
+    blocked_n, suppressed = blocking_would_suppress(rows)
+    mat = sum(1 for e in rows if material(e))
+    futile_fraction = 1 - (mat / len(rows)) if rows else 0.0
+
+    print("\n  -- detector output on the REAL trace --")
+    print(f"  stall_signal fires        : {len(fires)}" + (f" (first at step {fires[0]})" if fires else ""))
+    print(f"  adjacency_guard fires     : {len(adj)}")
+    print(f"  distinct dead targets     : {len(dead)}  {sorted(dead)[:6]}")
+    print(f"  futile step fraction      : {futile_fraction:.3f}")
+    print(f"  if dead targets were BLOCKED: {blocked_n} blocked, "
+          f"{suppressed} of them later WORK ({(suppressed / blocked_n * 100) if blocked_n else 0:.0f}% "
+          f"would be play the guard destroyed)")
+
+    # ── non-vacuity: the mirrored logic must reproduce the run's own numbers ──
+    # These detectors are MIRRORED from playtester.py, not imported. If the mirror has
+    # drifted, every number above is fiction. The report carries what the live loop
+    # actually computed, so cross-check against it and say so either way.
+    print("\n  -- cross-check: mirrored logic vs what the live run recorded --")
+    s = meta["summary"] or {}
+    pairs = [("stall_signal_steps", len(fires)), ("distinct_dead_targets", len(dead)),
+             ("futile_step_fraction", round(futile_fraction, 3))]
+    drift = []
+    for key, mine in pairs:
+        theirs = s.get(key)
+        if theirs is None:
+            print(f"  ?  {key}: not in this report — cannot cross-check")
+            continue
+        same = (abs(theirs - mine) < 0.002) if isinstance(mine, float) else (theirs == mine)
+        print(f"  {'OK' if same else 'DRIFT'} {key}: replay={mine}  live={theirs}")
+        if not same:
+            drift.append(key)
+    if drift:
+        print(f"  ** The mirror has DRIFTED from playtester.py on {drift}. Fix the mirror before "
+              f"trusting anything above — this file says the mirror is kept honest by exactly this. **")
+    else:
+        print("  => the mirror reproduces the live numbers, so the replay is measuring the real thing.")
+
+    print("\n  -- divergence from the synthetic model this file proves against --")
+    diverged = []
+    if len(adj) == 0 and meta["forced_by_repeat_block"] > 0:
+        diverged.append(
+            f"adjacency_guard replays as 0 fires, but the live run recorded "
+            f"{meta['forced_by_repeat_block']} repeat-blocks. Both are true and the gap is the point: "
+            "**the retained trace is a POST-GUARD artifact.** The forced `wait` the guard injects is "
+            "recorded as a step, so the run of identical picks is already broken in the log and can "
+            "never re-trip the guard on replay. Consequence: this trace CANNOT be used to tune any "
+            "guard that ACTS during a run — only report-only metrics replay faithfully. Note this also "
+            "means the synthetic trace's 0-fires assertion and this 0 are different zeros: there, no "
+            "guard ran; here, one already did.")
+    if meta["empty_actions"] > 0:
+        diverged.append(
+            f"{meta['empty_actions']} rows have an empty action (the injected `wait`), which the "
+            "synthetic trace has none of — so the oscillate-block-oscillate shape this run actually "
+            "died of is not modelled at all. Worse, an empty action is being counted as a dead TARGET "
+            "(see the list above), which is a metric artifact, not a finding about the game.")
+    distinct = len({e["action"] for e in rows if e["action"]})
+    if distinct < 40:
+        diverged.append(
+            f"only {distinct} distinct actions across {meta['steps']} steps; the synthetic dead-target "
+            "pool alone is ~38, so the diversity assumption does not hold either.")
+    if diverged:
+        for i, d in enumerate(diverged, 1):
+            print(f"  {i}. {d}")
+        print("\n  => Thresholds tuned on the synthetic trace should NOT be carried onto this shape "
+              "without re-deriving them here. That is the finding, and it is why this loader exists.")
+    else:
+        print("  none — the synthetic model still describes this run's failure shape.")
+    print("\n(Reported, not gated: a real run is evidence, not a specification.)")
+    return 0
+
+
 def main() -> int:
+    ap = argparse.ArgumentParser(description="Stall-detection proof, and real-trace replay")
+    ap.add_argument("--trace", help="a retained playtest-report-<UTC>.json to replay")
+    ap.add_argument("--config", help="that game's ugt.config.yaml, for the materiality rule")
+    args = ap.parse_args()
+    if args.trace:
+        rows, meta = load_trace(args.trace, args.config)
+        if not rows:
+            print(f"[FAIL] {args.trace} has no action_log entries — nothing to replay.")
+            return 1
+        return report_real_trace(rows, meta)
+
     print("Proving stall detection — and pinning the fix that must NOT be built\n")
     healthy, stall, gated = healthy_trace(), diffuse_stall_trace(), story_gated_trace()
 
