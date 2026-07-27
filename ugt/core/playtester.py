@@ -147,6 +147,29 @@ def playtest_game_with_adapter(adapter, provider, strategy_guide, max_actions=10
                           action_mode=action_mode)
 
 
+def _write_retained(payload, primary_path, results_dir, stem):
+    """Write a report to its stable path AND to a timestamped archive beside it.
+
+    The stable filename must not move — every gate, integration script and
+    downstream reader opens it by name. But it is also OVERWRITTEN by the next
+    run, and that cost is not hypothetical: the 599-action run whose stall
+    behaviour later needed analysis had already been destroyed by a subsequent
+    30-action smoke run, so the analysis had to be done against a synthetic
+    reconstruction of numbers quoted in a findings log. A trace is evidence, and
+    evidence you overwrite is evidence you do not have.
+
+    `results/` is gitignored repo-wide, so archives never enter version control.
+    Returns the archive path so the caller can print it.
+    """
+    with open(primary_path, "w") as f:
+        json.dump(payload, f, indent=2, default=str)
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    archive = os.path.join(results_dir, f"{stem}-{stamp}.json")
+    with open(archive, "w") as f:
+        json.dump(payload, f, indent=2, default=str)
+    return archive
+
+
 def _run_and_write(adapter, llm, config, strategy_guide, max_actions, output_path,
                    provider, runs, invariants, action_mode="action_id"):
     """Shared post-adapter orchestration for both entry points: connect, wire
@@ -209,8 +232,8 @@ def _run_and_write(adapter, llm, config, strategy_guide, max_actions, output_pat
             run_reports.append(run_report)
             if runs > 1:
                 run_path = os.path.join(results_dir, f"playtest-run-{run_index}.json")
-                with open(run_path, "w") as f:
-                    json.dump(run_report, f, indent=2, default=str)
+                _write_retained(run_report, run_path, results_dir,
+                                f"playtest-run-{run_index}")
                 s = run_report["summary"]
                 print(f"[+] Run {run_index}: actions={s['actions_taken']} "
                       + " ".join(f"{k}={v}" for k, v in s.items()
@@ -222,9 +245,9 @@ def _run_and_write(adapter, llm, config, strategy_guide, max_actions, output_pat
         report = run_reports[0]
         report["game"] = project_name
         out = output_path or os.path.join(results_dir, "playtest-report.json")
-        with open(out, "w") as f:
-            json.dump(report, f, indent=2, default=str)
+        archive = _write_retained(report, out, results_dir, "playtest-report")
         _print_run_summary(report, out)
+        print(f"[+] Trace retained: {archive}")
         return report
 
     aggregate = _aggregate_runs(run_reports)
@@ -239,8 +262,7 @@ def _run_and_write(adapter, llm, config, strategy_guide, max_actions, output_pat
         "run_report_files": [f"playtest-run-{i}.json" for i in range(1, runs + 1)],
     }
     out = output_path or os.path.join(results_dir, "playtest-summary.json")
-    with open(out, "w") as f:
-        json.dump(summary_report, f, indent=2, default=str)
+    archive = _write_retained(summary_report, out, results_dir, "playtest-summary")
 
     print(f"\n[+] Playtest batch complete: {runs} runs × {max_actions} actions")
     for label, stats in aggregate.items():
@@ -250,6 +272,7 @@ def _run_and_write(adapter, llm, config, strategy_guide, max_actions, output_pat
         else:
             print(f"    {label}: {stats}")
     print(f"[+] Summary: {out}")
+    print(f"[+] Trace retained: {archive}")
     return summary_report
 
 
@@ -427,6 +450,27 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
     discarded_turns = 0
     salvaged_turns = 0
     truncated_replies = 0
+    # Run-level stall signal (D3). The adjacency guard answers "is the pilot
+    # repeating itself RIGHT NOW"; this answers "is the RUN going anywhere",
+    # which is the question a diffuse stall fails. A 599-action run once spread
+    # its stalling across dozens of different dead targets, tripping the
+    # adjacency guard exactly 0 times, and the stall was only ever found by a
+    # human reading the transcript afterwards.
+    #
+    # REPORT-ONLY, deliberately: simulation showed that turning per-target
+    # futility into a BLOCK is wrong for a game whose gates open over time —
+    # 6 of 7 blocks would have suppressed a target that later became legitimately
+    # playable, and no expiry policy fixed it. So this measures; it never vetoes.
+    _stall_window = []
+    _stall_win_size = int(playtest_cfg.get("stall_window", 20))
+    _stall_floor = float(playtest_cfg.get("stall_min_productive", 0.20))
+    stall_signal_steps = 0
+    # Counted HERE, where materiality is known. The action_log stores the RAW
+    # delta (line ~783), which for any game with a per-command counter (an RNG
+    # cursor, a turn number) is never empty — deriving futility from the log
+    # would report 0.0 forever and look healthy by construction (O2).
+    productive_steps = 0
+    material_steps_seen = 0
     # Shared mutable context for stateful invariants (invariant-fuzzer semantics:
     # one ctx per episode — cleared whenever the game resets mid-run).
     inv_ctx = {}
@@ -777,6 +821,24 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
             k: v for k, v in delta.items()
             if k not in _ignore_delta_fields and k.rsplit(".", 1)[-1] not in _ignore_delta_fields
         }
+        # Feed the run-level window. Display-only verbs count as NON-productive
+        # here on purpose: they are legitimate recon (which is why the LEDGER
+        # exempts them from futility), but a run made only of them is not
+        # advancing the game, and this metric asks whether the run is advancing.
+        material_steps_seen += 1
+        if material_delta:
+            productive_steps += 1
+        _stall_window.append(1 if material_delta else 0)
+        if len(_stall_window) > _stall_win_size:
+            _stall_window.pop(0)
+        if (len(_stall_window) == _stall_win_size
+                and sum(_stall_window) / _stall_win_size < _stall_floor):
+            stall_signal_steps += 1
+            print(f"  [STALL] last {_stall_win_size} steps moved the state "
+                  f"{sum(_stall_window)}x (< {_stall_floor:.0%}) — the RUN is not "
+                  f"advancing. Reported, not blocked.")
+            _stall_window.clear()
+
         noop_key = f"{action_type}:{value}"
         # Some commands (e.g. a terminal RPG's `ls`/`analyze`) are legitimately display-only: their real
         # payload is rendered into terminal_text, not into any structured state field, so they will
@@ -922,6 +984,21 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         "discarded_turns": discarded_turns,
         "salvaged_turns": salvaged_turns,
         "truncated_replies": truncated_replies,
+        # Stall measurement (report-only). `distinct_dead_targets` reads the
+        # ledger that already exists rather than counting anything twice:
+        # entries tried >= 3 times that NEVER moved the state, display-only
+        # verbs excluded because their payload is terminal text by design.
+        # A high count with stall_signal_steps == 0 means the pilot spread its
+        # futility thinly; both high means the run stopped advancing outright.
+        "stall_signal_steps": stall_signal_steps,
+        "distinct_dead_targets": sum(
+            1 for rec in action_ledger.values()
+            if rec["tries"] >= 3 and rec["productive"] == 0 and not rec.get("display_only")
+        ),
+        "futile_step_fraction": (
+            round(1 - (productive_steps / material_steps_seen), 3)
+            if material_steps_seen else 0.0
+        ),
         "forced_repeat_blocks": forced_repeat_blocks,
         # Episodes that reached a real ending, i.e. the only ones an outcome tally
         # may count. Kept separate from `episode_resets` (which counts resets of
