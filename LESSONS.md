@@ -174,7 +174,16 @@ the first mover's committed card-vs-pass bit — which the engine's redacted vie
 **Check:** name every field in the prompt that the game's own client cannot see. **Fix pattern:** the
 game-agnostic `playtest.redact_state_fields` knob (dotted paths dropped from the *prompt only* — state JSON
 and delta summaries; logs, invariants and reports keep the full state).
-*(→ `ugt/core/playtester.py::_redact`.)*
+**Two knobs, and do not conflate them:** `redact_state_fields` is fog of war — the game hides it from the
+player, so it leaves *every* channel the pilot reads, deltas included. `hide_from_state_block` is context
+economy — the same information is rendered elsewhere in the prompt (usually the screen panel), so it leaves
+the state JSON *only* and stays in the recent-action deltas. Putting an economy decision in the fog-of-war
+list silently turns it into an information restriction on the pilot's **memory**: one game moved a whole-board
+render to its screen panel that way, and because the board was then stripped from the deltas too — and a push
+that crosses no target moves no visible scalar — a move that pushed a crate and a move that only walked
+rendered *identically* in the pilot's own history. Ask of each hidden path: is it hidden from the player, or
+merely printed somewhere better?
+*(→ `ugt/core/playtester.py::_redaction_paths` / `_state_block_only_paths`.)*
 
 ### P6 · The strategy guide must teach the RULES that create the skill, not just the entities
 A guide that lists commands/cards but not the mechanics that reward reading them produces a pilot that goes

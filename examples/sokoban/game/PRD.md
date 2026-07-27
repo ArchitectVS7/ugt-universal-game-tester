@@ -73,18 +73,27 @@ Solving a level advances to the next automatically; solving the third sets
 ```json
 {
   "level_index": 0,
-  "player_x": 3, "player_y": 2,
+  "player_x": 1, "player_y": 1,
   "boxes_on_target": 1, "boxes_total": 2,
   "moves_taken": 17,
   "level_solved": false,
   "all_levels_solved": false,
-  "grid": ["#####", "#@$.#", "#####"]
+  "grid": ["#######", "#@$ .*#", "#######"]
 }
 ```
 
 `grid` is the player-facing render of the current level in the grid legend
 above — exactly what the human sees on screen, one string per row, so a
 machine player is told no less and no more than a person at the keyboard.
+
+The scalars and the render share **one** coordinate frame, and the snippet above
+is a consistent example of it rather than an illustration of the shape alone:
+`player_x` is the 0-based **column** and `player_y` is the 0-based **row** of
+`grid`, so `grid[player_y][player_x]` is always the player's own `@` or `+`.
+(`render_rows()` builds one string per row — outer loop over `y`, inner over
+`x` — which is what makes that true.) State this here because it is the only
+place a reader would look it up, and the two readings are indistinguishable on
+any board where the player happens to sit on the diagonal.
 
 `reset_level` reloads the current level from scratch, keeping `level_index` —
 including after `all_levels_solved`, which it clears (retrying the last level

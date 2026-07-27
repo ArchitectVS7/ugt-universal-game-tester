@@ -47,10 +47,12 @@ transport and no evidence at all about the game, so it reports
 competence line. Exit codes: 0 scored, 1 unmeasured (or no report), 2 the log
 contradicts itself and is refused.
 
-Two model-free entry points, so scoring is re-runnable without a bridge:
+Three model-free entry points, so scoring and prompt rendering are re-runnable
+without a bridge:
 
     python3 examples/sokoban/integration/playtest_sokoban.py --score results/<r>.json
     python3 examples/sokoban/integration/playtest_sokoban.py --prove-scoring
+    python3 examples/sokoban/integration/playtest_sokoban.py --prove-prompt
 """
 from __future__ import annotations
 
@@ -72,7 +74,14 @@ for _p in (HERE, REPO):
 from godot_tcp_adapter import GodotTcpAdapter  # noqa: E402
 from invariants import SUITE  # noqa: E402
 
-from ugt.core.playtester import _build_prompt, playtest_game_with_adapter  # noqa: E402
+from ugt.core.playtester import (  # noqa: E402
+    _build_prompt,
+    _compute_delta,
+    _prompt_hidden_paths,
+    _redact_delta,
+    _unexpected_delta_fields,
+    playtest_game_with_adapter,
+)
 from ugt.utils.config_parser import UgtConfig  # noqa: E402
 
 GUIDE = os.path.join(HERE, "strategy-guide.md")
@@ -295,40 +304,236 @@ def assert_screen_channel_is_live(config: UgtConfig, adapter) -> str:
     return after
 
 
+def _prompt_section(prompt: str, header: str) -> str:
+    """One `## <header>` section of a rendered prompt, header line included.
+
+    Assertions about a channel must be made against THAT channel: the board is in
+    the Terminal panel, in the state block if it were not held back, and (since
+    T-009) in the Recent Actions deltas. A whole-prompt substring check cannot
+    tell those apart, so it proves nothing about where the pilot reads it.
+
+    Fail-closed on a missing header rather than returning "" — an empty slice
+    would make every `not in` assertion below trivially true.
+    """
+    marker = f"## {header}\n"
+    start = prompt.find(marker)
+    if start < 0:
+        raise SystemExit(
+            f"the rendered prompt has no '## {header}' section, so a check scoped to "
+            f"it would assert against an empty string. Refusing a vacuous pass — "
+            f"`ugt.core.playtester` has renamed or dropped the block."
+        )
+    end = prompt.find("\n## ", start + len(marker))
+    return prompt[start:] if end < 0 else prompt[start:end]
+
+
 def assert_prompt_shows_a_player_view(config: UgtConfig, guide: str, adapter,
                                       screen: str) -> None:
     """§B P5 — the prompt must not leak what the real client hides, and must not
     hide what it shows.
 
     Checked against a REAL rendered prompt rather than by reading the config,
-    because redaction is easy to configure and easy to configure for the wrong
-    path. There is no HUD in this game, so `moves_taken` is a score the game
-    keeps and shows to nobody, and it is also the number this tier scores
-    against — a pilot watching its own metric is playing a different game.
-    `grid` is redacted from the state block only because the SAME board is
-    already rendered, aligned, in the Terminal panel.
+    because holding a field back is easy to configure and easy to configure for
+    the wrong path. Two fields are held back, by two different knobs and for
+    opposite reasons:
+
+      * `moves_taken` — FOG OF WAR (`playtest.redact_state_fields`). There is no
+        HUD in this game, so it is a score the game keeps and shows to nobody, and
+        it is the number this tier scores against. Gone from EVERY channel, which
+        is why it is checked against the whole prompt.
+      * `grid` — CONTEXT ECONOMY (`playtest.hide_from_state_block`). The same
+        board is already rendered, aligned, in the Terminal panel, so it is
+        dropped from the state block ONLY — and is legitimately present in the
+        Recent Actions deltas, which is what makes a push distinguishable from a
+        walk. Hence the state-block-scoped check here.
+
+    This function renders with an EMPTY action log, so it says nothing about the
+    history channel: that is `assert_history_shows_the_board`'s job.
     """
     state = adapter.reset()
     for a in (LEFT, UP):
         state, _t, _tr, _i = adapter.step(a)
     prompt = _build_prompt(config, guide, state, adapter.get_terminal_text(600), [])
 
-    for leaked in ("moves_taken", '"grid"'):
-        if leaked in prompt:
-            raise SystemExit(
-                f"P5 VIOLATION — {leaked} appears in the rendered prompt despite "
-                f"playtest.redact_state_fields. Redaction is not doing what the "
-                f"config claims."
-            )
+    if "moves_taken" in prompt:
+        raise SystemExit(
+            "P5 VIOLATION — moves_taken appears in the rendered prompt despite "
+            "playtest.redact_state_fields. This one is fog of war and must be gone "
+            "from every channel the pilot reads, the history included."
+        )
+    state_block = _prompt_section(prompt, "Current State")
+    if '"grid"' in state_block:
+        raise SystemExit(
+            "P5 VIOLATION — \"grid\" appears in the prompt's Current State block "
+            "despite playtest.hide_from_state_block. The board would be printed "
+            "twice, once JSON-quoted, spending context on a worse rendering."
+        )
     board_rows = [r for r in screen.splitlines() if r.strip()]
     if not board_rows or board_rows[0] not in prompt:
         raise SystemExit(
-            "P5/P2 VIOLATION — the board is redacted from the state block AND missing "
-            "from the prompt's Terminal panel, so the pilot has no view of the game "
-            "at all. This is the one combination that must never ship."
+            "P5/P2 VIOLATION — the board is held back from the state block AND "
+            "missing from the prompt's Terminal panel, so the pilot has no view of "
+            "the game at all. This is the one combination that must never ship."
         )
     print(f"[P5] prompt is a player's view: {len(prompt)} chars, board present, "
-          f"no move counter, no raw grid field.")
+          f"no move counter, no raw grid field in the state block.")
+
+
+def assert_history_shows_the_board(config: UgtConfig, guide: str, adapter) -> None:
+    """§B P10 — the pilot's own memory must be able to tell a push from a walk.
+
+    This game's one feedback signal is the board. A push to a non-target cell
+    moves NO visible scalar — `boxes_on_target` only changes when a push crosses a
+    target, and `moves_taken` is fog of war — so if the history carries no board,
+    a crate-pushing move renders exactly like a plain walk
+    (`Step 2: up → {'player_y': '-1'}`) and the pilot cannot learn from its own
+    moves at all. That is what `grid` sitting in `redact_state_fields` did, since
+    that knob strips the deltas too.
+
+    Asserted against a REAL rendered prompt built from a REAL replay of the
+    committed solution, using the framework's own `_compute_delta`, so the check
+    exercises the rendering path the loop uses rather than a hand-built delta.
+
+    The pushing step is FOUND, never assumed to be step 2: the first replayed step
+    whose crate-cell set changes. A re-authored level re-finds it — the same
+    discipline `assert_repeat_guard_allows_real_play` uses for the repeat guard.
+    """
+    names = {aid: (d.get("name") if isinstance(d, dict) else str(d))
+             for aid, d in config.action_mappings.items()}
+    window = int(_pt(config).get("history_window", 5))
+
+    state = adapter.reset()
+    action_log, push_step, walk_step = [], None, None
+    for n, action in enumerate(_committed_solutions()["level_01"], start=1):
+        before = state
+        state, _t, _tr, _i = adapter.step(action)
+        action_log.append({"step": n, "action_type": "action_id",
+                           "action": names[action],
+                           "state_delta": _compute_delta(before, state)})
+        moved_a_crate = _crate_cells(before["grid"]) != _crate_cells(state["grid"])
+        if moved_a_crate and push_step is None:
+            push_step = action_log[-1]
+        if not moved_a_crate and walk_step is None:
+            walk_step = action_log[-1]
+        if push_step is not None and walk_step is not None:
+            break
+    if push_step is None or walk_step is None:
+        raise SystemExit(
+            f"P10 CHECK IS VACUOUS — replaying level_01's committed solution "
+            f"produced {'no crate-moving step' if push_step is None else ''}"
+            f"{' and ' if push_step is None and walk_step is None else ''}"
+            f"{'no step that moved only the player' if walk_step is None else ''}. "
+            f"This check needs both to assert that they render DIFFERENTLY, so a "
+            f"pass here would prove nothing. Re-derive it against the level as "
+            f"authored now."
+        )
+    if len(action_log) > window:
+        raise SystemExit(
+            f"P10 CHECK IS OUT OF WINDOW — the contrast steps are {len(action_log)} "
+            f"entries deep but playtest.history_window is {window}, so the prompt "
+            f"below would not contain them and the assertions would be about the "
+            f"wrong thing."
+        )
+
+    prompt = _build_prompt(config, guide, state, adapter.get_terminal_text(600),
+                           action_log)
+    history = _prompt_section(prompt, "Recent Actions")
+    push_line = next(ln for ln in history.splitlines()
+                     if ln.strip().startswith(f"Step {push_step['step']}:"))
+    walk_line = next(ln for ln in history.splitlines()
+                     if ln.strip().startswith(f"Step {walk_step['step']}:"))
+
+    before_rows, after_rows = _grid_delta(push_step)
+    # 1. the pushing step carries the whole after-board.
+    missing = [r for r in after_rows if r not in push_line]
+    if missing:
+        raise SystemExit(
+            f"P10 VIOLATION — the crate-pushing step's history line does not carry "
+            f"the board it produced: {len(missing)} of {len(after_rows)} rows absent "
+            f"({missing[0]!r} first). The pilot's memory of the game's one feedback "
+            f"signal is incomplete.\n    Line: {push_line.strip()}"
+        )
+    # 2. position sensitivity — the crate is shown MOVED, not merely present. The
+    #    row it now occupies must differ from the same row before, and that exact
+    #    row string must not occur anywhere in the before-board (which would let a
+    #    board with the crate one cell along satisfy check 1).
+    crate_rows = sorted({y for y, _x in _crate_cells(after_rows)
+                         - _crate_cells(before_rows)})
+    if not crate_rows:
+        raise SystemExit(
+            "P10 CHECK IS VACUOUS — the step selected as the push gained no crate "
+            "cell, so there is no moved crate to assert about."
+        )
+    for y in crate_rows:
+        if after_rows[y] == before_rows[y]:
+            raise SystemExit(
+                f"P10 VIOLATION — row {y} holds the crate's new cell but renders "
+                f"identically before and after ({after_rows[y]!r}), so the history "
+                f"cannot show the crate as having moved."
+            )
+        if after_rows[y] in before_rows:
+            raise SystemExit(
+                f"P10 VIOLATION — the after-row {after_rows[y]!r} also occurs in the "
+                f"before-board, so its presence in the history line is not evidence "
+                f"the crate moved."
+            )
+    # 3. the defect sentence, asserted: a push and a walk are DISTINGUISHABLE.
+    #    Every accepted move redraws the board (the `@` moves), so "a board
+    #    appears" is not the claim and could never be — the claim is that the
+    #    pilot can read a crate having moved off the pushing step's own pair and
+    #    can read that it did NOT on the walked step's.
+    walk_before, walk_after = _grid_delta(walk_step)
+    if _crate_cells(walk_before) != _crate_cells(walk_after):
+        raise SystemExit(
+            f"P10 CHECK IS VACUOUS — the step selected as a plain walk moved a crate "
+            f"after all, so the two lines are not a contrast.\n"
+            f"    Line: {walk_line.strip()}"
+        )
+    for label, line, entry in (("push", push_line, push_step),
+                               ("walk", walk_line, walk_step)):
+        pair = _grid_delta(entry)
+        if not all(r in line for r in pair[0] + pair[1]):
+            raise SystemExit(
+                f"P10 VIOLATION — the {label} step's history line does not carry both "
+                f"boards, so a crate move cannot be read off it either way.\n"
+                f"    Line: {line.strip()}"
+            )
+    # 4. and the board is the ONLY channel that says so, which is why stripping it
+    #    made the two identical. No non-grid delta key on the pushing step names a
+    #    crate at all: `boxes_on_target` moves only when a push CROSSES a target,
+    #    and there are no crate coordinates on the wire.
+    crate_terms = sorted(k for k in push_step["state_delta"]
+                         if k != "grid" and ("box" in k.lower() or "crate" in k.lower()))
+    if crate_terms:
+        raise SystemExit(
+            f"P10 CHECK IS NO LONGER THE CHECK — the pushing step's delta carries "
+            f"{crate_terms}, so a crate move is visible without the board and the "
+            f"premise of this assertion has changed. Re-derive it: the game's wire "
+            f"has grown a scalar that tracks crates."
+        )
+    # 5. fog of war survives the split — the move counter is in every delta and
+    #    must be in no rendered line.
+    if "moves_taken" in prompt:
+        raise SystemExit(
+            "P5/P10 VIOLATION — moves_taken reached the prompt through the history. "
+            "It is fog of war (`redact_state_fields`), so splitting the board out of "
+            "that list must not have taken the move counter with it."
+        )
+
+    print(f"[P10] history distinguishes a push from a walk. Pushing step "
+          f"{push_step['step']} ({push_step['action']}) renders as:\n"
+          f"        {push_line.strip()}")
+    # What the same step used to render as, printed so the difference is visible
+    # rather than asserted about in prose. This is the old behaviour exactly:
+    # `grid` in `redact_state_fields` stripped it from the deltas as well.
+    print(f"[P10] the same step with the board stripped, i.e. before this fix:\n"
+          f"        Step {push_step['step']}: {push_step['action']} → "
+          f"{_redact_delta(push_step['state_delta'], ['grid', 'moves_taken'])}")
+    print(f"[P10] the walked step {walk_step['step']} ({walk_step['action']}) "
+          f"carries both boards too, and its crate cells are UNCHANGED — which is "
+          f"the distinction:\n        {walk_line.strip()}")
+    print(f"[P10] prompt {len(prompt)} chars with {len(action_log)} history "
+          f"entries; Recent Actions block {len(history)} chars.")
 
 
 # ── Competence ───────────────────────────────────────────────────────────────
@@ -1341,6 +1546,117 @@ def prove_scoring() -> int:
     return 1 if failures else 0
 
 
+# ── Proving the two prompt knobs do different things ─────────────────────────
+#
+# `assert_history_shows_the_board` needs Godot; these cases need nothing at all.
+# They are the permanent control over the framework split this harness depends on
+# — including the case that protects the OTHER shipped example, whose
+# `redact_state_fields` really is fog of war and must keep stripping the deltas.
+
+class _ConfigShim:
+    """The three attributes the prompt builders read, and nothing else.
+
+    Deliberately synthetic: a real `UgtConfig` would tie these cases to the file
+    on disk, and the point is to vary the two knobs INDEPENDENTLY of it.
+    """
+
+    def __init__(self, playtest: dict):
+        self.data = {"playtest": dict(playtest)}
+        self.action_mappings = {0: {"name": "up"}, 2: {"name": "left"}}
+        self.project_name = "PromptKnobFixture"
+
+
+# A push left, in the PRD's legend: the crate goes from column 2 to column 1 and
+# the player follows it. No scalar the pilot can see moves — which is the whole
+# reason the history has to carry the board.
+_FIX_BEFORE = ["#######", "# $@  #", "#######"]
+_FIX_AFTER = ["#######", "#$@   #", "#######"]
+
+
+def prove_prompt() -> int:
+    """Controls for `redact_state_fields` vs `hide_from_state_block`, and for the
+    surprise filter that reads both. No bridge, no model, no file on disk."""
+    failures = 0
+
+    def check(name, ok, detail):
+        nonlocal failures
+        print(f"  [{'ok' if ok else 'FAIL'}] {name}: {detail}")
+        if not ok:
+            failures += 1
+
+    state = {"player_x": 2, "player_y": 1, "grid": _FIX_AFTER}
+    log = [{"step": 1, "action_type": "action_id", "action": "left",
+            "state_delta": _compute_delta(
+                {"player_x": 3, "player_y": 1, "grid": _FIX_BEFORE}, state)}]
+    if "grid" not in log[0]["state_delta"]:
+        raise SystemExit(
+            "the fixture's two boards are identical, so every case below would be "
+            "vacuous. `_compute_delta` wrote no grid term."
+        )
+
+    def render(playtest: dict):
+        prompt = _build_prompt(_ConfigShim(playtest), "guide", state, "SCREEN", log)
+        return (prompt,
+                _prompt_section(prompt, "Current State"),
+                _prompt_section(prompt, "Recent Actions"))
+
+    print("PROVE PROMPT — the two knobs, and that they are not the same knob")
+
+    # a — the split this task installs: economy hides it from the block and
+    #     LEAVES it in the pilot's memory of its own moves.
+    _p, block, hist = render({"hide_from_state_block": ["grid"]})
+    check("a hide_from_state_block: absent from the state block",
+          '"grid"' not in block, f"state block {len(block)} chars, no grid key")
+    check("a hide_from_state_block: PRESENT in the recent-action delta",
+          "grid" in hist and _FIX_AFTER[1] in hist,
+          "the history carries the board's before→after")
+
+    # b — the regression guard for the OTHER shipped example: real fog of war must
+    #     still strip both channels, history included.
+    _p, block, hist = render({"redact_state_fields": ["grid"]})
+    check("b redact_state_fields: absent from the state block",
+          '"grid"' not in block, "unchanged behaviour")
+    check("b redact_state_fields: absent from the history TOO",
+          "grid" not in hist,
+          "fog of war still strips the deltas — the escape-room example's `flags` "
+          "depends on exactly this")
+
+    # c — a path in both lists is hidden from both channels (no interaction).
+    _p, block, hist = render({"redact_state_fields": ["grid"],
+                              "hide_from_state_block": ["grid"]})
+    check("c in both lists: hidden from both channels",
+          '"grid"' not in block and "grid" not in hist,
+          "the stricter list wins; listing it twice is not a way to un-hide it")
+
+    # d — neither knob set: the field is in both. Without this the three cases
+    #     above could pass on a prompt that never renders a board at all.
+    _p, block, hist = render({})
+    check("d neither knob: present in both channels",
+          '"grid"' in block and "grid" in hist,
+          "the knobs are the cause, not a coincidence of the fixture")
+
+    # e — §B P16's second half: a field the pilot never saw NAMED cannot be a
+    #     surprise. The heuristic matches leaf names against the pilot's prose.
+    delta = log[0]["state_delta"]
+    prose = "I walk left"                     # mentions no field name at all
+    for label, cfg, want in (
+            ("hide_from_state_block", {"hide_from_state_block": ["grid"]}, False),
+            ("redact_state_fields", {"redact_state_fields": ["grid"]}, False),
+            ("neither list", {}, True)):
+        got = "grid" in _unexpected_delta_fields(delta, prose,
+                                                 redact=_prompt_hidden_paths(cfg))
+        check(f"e grid is {'a' if want else 'not a'} surprise under {label}",
+              got == want,
+              f"unexpected_deltas {'includes' if got else 'excludes'} grid — "
+              + ("a field the pilot was shown and did not predict is still counted"
+                 if want else
+                 "the pilot is not charged for a name it was never shown"))
+
+    print(f"\nPROVE PROMPT — "
+          f"{'MET' if not failures else f'NOT MET ({failures} failed)'}")
+    return 1 if failures else 0
+
+
 # ── Entry point ──────────────────────────────────────────────────────────────
 
 def main() -> int:
@@ -1365,11 +1681,19 @@ def main() -> int:
                     help="run the competence block's, the gate's and the budget floor's "
                          "own controls against synthetic reports and synthetic level "
                          "sets; no bridge, no model, no spend")
+    ap.add_argument("--prove-prompt", action="store_true", dest="prove_prompt",
+                    help="run the prompt knobs' own controls — that "
+                         "hide_from_state_block drops a field from the state block "
+                         "while LEAVING it in the pilot's history, and that "
+                         "redact_state_fields still strips both; synthetic states, no "
+                         "bridge, no model, no spend")
     args = ap.parse_args()
 
     # Model-free paths first, so scoring never needs Godot or a provider.
     if args.prove_scoring:
         return prove_scoring()
+    if args.prove_prompt:
+        return prove_prompt()
     if args.score:
         return report_competence(args.score)
 
@@ -1400,6 +1724,7 @@ def main() -> int:
     try:
         screen = assert_screen_channel_is_live(config, probe)
         assert_prompt_shows_a_player_view(config, guide, probe, screen)
+        assert_history_shows_the_board(config, guide, probe)
     finally:
         probe.close()
 
