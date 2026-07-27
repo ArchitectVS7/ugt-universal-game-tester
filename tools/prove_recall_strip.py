@@ -99,6 +99,42 @@ def main() -> int:
     check(INVITE not in bounded and "10.9.0.4" in bounded,
           "{start,end} form drops ONLY the event and keeps the later durable block")
 
+    # ── 4b. the SECOND real shape, which the first fix missed ───────────────
+    # Recorded 2026-07-27, hours after the first fix shipped. The next 200-action run
+    # looped on `reply 1` anyway: the invitation arrived under a DIFFERENT channel header
+    # ([SECURE CHANNEL - FOUNDATION], inside a `cat`), so a marker list naming
+    # [SYSTEM INTERRUPT] did not match it. The durable lesson, and the reason this case is
+    # pinned: strip the marker that constitutes the INVITATION, not the channel that
+    # delivered it. Channel headers multiply with the story; the call-to-action does not.
+    print("\n  -- the second real shape: a different channel, same defect --")
+    CROSS = (
+        "\x1b[90m[INTEL]\x1b[0m Discovered: Dr. Elena Cross built both AXIOM and NULL\n"
+        "\n"
+        "\x1b[36m[SECURE CHANNEL - FOUNDATION]\x1b[0m\n"
+        "\n"
+        "Dr. Cross: I've been watching your work.\n"
+        "Dr. Cross: What you've found... you can't carry alone.\n"
+        "\n"
+        "\x1b[33m[RESPONSE OPTIONS]\x1b[0m\n"
+        "  1) What do you know about what I found?\n"
+        "  2) Why should I trust you?\n"
+        "\n"
+        "Type 'reply <number>' to respond, or ignore to continue.\n"
+    )
+    INVITE_MARKERS = [{"start": r"\[RESPONSE OPTIONS\]",
+                       "end": r"\[(NETWORK UPDATE|STORY PROGRESS|INTEL|LOCATION|ACT [0-9])"}]
+    cleaned = _strip_recall_events(CROSS, INVITE_MARKERS)
+    check("RESPONSE OPTIONS" not in cleaned and "Type 'reply" not in cleaned,
+          "the invitation (options + the 'reply <number>' instruction) is stripped")
+    check("1) What do you know" not in cleaned, "the numbered choices go with it")
+    check("Dr. Cross: I've been watching your work." in cleaned,
+          "the DIALOGUE is kept — it is durable story content, not the one-shot half")
+    check("[INTEL]" in cleaned, "an earlier durable discovery in the same output survives")
+    check("RESPONSE OPTIONS" in _strip_recall_events(CROSS, [r"\[SYSTEM INTERRUPT\]"]),
+          "REGRESSION: a channel-header-only marker list does NOT catch this",
+          "this is exactly the gap that let the second 200-action run loop; if this ever "
+          "passes, the case has stopped modelling the failure")
+
     # ── 5. robustness ───────────────────────────────────────────────────────
     print("\n  -- robustness --")
     check(_strip_recall_events("", MARKERS) == "", "empty text is safe")
