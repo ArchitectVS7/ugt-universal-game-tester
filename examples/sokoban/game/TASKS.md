@@ -283,6 +283,47 @@ Minimality is asserted here rather than in the tester because it is a claim abou
 authored content: a solver in the harness would be a second rules engine beside
 the one it checks.
 
+**Follow-up (2026-07-26, integration T-007): the two remaining content claims are
+now asserted too, and neither needed a solver.** This task proved the levels
+*solvable*, and the correction above proved them *minimal*; two things the PRD
+said about them were still untested. (1) **The gradient.** `boxes_and_size`
+covered crate count and grid area but never that the puzzles take *longer* to
+solve, so `tests/test_shipped_levels.gd` gained
+`test_shipped_levels_grow_in_solution_length` — a strict relationship over
+`levels/solutions.json`, never the literal 6 / 23 / 44, kept a case of its own so a
+broken ordering names which axis broke. The PRD's "Content: 3 bundled levels"
+section now states the ordering as a content rule alongside box count and grid
+size. (2) **Deadlock-capability.** `reset_level` exists because a crate can become
+permanently stuck, and nothing asserted such a place existed in any shipped level.
+New `tests/test_deadlock_cells.gd` scans `board.gd::render_rows()` for non-target
+cells that are walled on one vertical *and* one horizontal side (a crate there can
+never be pushed again — the pusher would have to stand inside the wall), or that
+sit in a wall-flush lane with no target anywhere in it, and asserts **≥ 1** per
+level. Observed: **4 / 8 / 8 cells** (level_01 / level_02 / level_03), every one
+via the corner clause — the counts are recorded here and deliberately *not*
+asserted, since an exact count would be the second copy of the level geometry this
+suite forbids. The PRD's `reset_level` bullet now says why the action exists.
+Eight of the nine new cases are controls with hand-checkable answers, including one
+through the real `render_rows()` where a crate authored home in a corner renders
+`*` and must not be counted. Suite 105 → **115 passed, 0 failed** (~16.7 s, stderr
+0 bytes). **No game code was touched** — the predicate lives in the tests because
+it is not a rule, and `try_move()` is still the only place a rule lives. Four
+mutations, each restored byte-identically (sha256 compared, never `git checkout`):
+level 2 replaced with an easier 3-move grid *with its solution and
+`RECORDED_SHORTEST` moved to match* → `114 passed, 1 failed`, only the gradient
+case; the literal level_02 ↔ level_03 swap → `113 passed, 2 failed` in **two**
+tests, because no reorder of these three levels can break the length ordering
+without also breaking the box-count ordering, which is why the isolating mutation
+is a difficulty inversion rather than a swap; level 2 replaced with a corridor
+whose ends are its two targets (0 deadlock cells; the BFS independently confirmed
+the substituted 12-move solution minimal) → `114 passed, 1 failed`, only the
+deadlock case; the LANE clause deleted → `113 passed, 2 failed`, both lane
+controls red and the shipped-level case **still green**, which is the honest
+disclosure that shipped content passes on corners alone. A fifth, dropping the
+target exclusion, → `111 passed, 4 failed`. **Stated limit:** the deadlock check is
+a geometric witness, not an enumeration (two crates jamming each other is a real
+deadlock it does not count) and not a claim that a player can reach one.
+
 ## M3 — Front end
 
 ### T-006 · Human input — `status: DONE` · `coder: sonnet` · `after: T-004`

@@ -41,7 +41,11 @@ be expressed as colour or geometry, or the wire has to grow to carry it too.
   position; a wall-blocked or box-blocked no-op does not increment it.
 - No lose state — a player can always retry: `reset_level` (action id `4`,
   the `R` key for humans) reloads the current level for a stuck position.
-  No move limit, no timer.
+  No move limit, no timer. **The stuck position is real, and that is why this
+  action exists**: a crate pushed into a non-target corner, or into a
+  wall-flush lane with no target on it, can never be recovered — no sequence of
+  moves brings it back, because the pusher would have to stand inside a wall.
+  Every bundled level is authored to contain at least one such cell.
 - **A crate standing on a target is drawn in its own colour**, so the human can
   see the objective being met. The crate rect fills its cell and covers the
   target marker underneath it, so colour is the only place that can be shown.
@@ -55,9 +59,12 @@ be expressed as colour or geometry, or the wire has to grow to carry it too.
 ## Content: 3 bundled levels
 
 `res://levels/level_01.txt`, `level_02.txt`, `level_03.txt` — plain-text
-grids in the legend above, increasing in box count (1 → 2 → 3 boxes) and grid
-size. Solving a level advances to the next automatically; solving the third
-sets `all_levels_solved: true`.
+grids in the legend above, increasing in box count (1 → 2 → 3 boxes), grid
+size, **and shortest-solution length**. Those three are a difficulty *gradient*,
+so the ordering is a content rule and not an accident: the shortest solution to
+level 2 must be longer than level 1's, and level 3's longer than level 2's.
+Solving a level advances to the next automatically; solving the third sets
+`all_levels_solved: true`.
 
 ## Game state
 

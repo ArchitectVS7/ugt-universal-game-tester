@@ -151,6 +151,31 @@ func test_shipped_levels_grow_in_boxes_and_size() -> void:
 		previous_area = area
 
 
+## PRD content rule: the three levels are a difficulty GRADIENT, and the part of
+## that claim nothing tested is the shortest solution getting LONGER. Asserted as
+## a strict relationship over `solutions.json`, not as the literal 6 / 23 / 44 —
+## the lengths are content that may legitimately change, the ordering is the
+## design promise. Kept a case of its own, next to the box/area gradient above, so
+## a broken ordering names which axis broke.
+##
+## Minimality is NOT this case's job (`tests/test_solution_optimality.gd` proves
+## that by search): this case does no search and would stay green if all three
+## committed sequences were padded. It is the ordering it pins.
+func test_shipped_levels_grow_in_solution_length() -> void:
+	var solutions := _solutions()
+	var previous := 0
+	for name in LEVEL_NAMES:
+		var actions := _actions(solutions, name)
+		assert_true(
+			actions.size() > previous,
+			(
+				"%s solution (%d moves) should be longer than the previous level's (%d)"
+				% [name, actions.size(), previous]
+			)
+		)
+		previous = actions.size()
+
+
 ## Anti-vacuity guard for the replays below: a level shipped already solved (a
 ## box authored as `*` on its only target) would "pass" its replay without the
 ## solution doing anything at all.

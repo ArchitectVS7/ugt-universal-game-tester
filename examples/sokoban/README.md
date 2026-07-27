@@ -19,7 +19,7 @@ Then:
 ```bash
 cd game
 godot4 --headless --editor --path . --quit     # regenerates the import cache on a fresh clone
-godot4 --headless --path . -s tests/run_tests.gd   # 105 tests, ~17s (see below)
+godot4 --headless --path . -s tests/run_tests.gd   # 115 tests, ~17s (see below)
 SOKOBAN_SKIP_SLOW_TESTS=1 godot4 --headless --path . -s tests/run_tests.gd   # ~0.7s, drops one search
 godot4 --path .                                # play it yourself, arrow keys or WASD
 ```
@@ -228,7 +228,7 @@ once by throwing away a perfectly good comparison out of caution.
 
 ## Where it's up to
 
-**As of 2026-07-26**, ladder green at **18 · 11 · 14 · 15 · 7**, game suite **105/105**. Re-run from scratch rather than copied out of the table — the rule in this repo is that a number in a README is evidence about one commit, and a results table doesn't fail when it goes stale, it just quietly stops being true. Which it did: this section used to read `14 · 9 · 12 · 13 · 7` and `84/84`, both true when written, both wrong the moment the wire gained a field and the ladder grew checks to cover it. Two rungs got bigger, and per our own rule that's the point — a gate that returns its old count after the contract changed never tested the change.
+**As of 2026-07-26**, ladder green at **18 · 11 · 14 · 15 · 7**, game suite **115/115**. Re-run from scratch rather than copied out of the table — the rule in this repo is that a number in a README is evidence about one commit, and a results table doesn't fail when it goes stale, it just quietly stops being true. Which it did: this section used to read `14 · 9 · 12 · 13 · 7` and `84/84`, both true when written, both wrong the moment the wire gained a field and the ladder grew checks to cover it. Two rungs got bigger, and per our own rule that's the point — a gate that returns its old count after the contract changed never tested the change.
 
 Fail-closed is demonstrated on *these* scripts, not assumed from an older run: inverting R1's box-reached-a-target predicate gives `ROUND 1 NOT MET — 13/14 checks passed` and exit 1, and I compared the checksum afterwards to be sure the file went back exactly as it was. Every rung also feeds its invariant suite a deliberately corrupted transition and requires it to complain, because a suite that's never been seen to fail is decoration.
 
@@ -269,5 +269,11 @@ It isn't free. Level 3's reachable space is **772,948 states** and searching it 
 And the scorer still prints "the committed reference". That's deliberate now rather than leftover: the number is a proven minimum, but "1.37× optimum" still reads as a verdict on the level design and not just on the pilot, and only the second is what this tier measures. The control that keeps the word out of the instrument stayed in. It may live in prose, where a reader can see what proves it; it may not be a label on a scoreline.
 
 There's no win rate to quote — the game has no randomness at all, so every episode is the same three puzzles in the same order and the honest sample size is one however many you run. The config already says `seeding: deterministic` out loud for exactly that reason.
+
+**Two more claims had been sitting in prose for days with nothing under them.** The levels "get harder" — and the suite checked crate count and grid area, but never that the puzzles take longer to solve. And `reload` exists, the PRD says, *because a crate can become permanently stuck* — with no test anywhere asserting that such a place exists in any level I ship. That second one bothered me more: a whole action, a key on the keyboard, and a rung of the ladder justify themselves by a hazard nobody had checked was real. Both are now asserted, and neither needed a solver: the gradient is a strict relationship over the committed solution lengths, and the deadlock check is a scan of the rendered grid for cells with a wall on one vertical and one horizontal side (a crate there can never move again, because the pusher would have to stand inside the wall), or a wall-flush lane with no target on it. Four cells in level 1, eight in each of the others.
+
+Isolating the gradient check cost more thought than writing it. The obvious mutation is to swap two levels and watch the ordering break — except **no reorder of these three levels can break the length ordering without also breaking the box-count ordering**, so a swap turns two tests red and proves neither one specifically. I tried it anyway to be sure, and it does exactly that. What isolates it is inverting the *difficulty* of one level while holding every other derived number equal: I replaced level 2 with a genuinely easier three-move grid, and moved its committed solution and recorded shortest length along with it, so box count, area, unpaddedness and minimality all stayed true and only the ordering broke. That generalises past this game — an isolating mutation has to hold every constant derived from the thing you edited, or you learn that five checks fired and nothing about which one caught the defect.
+
+And the honest limit, stated in the test file itself so nobody over-reads a green run: a geometric witness is not a proof that a player can reach it. The check says the shipped content *contains* positions a crate can't come back from, which is what makes `reload` a response to something real; it does not enumerate every deadlock (two crates jamming each other in a corridor is one it doesn't count) and it says nothing about reachability in play. Deleting the lane clause leaves the shipped-level assertions green, because the shipped levels pass on corners alone — that clause is carried by its controls, and it says so.
 
 The full technical write-up, including the findings only useful to Claude, stays in [`integration/README.md`](integration/README.md).
