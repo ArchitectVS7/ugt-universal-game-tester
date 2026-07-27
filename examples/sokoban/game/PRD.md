@@ -18,6 +18,13 @@ examples):
   level. Every key routes through the board's own action dispatcher. This is
   the real, playable game.
 
+**The screen carries no text — this is a constraint, not an omission.** There is
+no `Label`, no font and no message line anywhere in the scene; everything the
+player sees is coloured rectangles on a grid. That is what makes the rendered
+`grid` below the game's *entire* player-facing text channel, and therefore
+carryable verbatim to a machine player. Any new information for the human must
+be expressed as colour or geometry, or the wire has to grow to carry it too.
+
 ## Core mechanics
 
 - 5 actions: `0=up, 1=down, 2=left, 3=right, 4=reset_level`.
@@ -35,6 +42,15 @@ examples):
 - No lose state — a player can always retry: `reset_level` (action id `4`,
   the `R` key for humans) reloads the current level for a stuck position.
   No move limit, no timer.
+- **A crate standing on a target is drawn in its own colour**, so the human can
+  see the objective being met. The crate rect fills its cell and covers the
+  target marker underneath it, so colour is the only place that can be shown.
+- **Solving the third level presents a win state, and it is colour and geometry
+  only — no text anywhere on screen**: a frame appears around the finished
+  board and the backdrop changes. `board.gd` freezes movement once
+  `all_levels_solved` is set, so the win state is what tells the player the
+  frozen board is *finished* rather than hung. `R` still works: it retries the
+  last level, clears the flag and clears the win state.
 
 ## Content: 3 bundled levels
 

@@ -27,8 +27,8 @@ for s in spike_sokoban smoke_sokoban_adapter verify_round1 verify_round2 verify_
 done
 ```
 
-Recorded results — **whole ladder re-run 2026-07-26 (late), on the wire contract
-`b66f710` landed**, against the game at 99/99 tests green:
+Recorded results — **whole ladder re-run 2026-07-26 (late), after the game gained
+its win state**, against the game at 105/105 tests green:
 
 | Rung | Script | Result |
 |---|---|---|
@@ -154,10 +154,10 @@ Run before spending anything, per P12. Everything below was free.
 | # | Check | Verdict |
 |---|---|---|
 | P1 | Identities, not handles | **PASS.** Actions are `up`/`down`/`left`/`right`/`reload`, never ids. State names are plain (`boxes_on_target`, not `bot`). No room-code equivalent exists — the board is the world |
-| P2 | Adapter passes through every PUBLIC field | **PASS, and the channel had to be built.** This game has NO prose: `main.tscn` is ColorRects with no Label, no font, no message line. So the board IS the entire player-facing text channel, and `GodotTcpAdapter.get_terminal_text()` now carries it by joining the very rows `board.gd::render_rows()` draws for the human. Asserted live in both directions — a board arrives, AND it changes when the game changes (a channel serving a stale screen forever would pass the first check and is worse than an empty one, because it looks right) |
+| P2 | Adapter passes through every PUBLIC field | **PASS, and the channel had to be built.** This game has NO prose: `main.tscn` is ColorRects with no Label, no font, no message line. So the board IS the entire player-facing text channel, and `GodotTcpAdapter.get_terminal_text()` now carries it by joining the very rows `board.gd::render_rows()` draws for the human. Asserted live in both directions — a board arrives, AND it changes when the game changes (a channel serving a stale screen forever would pass the first check and is worse than an empty one, because it looks right). **Still true after the win state was added** (Finding 15): it is colour and geometry — a frame, a backdrop change, a crate-on-target colour — with **no text node of any kind**, precisely so the channel did not have to grow. The pilot already had that information as `level_solved` / `all_levels_solved` and as `*` in the rendered board, so nothing was added to the wire and this verdict stands unchanged. Zero prose is now a stated `PRD.md` constraint rather than an accident of the scene, which is what keeps this row true against a future edit |
 | P3 | Truncation is silent starvation | **WOULD HAVE FAILED — FIXED.** The guide is 4,422 chars against the 2,000 default. The cut lands from "The one rule that matters" onward, i.e. every rule that creates the skill. Budget set to 6,000 and `assert_guide_fits` fails the run before any model is contacted |
 | P4 | Action channel sends what the LLM thinks | **PASS.** `action_id` mode maps name → id 1:1; an unknown name is dropped, never coerced to a neighbouring id. The truncation salvage added in Finding 7 keeps that property — it refuses to salvage a name the config does not declare |
-| P5 | Prompt must not leak what the client hides | **WAS LEAKING — CLOSED, and the audit ran the other way too.** There is no HUD at all here, so every field had to be justified rather than passed through. Six of eight are derivable by looking at the board. Two are redacted: `moves_taken` (a score the game keeps and shows nobody — Finding 6 — and the exact number this tier scores against) and `grid` (not hidden, *moved* to the Terminal panel where it renders aligned instead of JSON-quoted). Verified against a **rendered prompt**, not against the config |
+| P5 | Prompt must not leak what the client hides | **WAS LEAKING — CLOSED, and the audit ran the other way too.** There is no HUD at all here, so every field had to be justified rather than passed through. Six of eight are derivable by looking at the board. Two are redacted: `moves_taken` (a score the game keeps and shows nobody — Finding 6 — and the exact number this tier scores against) and `grid` (not hidden, *moved* to the Terminal panel where it renders aligned instead of JSON-quoted). Verified against a **rendered prompt**, not against the config. **One asymmetry ran the OTHER way and is now closed on the human side** (Finding 15): the pilot could see `*` in the board and `all_levels_solved` in its state block, and the player at the keyboard could see neither — a crate on a target was painted like a crate on floor, and the finished game looked hung. Fixed in the game as colour, so **nothing entered or left `redact_state_fields`** and this row's disposition is unchanged. P5 is a two-way audit: "the prompt must not leak what the client hides" has a mirror, "the client must not hide what the prompt is given" |
 | P6 | Guide teaches the RULES that create skill | **PASS.** Push-not-pull and its consequences: why a wall-flush crate can only slide, why a corner is permanent, why finishing a crate early can wall you off, and that reload is the correct move rather than a failure. No solution sequences — teaching the moves would measure recall |
 | P7 | Competence from the reasoning, not the exit code | **RUN — the channel is proven and the local model is below the floor.** Quantified rather than sensed: across 160 actions over three runs the pilot moved a crate **0 times** on a first level solvable in 6 moves (instrument-derived from the boards since Finding 11, not counted by hand), and of the crate positions it stated out loud only ~40% matched the board (9/17, 9/21, 41/59 right/wrong). It is engaged with the right concepts (`crate` 67×, `push` 30×, `target` 33× in 30 actions) and cannot reliably localise a glyph in a 7×5 grid. This is NOT P12's ambiguous-silence case: a specific wrong belief, stated out loud, is diagnosable — see Finding 8 |
 | P8 | Never pool across an information fix | **Boundaries declared** — see the run table. Row 1 → 2 crosses the Finding 7 fix and is a before/after pair, never a trend. Findings 9 and 11 are *reporting* fixes that never touched a prompt, so neither creates a behavioural boundary — the three rows stay comparable across both |
@@ -303,6 +303,20 @@ defect to repair. Handled on the tester's side instead, which is the half this
 repo owns: `moves_taken` is redacted from the prompt, so the pilot plays with what
 a player has. Recorded because a puzzle game whose only score is invisible is
 worth someone deciding about on purpose.
+
+**Follow-up (2026-07-26): one of the three things listed above was a defect, not a
+scope call, and it is fixed.** The finding is left as written. Of "nor the level
+number, nor any *solved* acknowledgement", the second half was never a missing
+feature — the game *entered* a terminal state and showed nobody, which is Finding
+15 and a game defect. It is fixed as **colour, not text**: a crate on a target
+gets its own colour, and finishing the third level draws a frame and changes the
+backdrop. Deliberately non-textual, so the P2 premise (the rendered board is the
+whole text channel) survives and `get_terminal_text()` needed no change. The other
+two halves — the invisible **move counter** and the level number — are still filed
+and still a scope call for the game's owner, and still carry the coupling named in
+the master task list: if `moves_taken` reaches the screen it must leave
+`playtest.redact_state_fields`, and the competence metric changes with it, so that
+decision belongs *before* stage 2.
 
 **7. UGT core: a truncated reply silently cost the pilot its move. FIXED.** The
 Ollama client capped responses at `num_predict: 256`. The required JSON puts the
@@ -697,6 +711,50 @@ printed lines that stated "no solver exists here", which this task made false. L
 Findings 9, 11, 12, 13 and 14 it changes what is **tested and recorded**, never what
 the pilot receives — the three stage-1 rows stay comparable on exactly the terms they
 already were, and no run needs redoing. No stage-1 figure is quoted here.
+
+**15. The game reached its terminal state, and its own player could not tell that
+from a crash. FIXED, game-side.** Two defects with one cause: `main.gd` — the human
+front end — contained **no reference to `level_solved` or `all_levels_solved`**, so
+the view never read either flag.
+
+* **A crate standing on a target was drawn identically to a crate on floor.** The
+  crate is a full-cell rect and the target is a 35%-of-a-cell pip underneath it, so
+  arriving on a target erased the only marker that said it was one. The *objective*
+  of a Sokoban level was invisible to the player achieving it — while this harness's
+  wire carried `*` for that exact cell and `boxes_on_target` beside it.
+* **After the third level the game read as hung.** `board.gd` freezes `try_move()`
+  once `all_levels_solved` latches — deliberate, documented, and depended on by R2
+  and by `invariants.py::all_levels_solved_is_terminal`. But nothing on screen
+  changed and no message appeared, so *winning* and *crashing* looked the same. The
+  freeze was never the bug; showing it to nobody was.
+
+**Fixed as colour and geometry, with no text node of any kind** — a crate-on-target
+colour, a frame around the finished board, a changed backdrop. Text was rejected on
+purpose: the rendered board is this game's entire player-facing text channel (§B
+P2), so a `Label` would have to travel down the wire or the pilot would be told less
+than a human, and the P2/P5 rows would need re-dispositioning for a cosmetic. The
+board's freeze is unchanged, `R` still clears it, and the game's own suite proves the
+un-freeze by a **move being accepted** rather than by reading a flag (suite 99 →
+105/105, six mutations red and restored byte-identically).
+
+Two things worth separating, because they are the reason this sat green for so long:
+
+* **Nothing in this harness could have caught it.** Every ladder rung and the LLM
+  tier read `get_state()`, which has carried `level_solved`, `all_levels_solved` and
+  `grid` all along. The tester was told *more* than the player, so a perfectly green
+  ladder is consistent with a game that looks broken to a human. §B P5 is normally
+  read one way — the prompt must not leak what the client hides — and this is its
+  mirror: **the client must not hide what the prompt is given.** Auditing the
+  asymmetry in that direction is what surfaced it.
+* **Route: the game's repo.** No adapter, invariant, config or wire field changed;
+  the fix is entirely in `game/scripts/main.gd` plus a stated `PRD.md` constraint
+  that the screen carries no text, so the P2 premise cannot be broken by accident
+  later.
+
+**P8: no boundary.** Nothing the pilot receives moved — no prompt, no
+`redact_state_fields`, no guard, no budget, and no wire field. The bridge front end
+owns its own `Board` and never calls `main.gd`, so the three stage-1 rows stay
+comparable and no run needs redoing. No stage-1 figure is quoted here.
 
 ## Corrections to this harness
 

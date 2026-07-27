@@ -19,7 +19,26 @@ extends Node2D
 ## synthesized events — an environment quirk, not game logic).
 ##
 ## Errors are printed as returned data, never `push_error()` / `assert()`:
-## a project run must leave stderr clean (T-001's Accept).
+## a project run must leave stderr clean (T-001's Accept). Nor is anything else
+## printed from here: `main.tscn` is the project's main scene, so this script
+## also runs underneath the UGT bridge autoload, and a stray stdout line would
+## land in the middle of that protocol.
+##
+## THE WIN STATE IS READ, NEVER RECOMPUTED. `board.all_levels_solved` is the
+## only source for "the game is finished" (the same discipline `ugt_bridge.gd`
+## uses for `terminated`), and a crate's "standing on a target" colour is read
+## off `board.render_rows()` — the board's OWN render — so this file still makes
+## no decision about `Tile`, `is_solved()`, `boxes_on_target` or `moves_taken`.
+## The freeze after `all_levels_solved` is `board.gd`'s deliberate, tested
+## behaviour and is NOT undone here; what this script fixes is that the freeze
+## used to be invisible, which read as a hang.
+##
+## THE SCREEN CARRIES NO TEXT, ON PURPOSE. There is no `Label`, no font and no
+## message line anywhere in this project, which is why `board.render_rows()` is
+## the game's entire player-facing text channel and a tester can carry it
+## verbatim. Adding a text node here would hand the human something the wire
+## does not, so the win state below is expressed as COLOUR and GEOMETRY only.
+## Keep it that way, or the wire has to grow with it.
 
 const Board := preload("res://scripts/board.gd")
 const Level := preload("res://scripts/level.gd")
@@ -55,15 +74,41 @@ const COLOR_TARGET := Color(0.55, 0.42, 0.16)
 const COLOR_BOX := Color(0.78, 0.62, 0.29)
 const COLOR_PLAYER := Color(0.40, 0.72, 0.85)
 
+## A crate that is DONE — standing on a target. Deliberately a different hue
+## from `COLOR_BOX` rather than a shade of it: the full-cell crate rect covers
+## the target pip completely, so without this the human cannot see the game's
+## own objective being met even though the rendered board says `*`.
+const COLOR_BOX_ON_TARGET := Color(0.35, 0.76, 0.45)
+
+## The finished board's backdrop, and the ring drawn around it. Together with
+## the crate colour above these are the WHOLE win state — no text (see header).
+const COLOR_FLOOR_WON := Color(0.09, 0.20, 0.14)
+const COLOR_WIN_FRAME := Color(0.42, 0.85, 0.52)
+
+## Pixels the win frame extends beyond the grid on every side.
+const WIN_FRAME_THICKNESS := 6
+
 ## The rules engine. Public so a test can inject a small inline fixture board
 ## without going anywhere near `_ready()` or the scene tree.
 var board = null
+
+## True while `board.all_levels_solved` is set. A cache of the board's flag for
+## painting, never a second opinion about it.
+var win_state_active: bool = false
+
+## How many times the win state has been ENTERED (a false -> true edge). Public,
+## and node-free, so a test can pin "entered exactly once" with no scene tree.
+## A reload clears `win_state_active` without touching this, so re-winning after
+## a retry counts a second entry.
+var win_state_entries: int = 0
 
 ## View nodes. Empty/null until `build_view()` runs, which is what keeps the
 ## handler usable in a node-free test.
 var view_root: Node2D = null
 var player_node: ColorRect = null
 var box_nodes: Array = []
+var backdrop_node: ColorRect = null
+var win_frame_node: ColorRect = null
 
 var _rendered_level_index: int = -1
 
@@ -98,11 +143,17 @@ static func cell_to_position(cell: Vector2i) -> Vector2:
 ## unconditionally, including when the move returned false: `board.gd` warns
 ## that a false return can still coincide with its lazy level advance, so the
 ## view must always re-read state rather than trust the return value.
+##
+## `_refresh_win_state()` is unconditional for the same reason and it matters
+## more here: a board whose last level is already solved sets
+## `all_levels_solved` on a move that returns FALSE. Putting the refresh behind
+## `if moved:` would enter the win state never in that case.
 func _on_action_input(action: int) -> bool:
 	if board == null:
 		return false
 	var moved: bool = board.apply_action(action)
 	_sync_view()
+	_refresh_win_state()
 	return moved
 
 
@@ -140,6 +191,8 @@ func build_view() -> void:
 	add_child(view_root)
 	box_nodes = []
 	player_node = null
+	backdrop_node = null
+	win_frame_node = null
 
 	var viewport_size := Vector2(
 		float(ProjectSettings.get_setting("display/window/size/viewport_width", 640)),
@@ -148,10 +201,17 @@ func build_view() -> void:
 	var grid_size := Vector2(level.width, level.height) * CELL_SIZE
 	view_root.position = ((viewport_size - grid_size) * 0.5).floor()
 
+	# The win frame goes in FIRST: child order is draw order, so the backdrop
+	# covers all of it except the ring that sticks out past the grid.
+	var frame_inset := Vector2(WIN_FRAME_THICKNESS, WIN_FRAME_THICKNESS)
+	win_frame_node = _new_rect(COLOR_WIN_FRAME, grid_size + frame_inset * 2.0)
+	win_frame_node.position = -frame_inset
+	view_root.add_child(win_frame_node)
+
 	# Static geometry: a backdrop, a full tile per wall, a centred pip per target.
-	var backdrop := _new_rect(COLOR_FLOOR, grid_size)
-	backdrop.position = Vector2.ZERO
-	view_root.add_child(backdrop)
+	backdrop_node = _new_rect(COLOR_FLOOR, grid_size)
+	backdrop_node.position = Vector2.ZERO
+	view_root.add_child(backdrop_node)
 	for y in range(level.height):
 		for x in range(level.width):
 			match level.tile_at(x, y):
@@ -167,6 +227,53 @@ func build_view() -> void:
 	player_node = _add_cell_rect(board.player, COLOR_PLAYER)
 
 	_rendered_level_index = board.level_index
+	_paint_status()
+
+
+## Re-reads the board's finished flag and repaints. Edge-triggered: entering the
+## win state is a false -> true transition, so a frozen board that keeps
+## refusing moves does not keep re-entering it.
+##
+## Node-free by design (the counter lives in a plain member, the painting is
+## behind `_paint_status()`'s early return), which is what lets a test pin
+## "entered exactly once" without a scene tree.
+func _refresh_win_state() -> void:
+	var won: bool = board != null and board.all_levels_solved
+	if won and not win_state_active:
+		win_state_entries += 1
+	win_state_active = won
+	_paint_status()
+
+
+## Paints the win state onto the existing view. Paints BOTH directions — a
+## reload after a win clears the flag without changing the level index or the
+## crate count, so `_sync_view()` does not rebuild and nothing else would ever
+## put the idle colours back.
+func _paint_status() -> void:
+	if view_root == null or board == null:
+		return
+	if backdrop_node != null:
+		backdrop_node.color = COLOR_FLOOR_WON if win_state_active else COLOR_FLOOR
+	if win_frame_node != null:
+		win_frame_node.visible = win_state_active
+	# The board's own render decides which crates are done — this file does not
+	# look at a tile, a target list or `boxes_on_target`.
+	var rows: Array = board.render_rows()
+	var painted: int = min(box_nodes.size(), board.boxes.size())
+	for i in range(painted):
+		var done: bool = _rendered_glyph(rows, board.boxes[i]) == Level.CHAR_BOX_ON_TARGET
+		box_nodes[i].color = COLOR_BOX_ON_TARGET if done else COLOR_BOX
+
+
+## The character the board drew at `cell`, or "" for an off-grid read. A lookup
+## into the render, not a rule.
+func _rendered_glyph(rows: Array, cell: Vector2i) -> String:
+	if cell.y < 0 or cell.y >= rows.size():
+		return ""
+	var row: String = rows[cell.y]
+	if cell.x < 0 or cell.x >= row.length():
+		return ""
+	return row[cell.x]
 
 
 ## Snaps the movable sprites onto their cells. A no-op when no view exists,

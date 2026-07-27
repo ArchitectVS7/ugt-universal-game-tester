@@ -19,7 +19,7 @@ Then:
 ```bash
 cd game
 godot4 --headless --editor --path . --quit     # regenerates the import cache on a fresh clone
-godot4 --headless --path . -s tests/run_tests.gd   # 99 tests, ~17s (see below)
+godot4 --headless --path . -s tests/run_tests.gd   # 105 tests, ~17s (see below)
 SOKOBAN_SKIP_SLOW_TESTS=1 godot4 --headless --path . -s tests/run_tests.gd   # ~0.7s, drops one search
 godot4 --path .                                # play it yourself, arrow keys or WASD
 ```
@@ -113,6 +113,37 @@ count either, because a player doesn't. That also happens to be the number I'm
 scoring it against, and letting a pilot watch its own metric measures something
 other than the game.
 
+**Follow-up, and I got one third of that paragraph wrong.** "No move counter, no
+level number, no *solved!*" — the first two are still true and still a scope call.
+The third wasn't a missing feature at all, it was a bug, and a worse one than I'd
+written. `main.gd` never mentioned `level_solved` or `all_levels_solved` anywhere,
+so the view never read either. Two things fell out of that. A crate arriving on a
+target looked exactly like a crate on floor, because the crate is a full-cell
+rectangle and the target is a small pip *underneath* it — so the objective of a
+Sokoban level was invisible to the person achieving it. And after the third level
+the board froze, correctly and on purpose, with no message and no visual change
+whatsoever. The game ending and the game crashing looked identical.
+
+That's the same defect class as the invisible move counter, one step further along:
+a state the game **entered deliberately** and **showed nobody**. And it's the exact
+inverse of the fog-of-war check I'd been running all week. I kept asking whether the
+prompt leaked something the player can't see. Nobody was asking the mirror question —
+whether the *player* was being denied something the prompt already had. The wire has
+carried `all_levels_solved` and `*` in the grid since the beginning. My tester knew
+the game was won. My own game didn't tell me.
+
+I fixed it in colour, not text, and that choice is the whole point. A frame appears
+around the finished board, the backdrop shifts, and a crate on a target gets its own
+colour. Zero text nodes — because the rendered board is this game's *entire*
+player-facing text channel, and the moment a `Label` says "SOLVED!" on screen the
+adapter has to carry that string too or the model is being told less than a human.
+One word of celebration would have cost a wire change, a re-audit of two pre-flight
+rows, and the clean claim that the board is everything. It's cheaper and more honest
+to say it in green. The freeze itself I left completely alone — it's deliberate,
+tested, and two ladder rungs depend on it. `R` still clears it, and the test proves
+the un-freeze by making a move and checking it's *accepted*, not by reading the flag
+back.
+
 ### The model can read the rules and can't find the crate
 
 The local run is the free one — it's not measuring the game, it's proving the
@@ -197,7 +228,7 @@ once by throwing away a perfectly good comparison out of caution.
 
 ## Where it's up to
 
-**As of 2026-07-26**, ladder green at **18 · 11 · 14 · 15 · 7**, game suite **99/99**. Re-run from scratch rather than copied out of the table — the rule in this repo is that a number in a README is evidence about one commit, and a results table doesn't fail when it goes stale, it just quietly stops being true. Which it did: this section used to read `14 · 9 · 12 · 13 · 7` and `84/84`, both true when written, both wrong the moment the wire gained a field and the ladder grew checks to cover it. Two rungs got bigger, and per our own rule that's the point — a gate that returns its old count after the contract changed never tested the change.
+**As of 2026-07-26**, ladder green at **18 · 11 · 14 · 15 · 7**, game suite **105/105**. Re-run from scratch rather than copied out of the table — the rule in this repo is that a number in a README is evidence about one commit, and a results table doesn't fail when it goes stale, it just quietly stops being true. Which it did: this section used to read `14 · 9 · 12 · 13 · 7` and `84/84`, both true when written, both wrong the moment the wire gained a field and the ladder grew checks to cover it. Two rungs got bigger, and per our own rule that's the point — a gate that returns its old count after the contract changed never tested the change.
 
 Fail-closed is demonstrated on *these* scripts, not assumed from an older run: inverting R1's box-reached-a-target predicate gives `ROUND 1 NOT MET — 13/14 checks passed` and exit 1, and I compared the checksum afterwards to be sure the file went back exactly as it was. Every rung also feeds its invariant suite a deliberately corrupted transition and requires it to complain, because a suite that's never been seen to fail is decoration.
 

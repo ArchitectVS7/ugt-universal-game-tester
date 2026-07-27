@@ -8,6 +8,14 @@ extends "res://tests/assertions.gd"
 ## Every parity case therefore runs the SAME fixture down two paths and
 ## compares player position, box positions and the PRD state dictionary.
 ##
+## The last six cases cover the WIN STATE, which is the front end's own
+## behaviour rather than a parity claim: the board's `all_levels_solved` freeze
+## is deliberate and tested elsewhere, and what these pin is that the freeze is
+## *visible* — entered exactly once, only on `all_levels_solved` (not on a
+## solved level), entered even when the setting move returns false, painted as
+## colour and geometry with no text node anywhere, persisting while frozen, and
+## cleared by a reload that the board then accepts moves on again.
+##
 ## DELIBERATELY NOT DONE HERE: no `InputEventKey` is synthesized, no
 ## `Input.parse_input_event()` / `Input.action_press()`, no window resizing and
 ## no `SceneTree` node adds. Headless Godot's root window is 64x64 and
@@ -43,7 +51,20 @@ const ONE_BOX := ["#####", "#@$.#", "#####"]
 
 ## 6x3 · player (1,1) · box (2,1) · target (4,1). Second level of the
 ## advance fixture — RIGHT pushes the box onto plain floor, not a solve.
+## `[ONE_BOX, NEXT_LEVEL]` + `[3, 3, 3]` is the shortest two-level FINISH:
+## step 1 solves level 1, step 2 lazily advances and pushes in level 2, step 3
+## solves the last level and sets `all_levels_solved`.
 const NEXT_LEVEL := ["######", "#@$ .#", "######"]
+
+## 4x3 · player (1,1) · one crate already standing on its only target at (2,1),
+## so the board is `is_solved()` the moment it loads. Used to reach `board.gd`'s
+## "last level was already solved at load time" branch, where the move that sets
+## `all_levels_solved` RETURNS FALSE.
+const PRE_SOLVED := ["####", "#@*#", "####"]
+
+## 7x3 · player (1,1) · crates (2,1) and (4,1) · targets (3,1) and (5,1). One
+## RIGHT parks crate 0 on a target while the level as a whole stays unsolved.
+const TWO_BOXES := ["#######", "#@$.$.#", "#######"]
 
 ## Every PRD action id, in order.
 const ALL_DIRECTIONS := [0, 1, 2, 3]
@@ -248,4 +269,150 @@ func test_handler_drives_a_level_advance() -> void:
 		assert_eq(_snapshot(main.board), _snapshot(reference), "advance step %d: same state" % step)
 
 	assert_eq(main.board.level_index, 1, "the handler really crossed into level 1")
+	main.free()
+
+
+## Drives the two-level fixture to its finish and asserts the win state after
+## EVERY step. The half that matters most is the middle: solving a level is not
+## winning the game, so `level_solved` must not enter the win state.
+func test_win_state_is_entered_only_on_all_levels_solved() -> void:
+	var main = _main([ONE_BOX, NEXT_LEVEL])
+	assert_eq(main.win_state_entries, 0, "no win state before a move")
+	assert_false(main.win_state_active, "no win state before a move")
+
+	assert_true(main._on_action_input(3), "step 1: the solving push in level 1")
+	var after_first: Dictionary = main.board.get_state()
+	assert_true(after_first["level_solved"], "step 1 solved level 1")
+	assert_false(after_first["all_levels_solved"], "but there is another level to play")
+	assert_eq(main.win_state_entries, 0, "a solved LEVEL is not the win state")
+	assert_false(main.win_state_active, "a solved LEVEL is not the win state")
+
+	assert_true(main._on_action_input(3), "step 2: the advance move, applied in level 2")
+	assert_eq(main.board.level_index, 1, "step 2 crossed into the last level")
+	assert_false(main.board.all_levels_solved, "level 2 is not solved yet")
+	assert_eq(main.win_state_entries, 0, "still no win state")
+	assert_false(main.win_state_active, "still no win state")
+
+	assert_true(main._on_action_input(3), "step 3: the solving push in the last level")
+	assert_true(main.board.all_levels_solved, "the game is finished")
+	assert_eq(main.win_state_entries, 1, "the win state was entered")
+	assert_true(main.win_state_active, "the win state is showing")
+	main.free()
+
+
+## The frozen board must not keep re-entering the win state. Every refused
+## action is checked on a whole-state snapshot as well as on the counter, so a
+## board that quietly changed while looking frozen is caught too.
+func test_win_state_is_entered_exactly_once() -> void:
+	var main = _main([ONE_BOX, NEXT_LEVEL])
+	for direction in [3, 3, 3]:
+		main._on_action_input(direction)
+	assert_true(main.board.all_levels_solved, "the fixture really finished")
+	var won := _snapshot(main.board)
+
+	for action in [0, 1, 2, 3, Main.NO_ACTION]:
+		assert_false(main._on_action_input(action), "action %d is refused on a won board" % action)
+		assert_eq(_snapshot(main.board), won, "action %d changed nothing" % action)
+		assert_eq(main.win_state_entries, 1, "action %d did not re-enter the win state" % action)
+		assert_true(main.win_state_active, "action %d: the win state persists" % action)
+	main.free()
+
+
+## The PRD's "a player can always retry" has to hold AFTER the game is won. The
+## un-freeze is proven by a move being accepted, not by reading a flag — and
+## re-solving must count a SECOND entry, which is what makes the "exactly once"
+## case above a real edge trigger rather than a value latched at 1.
+func test_reload_clears_the_win_state_and_un_freezes_the_board() -> void:
+	var main = _main([ONE_BOX, NEXT_LEVEL])
+	for direction in [3, 3, 3]:
+		main._on_action_input(direction)
+	assert_true(main.win_state_active, "the fixture really won")
+
+	assert_true(main._on_action_input(Board.ACTION_RELOAD), "reload is accepted")
+	assert_false(main.board.all_levels_solved, "reload cleared the frozen flag")
+	assert_false(main.win_state_active, "reload cleared the win state")
+	assert_eq(main.win_state_entries, 1, "leaving the win state is not an entry")
+	assert_eq(main.board.level_index, 1, "reload retries the LAST level, not the game")
+
+	assert_true(main._on_action_input(3), "the board accepts moves again")
+	assert_false(main.win_state_active, "one push is not a win")
+	assert_true(main._on_action_input(3), "the re-solving push")
+	assert_true(main.board.all_levels_solved, "the last level is solved again")
+	assert_eq(main.win_state_entries, 2, "re-winning enters the win state a second time")
+	assert_true(main.win_state_active, "and it is showing again")
+	main.free()
+
+
+## `board.gd`'s "last level was already solved at load time" branch sets
+## `all_levels_solved` and returns FALSE. The win state must still be entered —
+## it hangs off the board's flag, never off the handler's return value.
+func test_win_state_is_entered_on_a_refused_move_when_the_board_loads_solved() -> void:
+	var main = _main([PRE_SOLVED])
+	assert_true(main.board.is_solved(), "the fixture ships its crate on the target")
+	assert_false(main.board.all_levels_solved, "the flag is not set until a move asks")
+
+	assert_false(main._on_action_input(3), "board.gd refuses that move")
+	assert_true(main.board.all_levels_solved, "...and sets the finished flag on the way out")
+	assert_true(main.win_state_active, "the win state does not hang off the return value")
+	assert_eq(main.win_state_entries, 1, "entered exactly once")
+	main.free()
+
+
+## The win state as a HUMAN sees it — colour and geometry, no text anywhere. All
+## three signals are asserted on the winning move, asserted to PERSIST across a
+## frozen press (the "does not read as hung" half), and asserted to REVERT on a
+## reload.
+func test_view_paints_the_win_state_and_reverts_on_reload() -> void:
+	var main = _main([ONE_BOX, NEXT_LEVEL])
+	main.build_view()
+
+	assert_eq(main.backdrop_node.color, Main.COLOR_FLOOR, "idle backdrop")
+	assert_false(main.win_frame_node.visible, "no win frame before the win")
+	assert_eq(main.box_nodes[0].color, Main.COLOR_BOX, "idle crate colour")
+
+	# The frame is a real ring around the board, not a zero-size node that would
+	# make "visible" a meaningless assertion.
+	var inset := Vector2(Main.WIN_FRAME_THICKNESS, Main.WIN_FRAME_THICKNESS)
+	assert_eq(main.win_frame_node.position, -inset, "the frame starts outside the grid")
+	assert_eq(
+		main.win_frame_node.size,
+		main.backdrop_node.size + inset * 2.0,
+		"the frame is thicker than the board on every side"
+	)
+
+	# Step 2 crosses a level boundary, which REBUILDS the view — so every
+	# assertion below re-reads `main.<node>` rather than caching a reference.
+	for direction in [3, 3, 3]:
+		main._on_action_input(direction)
+	assert_true(main.board.all_levels_solved, "the fixture really finished")
+	assert_eq(main.backdrop_node.color, Main.COLOR_FLOOR_WON, "the won backdrop is painted")
+	assert_true(main.win_frame_node.visible, "the win frame is shown")
+	assert_eq(main.box_nodes[0].color, Main.COLOR_BOX_ON_TARGET, "the finished crate is marked")
+
+	assert_false(main._on_action_input(3), "the board is frozen")
+	assert_eq(main.backdrop_node.color, Main.COLOR_FLOOR_WON, "the won backdrop persists")
+	assert_true(main.win_frame_node.visible, "the win frame persists")
+	assert_eq(main.box_nodes[0].color, Main.COLOR_BOX_ON_TARGET, "the crate marking persists")
+
+	main._on_action_input(Board.ACTION_RELOAD)
+	assert_eq(main.backdrop_node.color, Main.COLOR_FLOOR, "reload reverted the backdrop")
+	assert_false(main.win_frame_node.visible, "reload hid the win frame")
+	assert_eq(main.box_nodes[0].color, Main.COLOR_BOX, "reload reverted the crate colour")
+	main.free()
+
+
+## A crate standing on a target is marked per-crate, off the board's own render —
+## not off the win state. Without this the human cannot see the game's objective
+## at all: the full-cell crate rect covers the target pip completely.
+func test_crate_colour_marks_a_crate_standing_on_a_target() -> void:
+	var main = _main([TWO_BOXES])
+	main.build_view()
+	assert_eq(main.box_nodes.size(), 2, "the fixture ships two crates")
+
+	assert_true(main._on_action_input(3), "the push happened")
+	assert_eq(main.board.boxes[0], Vector2i(3, 1), "crate 0 landed on the target at (3,1)")
+	assert_eq(main.box_nodes[1].color, Main.COLOR_BOX, "crate 1 is still on floor")
+	assert_eq(main.box_nodes[0].color, Main.COLOR_BOX_ON_TARGET, "crate 0 is marked as done")
+	assert_false(main.board.all_levels_solved, "one crate of two is not a win")
+	assert_false(main.win_frame_node.visible, "so there is no win frame")
 	main.free()

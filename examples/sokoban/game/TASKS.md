@@ -343,6 +343,45 @@ Scope boundary held: no reset key binding, HUD, undo,
 animation or sound.
 Orchestration: graphify=none — no `graphify-out/graph.json` in the game dir or in the git root `_UGT Universal Game Tester/` (both checked); the task is also self-contained (one script · attempts=1/4.
 
+**Follow-up (2026-07-26): the front end never read the win flag, so the game
+read as hung.** The delivery note above is left as written. What it did not
+cover, and no test asked about, is that `main.gd` contained no reference to
+`level_solved` or `all_levels_solved` at all. Two consequences a human hit and
+no green suite could see: a crate arriving on a target looked identical to a
+crate on floor (the full-cell crate rect covers the target pip entirely), and
+after the third level `board.gd`'s deliberate freeze produced no message and no
+visual change whatsoever — the correct end of the game was indistinguishable
+from a crash.
+
+Fixed as **colour and geometry, with no text node of any kind**: a crate on a
+target gets `COLOR_BOX_ON_TARGET`, and on `all_levels_solved` a frame appears
+around the board and the backdrop switches to `COLOR_FLOOR_WON`. Text was
+rejected on purpose — the rendered `grid` is this game's whole player-facing
+text channel (now a stated PRD constraint), so a `Label` here would show the
+human something the state snapshot does not carry. The freeze itself is
+**unchanged**: `board.gd` and its tests were not touched, `R` still clears the
+flag and the win state, and the board accepts moves again afterwards. The win
+flag is *read*, never recomputed, and crate colour comes off
+`board.render_rows()` — so this file still decides nothing about `Tile`,
+`is_solved()` or `boxes_on_target`.
+
+Six cases added to `tests/test_human_input.gd` (suite 99 → **105 passed, 0
+failed**, stderr 0 bytes, `godot4 --headless --path . --quit` still exit 0 with
+clean stderr, `tools/check_runner_reports_failure.sh` still exit 0): entered
+only on `all_levels_solved` and not on `level_solved`; entered exactly once
+across five refused actions, whole-state compared; a reload clears it, the
+board then *accepts* a move, and re-solving counts a second entry; entered even
+when the setting move returns **false** (the already-solved-at-load branch);
+the painted view asserted idle → won → persisting-while-frozen → reverted; and
+a crate on a target marked while the level is unsolved. Mutation-tested six
+ways, `main.gd` restored byte-identically each time (sha256 compared, never
+`git checkout`), against the 105/105 baseline: dropping the refresh call
+`99 passed, 6 failed`; keying on `is_solved()` instead of `all_levels_solved`
+`102 passed, 3 failed`; dropping the edge guard `104 passed, 1 failed`; wrapping
+the refresh in `if moved:` `104 passed, 1 failed`; painting only in the win
+direction `103 passed, 2 failed`; and keying crate colour on the win state
+`104 passed, 1 failed`.
+
 ---
 
 **Deliberately deferred:** undo/redo, level editor, more than 3 levels,
