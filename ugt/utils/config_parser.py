@@ -73,6 +73,27 @@ class UgtConfig:
                     f"the number of defined actions ({len(act['actions'])}). These must be equal."
                 )
 
+        # engine.idle_action — which action the verify tier steps when NO feature's
+        # precondition is met and the world has to be ticked forward. It defaults to 0
+        # because that was the hardcoded value before this key existed, but 0 is only
+        # right for games whose action 0 happens to advance something. A game whose
+        # action 0 is an inert no-op cannot be ticked at all, and every feature with a
+        # slow precondition then reports NOT_REACHED however large --max-turns is —
+        # measured on a day-loop game whose action 0 is a Wait that a feature assertion
+        # separately pins as inert (SpacerQuest T-1604a, finding F7). Validated here
+        # rather than at use, so a typo is a config error and not a silent fallback.
+        if "idle_action" in engine:
+            idle = engine["idle_action"]
+            if not isinstance(idle, int) or isinstance(idle, bool):
+                raise ConfigError(
+                    f"engine.idle_action must be an integer action id, got {idle!r}"
+                )
+            if not 0 <= idle < act["size"]:
+                raise ConfigError(
+                    f"engine.idle_action ({idle}) is outside the action space "
+                    f"[0, {act['size']})."
+                )
+
     @property
     def project_name(self):
         return self.data["project"]["name"]
@@ -89,6 +110,12 @@ class UgtConfig:
     @property
     def engine_reset_command(self):
         return self.data["engine"].get("reset_command")
+
+    @property
+    def engine_idle_action(self):
+        """The action id the verify tier steps to advance a game whose features are
+        all waiting on a precondition. Defaults to 0 (the pre-existing hardcode)."""
+        return self.data["engine"].get("idle_action", 0)
 
     @property
     def obs_shape(self):

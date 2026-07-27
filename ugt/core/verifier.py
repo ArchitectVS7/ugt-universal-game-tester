@@ -35,6 +35,7 @@ def verify_game(config, feature_map, max_turns=50, output_path=None):
     if output_path is None:
         output_path = os.path.join(results_dir, "coverage-report.json")
 
+    idle_action = config.engine_idle_action
     features = feature_map.features
     coverage = {f.id: "not_reached" for f in features}
     details = {}
@@ -71,11 +72,17 @@ def verify_game(config, feature_map, max_turns=50, output_path=None):
             tasks_this_turn.append(feature)
 
         if not tasks_this_turn:
-            # No preconditions met — step with action 0 (the conventional no-op/wait)
-            # to advance game state. Any game-specific advance logic belongs in the
-            # bridge, never here (M1: never reimplement game logic in the framework).
+            # No preconditions met — step the game's declared idle action to advance
+            # state. This was hardcoded to 0 on the assumption that action 0 is a
+            # conventional no-op/wait; the assumption is wrong in the direction that
+            # matters, because a no-op that changes NOTHING cannot tick a world
+            # forward, and every feature with a slow precondition then reports
+            # NOT_REACHED no matter how large max_turns is. Which action advances a
+            # given game is game knowledge, so it is declared in that game's config
+            # (engine.idle_action) rather than guessed here — M1 either way: the
+            # framework still contains no game-specific advance logic.
             try:
-                current_state, terminated, truncated, _ = adapter.step(0)
+                current_state, terminated, truncated, _ = adapter.step(idle_action)
                 if terminated or truncated:
                     current_state = adapter.reset()
             except Exception:
@@ -162,10 +169,19 @@ def verify_game(config, feature_map, max_turns=50, output_path=None):
     adapter.close()
     duration = round(time.time() - start_time, 1)
 
-    # Final status mapping: "running" → "not_reached" (interrupted), "not_reached" stays
+    # Final status mapping: "running" → "not_reached" (interrupted), "not_reached" stays.
+    #
+    # The guard is `fid not in details` — it fills in the features the run never
+    # resolved, and must NOT touch the ones it did. It used to read
+    # `coverage[fid] not in details`, comparing a STATUS STRING ("passed") against a
+    # dict keyed by FEATURE ID, so it was always true: every rich entry written above
+    # — before, after, delta, the failed-assertion list — was overwritten with a bare
+    # {"status": ...} on the way out. A whole run's evidence reached the report as
+    # nothing but a verdict. Found by a game repo reading its own coverage-report.json
+    # and finding 9 features and no deltas (SpacerQuest T-1604a, finding F6).
     status_map = {"passed": "PASSED", "failed": "FAILED", "not_reached": "NOT_REACHED", "running": "NOT_REACHED"}
     for fid in coverage:
-        if coverage[fid] not in details:
+        if fid not in details:
             mapped_status = status_map.get(coverage[fid], "NOT_REACHED")
             if mapped_status == "NOT_REACHED":
                 details[fid] = {

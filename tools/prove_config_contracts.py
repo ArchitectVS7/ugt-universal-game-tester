@@ -128,6 +128,16 @@ def main() -> int:
         check(cfg.obs_shape == 2 and len(cfg.obs_mappings) == 2, "obs shape + mappings")
         check(cfg.action_size == 2 and len(cfg.action_mappings) == 2, "action size + mappings")
         check(cfg.engine_reset_command is None, "absent optional reads None, not KeyError")
+        check(cfg.engine_idle_action == 0, "engine.idle_action defaults to 0 when undeclared",
+              "0 was the hardcoded value before the key existed; the default must preserve it")
+
+    print("\n  -- UgtConfig: engine.idle_action is read when declared --")
+    idle = copy.deepcopy(GOOD_CONFIG)
+    idle["engine"]["idle_action"] = 1
+    ok, c3 = load_config(idle)
+    check(ok, "a declared engine.idle_action loads", "" if ok else str(c3))
+    if ok:
+        check(c3.engine_idle_action == 1, "engine.idle_action reads the declared id")
 
     print("\n  -- UgtConfig: custom needs no entry (the documented exception) --")
     custom = copy.deepcopy(GOOD_CONFIG)
@@ -152,6 +162,12 @@ def main() -> int:
     red_config(lambda c: c["action_space"].__setitem__("type", "box"),  "action type not discrete", "discrete")
     red_config(lambda c: c["action_space"].__setitem__("size", None),   "action size not int", "integer")
     red_config(lambda c: c["action_space"].__setitem__("size", 5),      "size != len(actions)", "does not match")
+    # idle_action names an action the tier will actually STEP, so a wrong one is a
+    # silent no-op run rather than an error at use — it has to be rejected at load.
+    red_config(lambda c: c["engine"].__setitem__("idle_action", "wait"), "idle_action not an int", "idle_action")
+    red_config(lambda c: c["engine"].__setitem__("idle_action", True),   "idle_action is a bool", "idle_action")
+    red_config(lambda c: c["engine"].__setitem__("idle_action", 2),      "idle_action outside the action space", "outside the action space")
+    red_config(lambda c: c["engine"].__setitem__("idle_action", -1),     "idle_action negative", "outside the action space")
 
     print("\n  -- UgtConfig: file-level failures --")
     try:
