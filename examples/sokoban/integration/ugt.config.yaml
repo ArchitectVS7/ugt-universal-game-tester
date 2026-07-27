@@ -70,7 +70,8 @@ playtest:
   # hidden state. Every episode is the same three puzzles in the same order, so
   # episodes are replays by design and the effective sample size is 1 however
   # many are run. The LLM tier measures COMPETENCE here (solved / moves against
-  # the committed 73-move solution), never a rate. See ugt/core/seeding.py.
+  # the committed 73-move reference sequence), never a rate. See
+  # ugt/core/seeding.py.
   seeding: deterministic
   # `left` — the first move of level 1's committed solution, so the probe is
   # guaranteed to change the state rather than bounce off a wall (an inert probe
@@ -136,7 +137,7 @@ playtest:
   # The repeat guard counts consecutive IDENTICAL proposals regardless of whether
   # they changed the state, and at its default of 3 it hard-blocks the third one
   # and substitutes `wait`. But pushing a crate five cells along a row IS five
-  # consecutive `left`s, and the committed optimal solutions contain runs of
+  # consecutive `left`s, and the committed reference solutions contain runs of
   # 5 (level_02) and 6 (level_03) — so on the default config the pilot is
   # physically prevented from playing the shipped solution, and the override
   # burns budget on a `wait` that does not touch the game.

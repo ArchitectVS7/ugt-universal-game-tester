@@ -90,10 +90,13 @@ counts** — `boxes_on_target` alone cannot see one. Level advances and reloads
 change the board without being pushes, so both are excluded, and the count of what
 was excluded is printed next to the total.
 
-The moves-against-the-committed-73 ratio is **withheld unless `all_levels_solved`
-is true** (see Finding 11). Its denominator is the cost of FINISHING, so on a
-partial run it is not a worse score — it is not a score, and the block prints an
-explicit line saying so instead of a number.
+The moves-against-the-committed-reference ratio (73 moves) is **withheld unless
+`all_levels_solved` is true** (see Finding 11). Its denominator is the cost of
+FINISHING, so on a partial run it is not a worse score — it is not a score, and the
+block prints an explicit line saying so instead of a number. **73 is a reference, not
+an optimum** (Finding 14): nothing in this repo pins that it is the shortest possible
+solution, so the ratio says "37% more moves than one known-working sequence" and
+never "37% off the theoretical floor".
 
 **A paid run's budget is floored so that finishing is possible at all** (Finding 13).
 The floor is `2 ×` the committed 73-move reference — **146 actions** — derived from
@@ -132,7 +135,9 @@ control too: a synthetic level set that moves the reference and the floor with i
 case a hard-coded 73 cannot pass), a truncated `solutions.json` failing closed rather
 than yielding a floor of 0, both sides of the refusal boundary plus the fact that it is
 paid-only, the provider-dependent defaults, and §B P12's ceiling still refusing 101 on
-ollama. It needs no game and no model.
+ollama. And it is the **denominator's own name**'s control: that no line the tier
+prints — on the scored path or the refused one — calls the 73-move reference an
+optimum. It needs no game and no model.
 
 ### The §B pre-flight (2026-07-26)
 
@@ -369,7 +374,11 @@ a framework item rather than patched here, because it belongs to `ugt/core/` and
 wants its own negative control.
 
 **11. The scorer printed `1.37x optimum` for a run that solved nothing. FIXED.**
-`report_competence` printed the moves/optimum ratio unconditionally, so the real
+That label was wrong twice over — it printed on a partial run, *and* it called the
+denominator an optimum, which nothing here pins; the second half was not caught
+until Finding 14. The quoted strings below are what the code actually printed at
+that commit and are left as they were.
+`report_competence` printed the moves/reference ratio unconditionally, so the real
 100-action stage-1 report — **0 of 3 levels solved, 0 crates moved** — was scored
 `100 moves (1.37x optimum)`. That reads as "37% off the pace", i.e. as a pilot
 that played competently and finished a bit slowly. The true reading is that the
@@ -378,7 +387,7 @@ game was never played.
 The ratio is not a lenient measure of a partial run; it is undefined for one. Its
 denominator is the cost of FINISHING all three levels, and a run that finished
 none has no numerator to compare against it. Worse than being wrong, it was
-*quotable-looking* — a bare multiple of a committed optimum, produced by the one
+*quotable-looking* — a bare multiple of a committed reference, produced by the one
 function whose entire stated job is to say what a run is worth, in exactly the
 tier where §B P12 forbids quoting stage-1 numbers at all.
 
@@ -535,6 +544,69 @@ already treats row 3 that way), and the three recorded stage-1 rows are unaffect
 because the stage-1 default and ceiling are unchanged. The generalisable half — derive
 the pilot's action budget from the game's own committed reference, and refuse a paid run
 that cannot reach the win condition — belongs in `LESSONS.md` §B and is not written
+here.
+
+**14. The scoring denominator was called an "optimum", and nothing anywhere proves
+it is one. FIXED.** There is **no solver in this repo** — no BFS, no minimality
+search, nothing that could establish a lower bound on any level. What
+`tests/test_shipped_levels.gd` actually pins about each committed sequence is three
+properties, and minimality is not among them: it **solves** its level, it is
+**unpadded** (`moves_taken == actions.size()`, so no no-op can hide in it), and it
+does **not solve early** (`is_solved()` is asserted false before the final action).
+A shorter solution may well exist for all three levels; nobody has looked.
+
+The word travelled. It started in `game/TASKS.md`'s T-005 delivery note ("every
+committed sequence is BFS-**optimal**"), reached both READMEs, and ended up as the
+printed **label of the ratio's denominator** — `optimum for all 3 levels: 73 moves`
+and `moves/optimum ratio: 1.37x`. That is the worst place for it to land. "1.37×
+optimum" asserts a proven floor and reads as a verdict on two separate things at
+once: that the pilot played 37% off the best possible line, and that 73 is what the
+level design costs. "1.37× the committed reference" claims only what is true — 37%
+more moves than one sequence known to work, which may itself be beatable. Finding 11
+caught half of this (the ratio printing on a partial run) and left the other half
+sitting in the label it rewrote.
+
+Renamed to *the committed reference* in the scorer's own strings, the P11 pre-flight
+message, both config comments and both READMEs; `game/TASKS.md`'s claim is corrected
+in place with a dated correction line rather than quietly reworded. **No logic, no
+threshold, no withholding rule and no gate moved** — this is vocabulary. The one
+structural improvement that came with it: `competence_lines` now calls
+`reference_moves()` instead of re-summing the sequences inline, so the scoreline and
+the budget floor share a single derivation (and inherit its fail-closed behaviour on
+a truncated `solutions.json`, which the inline `sum` did not have).
+
+The new control is a **vocabulary** control, case W, and it is what makes the rename
+permanent rather than a one-time edit: for a finished run *and* for a walk, no line
+the tier prints — competence block or `CHANNEL PROVEN / GAME UNMEASURED` banner —
+may match `/optim/i`. The block also says out loud what the number is not: *"the
+committed levels/solutions.json sequences — a known-working reference, not a proven
+minimum; no solver exists here"*. And case A's old guard, `"x optimum" not in text`,
+was **coupled to the very word being renamed** — it would have gone on passing while
+guarding nothing. It now guards the *shape* of a ratio, `\d+\.\d+x`, which no rename
+can defeat.
+
+Proven able to fail, three ways, each mutation applied by hand and the file restored
+byte-identically (sha256 compared before and after, never `git checkout`), against a
+58-check green baseline:
+
+* putting the old `optimum for all 3 levels` label back turns **both** W rows red
+  (`NOT MET (2 failed)`, exit 1) while every `_RATIO`-keyed row stays green — which
+  is exactly the point: those rows follow the label wherever it goes and cannot see
+  this defect;
+* making only the **refused** path claim it (adding "undefined against the optimum"
+  to the `NOT REPORTED` line) turns the walk's W row red alone (`NOT MET (1 failed)`),
+  so the banner path is covered and W is not one-sided;
+* dropping the `if finished and moves and reference:` condition, i.e. reproducing
+  Finding 11's original defect, turns case A's hardened row red via the new
+  `\d+\.\d+x` regex — along with A's refusal row and G — `NOT MET (3 failed)`. The
+  printed multiple on the walk fixture is `1.37x` again, the original figure.
+
+**P8: no boundary.** Nothing here touches `_build_prompt`, `redact_state_fields`, a
+guard threshold or a budget; like Findings 9, 11, 12 and 13 it changes only what is
+**REPORTED**, so the three stage-1 rows stay comparable on exactly the terms they
+already were and no run needs redoing. The generalisable half — *a scoring
+denominator must name what is actually pinned about it, and a control keyed on a
+label cannot outlive a rename* — is a `LESSONS.md` candidate and is not promoted
 here.
 
 ## Corrections to this harness

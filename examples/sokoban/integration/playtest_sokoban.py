@@ -36,7 +36,7 @@ randomness at all — three fixed levels in a fixed order — so every episode i
 replay and the honest sample size is 1 however many are run
 (`playtest.seeding: deterministic`, proven against the live game before the run
 starts). The scoreline is `levels_solved: N/3` and `crates_moved: N`, both
-derived from the action log. The moves-against-the-committed-optimum ratio is
+derived from the action log. The moves-against-the-committed-reference ratio is
 **withheld unless every level was solved**: its denominator is the cost of
 FINISHING, so on a partial run it is not a worse score, it is not a score.
 
@@ -59,6 +59,7 @@ import ast
 import itertools
 import json
 import os
+import re
 import sys
 import tempfile
 
@@ -241,7 +242,7 @@ def assert_repeat_guard_allows_real_play(config: UgtConfig) -> None:
     if threshold <= longest:
         raise SystemExit(
             f"P11 VIOLATION — playtest.repeat_block_threshold is {threshold}, but the "
-            f"committed optimal solution contains a run of {longest} identical moves: "
+            f"committed reference solution contains a run of {longest} identical moves: "
             f"{where}. The guard would hard-block the pilot mid-push and force `wait`, "
             f"so the shipped solution is unplayable and the measurement is of a "
             f"different game.\n    Raise repeat_block_threshold above {longest}."
@@ -551,7 +552,12 @@ def competence_lines(report: dict) -> list:
     """Build the competence block. Pure — returns lines, prints nothing."""
     solutions = _committed_solutions()
     total = len(solutions)
-    optimum = sum(len(v) for v in solutions.values())
+    # The committed REFERENCE, not a proven optimum: nothing in this repo pins
+    # minimality (there is no solver) — `tests/test_shipped_levels.gd` pins that
+    # each sequence solves, is unpadded and does not win early. One derivation
+    # for the whole file, so the scoreline and the budget floor cannot drift, and
+    # a truncated solutions.json fails closed instead of scoring against 0.
+    reference = reference_moves(solutions)
 
     crates = count_crate_moves(report)
     solved = count_levels_solved(report, total)
@@ -581,19 +587,21 @@ def competence_lines(report: dict) -> list:
     finished = bool(final.get("all_levels_solved"))
 
     out.append("")
-    out.append(f"  optimum for all {total} levels: {optimum} moves")
+    out.append(f"  reference for all {total} levels: {reference} moves")
+    out.append("      (the committed levels/solutions.json sequences — a known-working")
+    out.append("       reference, not a proven minimum; no solver exists here)")
     if moves is not None:
         out.append(f"  pilot's move count at the end : {moves}")
-    if finished and moves and optimum:
-        out.append(f"  moves/optimum ratio: {moves / optimum:.2f}x  "
-                   f"({moves} moves against the committed {optimum})")
+    if finished and moves and reference:
+        out.append(f"  moves/reference ratio: {moves / reference:.2f}x  "
+                   f"({moves} moves against the committed {reference})")
     else:
         why = ("no move count was recorded" if moves is None
                else "this run never finished")
-        out.append("  moves/optimum ratio: NOT REPORTED — undefined for a partial run.")
+        out.append("  moves/reference ratio: NOT REPORTED — undefined for a partial run.")
         out.append(f"      all_levels_solved is {finished}; {solved} of {total} levels "
                    f"solved, {crates['moved']} crates moved.")
-        out.append(f"      The denominator ({optimum} moves) is the cost of FINISHING and "
+        out.append(f"      The denominator ({reference} moves) is the cost of FINISHING and "
                    f"{why},")
         out.append("      so a ratio would read as 'a little off the pace' when the true")
         out.append("      reading is 'the game was never played'.")
@@ -967,7 +975,7 @@ def _fixture_malformed() -> dict:
     return _report(log, 1)
 
 
-_RATIO = "moves/optimum ratio:"
+_RATIO = "moves/reference ratio:"
 
 
 def prove_scoring() -> int:
@@ -976,7 +984,7 @@ def prove_scoring() -> int:
     demo."""
     solutions = _committed_solutions()
     total = len(solutions)
-    optimum = sum(len(v) for v in solutions.values())
+    reference = reference_moves(solutions)
     failures = 0
 
     def check(name, ok, detail):
@@ -996,8 +1004,12 @@ def prove_scoring() -> int:
           f"{count_levels_solved(rep, total)}/{total}")
     check("A walk: crates_moved 0", count_crate_moves(rep)["moved"] == 0,
           f"{count_crate_moves(rep)}")
+    # The guard is on the SHAPE of a ratio, not on the word next to it: a
+    # substring check like `"x optimum" not in text` stops guarding anything the
+    # moment the label is renamed, which is silent and is exactly how the 1.37x
+    # survived. `\d+\.\d+x` catches any multiple however it is labelled.
     check("A walk: no ratio printed",
-          "x optimum" not in text and f"{_RATIO} 1." not in text
+          re.search(r"\d+\.\d+x", text) is None and f"{_RATIO} 1." not in text
           and "1.37x" not in text,
           "no 'Nx' figure anywhere in the block")
     check("A walk: refusal is explicit", "NOT REPORTED" in text,
@@ -1038,8 +1050,8 @@ def prove_scoring() -> int:
     check("E all solved: levels_solved 3", count_levels_solved(rep, total) == total,
           f"{count_levels_solved(rep, total)}/{total}")
     check("E all solved: ratio printed",
-          f"{_RATIO} {moves / optimum:.2f}x" in text and "NOT REPORTED" not in text,
-          f"expected {moves / optimum:.2f}x for {moves} moves against {optimum}")
+          f"{_RATIO} {moves / reference:.2f}x" in text and "NOT REPORTED" not in text,
+          f"expected {moves / reference:.2f}x for {moves} moves against {reference}")
 
     # G — the log-only path, and a partial run WITH real progress still gets no
     # ratio. Withholding must key on all_levels_solved, not on "achieved nothing".
@@ -1177,7 +1189,7 @@ def prove_scoring() -> int:
     moves = rep["final_state"]["moves_taken"]
     check("P a finished run is scored", code == 0, f"exit {code}")
     check("P a finished run prints the competence block",
-          _COMP in text and f"{_RATIO} {moves / optimum:.2f}x" in text
+          _COMP in text and f"{_RATIO} {moves / reference:.2f}x" in text
           and _BANNER not in text, "scoreline and ratio, no banner")
 
     # Q/R — the two sources are made to argue, in both directions.
@@ -1292,6 +1304,27 @@ def prove_scoring() -> int:
         check("V the ceiling itself is allowed", True, f"{STAGE1_CEILING} actions")
     except SystemExit as exc:
         check("V the ceiling itself is allowed", False, f"refused: {exc}")
+
+    # ── The scoring denominator's own name ───────────────────────────────────
+    # W — 73 is the committed REFERENCE, not a proven optimum. No solver exists
+    # anywhere in this repo: `tests/test_shipped_levels.gd` pins that each
+    # committed sequence SOLVES its level, is UNPADDED (`moves_taken ==
+    # actions.size()`) and does NOT solve early — three properties, none of them
+    # minimality. So no line this tier prints may claim otherwise, on the scored
+    # path or on the refused one. This is a vocabulary control because the word
+    # is what leaked: it started in a delivery note, reached two READMEs, and
+    # ended up as the LABEL of the denominator, where it reads as a quotable
+    # verdict on both the pilot's play and the level design.
+    _CLAIM = re.compile(r"optim", re.I)
+    for label, fixture in (("a finished run", _fixture_all_solved),
+                           ("a walk", _fixture_walk)):
+        rep = fixture()
+        text = "\n".join(competence_lines(rep) + core_interaction_verdict(rep)[1])
+        hit = _CLAIM.search(text)
+        check(f"W nothing printed for {label} claims optimality",
+              hit is None,
+              "no 'optim…' anywhere in the scoreline or the banner" if hit is None
+              else f"printed {text[max(0, hit.start() - 40):hit.end() + 40]!r}")
 
     print(f"\nPROVE SCORING — "
           f"{'MET' if not failures else f'NOT MET ({failures} failed)'}")

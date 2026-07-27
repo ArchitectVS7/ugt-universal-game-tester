@@ -228,9 +228,10 @@ or a wrong solution fails *this* task's gate, not a later task's.
 1→2→3 and grid area 35→63→88, both strictly increasing per the PRD — plus
 `levels/solutions.json`, a flat `{"level_01": [2,0,2,0,3,3], ...}` map of PRD
 action ids with sequences of 6 / 23 / 44 moves (73 total). Every committed
-sequence is BFS-**optimal**, contains zero no-op actions, and does not solve
-its level before its own final action; the tests pin all three properties, so
-a padded or wrong sequence cannot pass. `tests/test_shipped_levels.gd` adds 10
+sequence **solves its level**, contains zero no-op actions
+(`moves_taken == actions.size()`), and does not solve it before its own final
+action; the tests pin those three properties, so a padded or wrong sequence
+cannot pass. `tests/test_shipped_levels.gd` adds 10
 cases (suite 37 → 47 passed, 0 failed): the solutions file parses to exactly
 the three shipped keys with whole-number ids in 0..3, `board.gd`'s
 `DEFAULT_LEVEL_PATHS` really are these files, each level loads through T-003's
@@ -262,6 +263,12 @@ still exits 0, and `levels/.gitkeep` was removed now that the directory holds
 real content. Scope boundary held: no human input handling, and
 `scripts/board.gd` / `scripts/level.gd` were not touched — T-006 owns those.
 Orchestration: graphify=none — no `graphify-out/graph.json` in the game dir or the git root (`_UGT Universal Game Tester/`), both checked; the task is also self-contained (3 data files · attempts=1/4.
+**Correction (2026-07-26, integration T-004):** this entry originally called the
+committed sequences BFS-**optimal**. Nothing in this repo pins that — there is
+no solver, and `tests/test_shipped_levels.gd` asserts solves / unpadded /
+not-solved-early only. The 73 moves are the committed **reference**, not a
+proven minimum; a shorter solution may exist for any of the three levels. See
+the integration findings log, Finding 14.
 
 ## M3 — Front end
 
