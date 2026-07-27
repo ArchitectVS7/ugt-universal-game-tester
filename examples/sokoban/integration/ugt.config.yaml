@@ -150,8 +150,8 @@ playtest:
   repeat_block_threshold: 8
 
   # ── Guide budget (P3) ────────────────────────────────────────────────────
-  # Measured, not guessed: strategy-guide.md is 4,422 CHARS against a default
-  # budget of 2,000. (`wc -c` says 4,442 — it counts bytes, and the guide has em
+  # Measured, not guessed: strategy-guide.md is 4,682 CHARS against a default
+  # budget of 2,000. (`wc -c` says 4,704 — it counts bytes, and the guide has em
   # dashes. The budget is applied to `len(str)`, so the char figure is the one
   # that matters; playtest_sokoban.py measures it the same way the loop does
   # rather than shelling out to `wc`.)

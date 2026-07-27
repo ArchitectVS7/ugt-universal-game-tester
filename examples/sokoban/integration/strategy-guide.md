@@ -24,6 +24,11 @@ $   a crate that is NOT yet on a target
 Row 0 is the top line; column 0 is the leftmost character. `up` decreases the
 row, `down` increases it, `left` decreases the column, `right` increases it.
 
+Your own position arrives as two numbers in that same frame: **`player_x` is the
+column** and **`player_y` is the row.** Both count from zero, on the board
+exactly as drawn above — so the character in row `player_y`, column `player_x`
+is your own `@` or `+`.
+
 Count the `$` and the `.` before you move. Every `$` needs to reach a `.`, and
 the number of each is always equal.
 

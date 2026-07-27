@@ -151,7 +151,9 @@ plumbing carries what a player sees. The plumbing is fine. The board arrives, in
 the panel a player looks at, correctly aligned.
 
 The model, though, is out of its depth, and the *shape* of how it fails is the
-useful bit. Over thirty moves it talked about crates sixty-seven times, about
+useful bit. Every number in the next two paragraphs is from before the fix at the
+end of this section, and can't be compared with anything run after it. Over thirty
+moves it talked about crates sixty-seven times, about
 pushing thirty times, about targets thirty-three times — it clearly read the
 briefing and understood the game. It moved a crate **zero times**, on a level you
 can finish in six moves. And when it stated where things were: its own position,
@@ -170,6 +172,23 @@ reader can count the way a person points. I filed both instead of picking, becau
 the evidence that would decide it — does the error rate actually drop — needs a
 model that can localise at all, and that's the paid run. Choosing now would bake my
 guess into the instrument and then measure it.
+
+**And then, framing it as a choice between two fixes, I walked straight past a
+third one that costs nothing and isn't a choice at all.** Both of those assume the
+model knows what the two numbers it's handed *mean*. It didn't. The briefing spells
+out that row 0 is the top line and column 0 is the leftmost character — and then
+never says which of `player_x` and `player_y` is the row. I'd written both halves of
+that sentence and never noticed the gap between them, and the reason it stayed
+invisible is almost funny: level 1 starts the player at **(3, 3)**, where both
+readings give the same cell. The same coordinate had already hidden a bug in my own
+F3 check earlier in this file. A start position that's symmetric under the mistake
+is a start position that can't show you the mistake.
+
+One paragraph in the guide, and it doesn't decide either of the two filed
+candidates — they're both still open and both still want the paid run. What it does
+mean is that everything above it is now behind a line: the model that produced those
+three runs was guessing at the frame, so those numbers can't be compared with
+anything played after the guide told it.
 
 ### Small ones, each of which cost a red run
 

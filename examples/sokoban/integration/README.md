@@ -156,12 +156,12 @@ Run before spending anything, per P12. Everything below was free.
 |---|---|---|
 | P1 | Identities, not handles | **PASS.** Actions are `up`/`down`/`left`/`right`/`reload`, never ids. State names are plain (`boxes_on_target`, not `bot`). No room-code equivalent exists — the board is the world |
 | P2 | Adapter passes through every PUBLIC field | **PASS, and the channel had to be built.** This game has NO prose: `main.tscn` is ColorRects with no Label, no font, no message line. So the board IS the entire player-facing text channel, and `GodotTcpAdapter.get_terminal_text()` now carries it by joining the very rows `board.gd::render_rows()` draws for the human. Asserted live in both directions — a board arrives, AND it changes when the game changes (a channel serving a stale screen forever would pass the first check and is worse than an empty one, because it looks right). **Still true after the win state was added** (Finding 15): it is colour and geometry — a frame, a backdrop change, a crate-on-target colour — with **no text node of any kind**, precisely so the channel did not have to grow. The pilot already had that information as `level_solved` / `all_levels_solved` and as `*` in the rendered board, so nothing was added to the wire and this verdict stands unchanged. Zero prose is now a stated `PRD.md` constraint rather than an accident of the scene, which is what keeps this row true against a future edit |
-| P3 | Truncation is silent starvation | **WOULD HAVE FAILED — FIXED.** The guide is 4,422 chars against the 2,000 default. The cut lands from "The one rule that matters" onward, i.e. every rule that creates the skill. Budget set to 6,000 and `assert_guide_fits` fails the run before any model is contacted |
+| P3 | Truncation is silent starvation | **WOULD HAVE FAILED — FIXED.** The guide is 4,682 chars against the 2,000 default. The cut lands from "The one rule that matters" onward, i.e. every rule that creates the skill. Budget set to 6,000 and `assert_guide_fits` fails the run before any model is contacted |
 | P4 | Action channel sends what the LLM thinks | **PASS.** `action_id` mode maps name → id 1:1; an unknown name is dropped, never coerced to a neighbouring id. The truncation salvage added in Finding 7 keeps that property — it refuses to salvage a name the config does not declare |
 | P5 | Prompt must not leak what the client hides | **WAS LEAKING — CLOSED, and the audit ran the other way too.** There is no HUD at all here, so every field had to be justified rather than passed through. Six of eight are derivable by looking at the board. Two are redacted: `moves_taken` (a score the game keeps and shows nobody — Finding 6 — and the exact number this tier scores against) and `grid` (not hidden, *moved* to the Terminal panel where it renders aligned instead of JSON-quoted). Verified against a **rendered prompt**, not against the config. **One asymmetry ran the OTHER way and is now closed on the human side** (Finding 15): the pilot could see `*` in the board and `all_levels_solved` in its state block, and the player at the keyboard could see neither — a crate on a target was painted like a crate on floor, and the finished game looked hung. Fixed in the game as colour, so **nothing entered or left `redact_state_fields`** and this row's disposition is unchanged. P5 is a two-way audit: "the prompt must not leak what the client hides" has a mirror, "the client must not hide what the prompt is given" |
 | P6 | Guide teaches the RULES that create skill | **PASS.** Push-not-pull and its consequences: why a wall-flush crate can only slide, why a corner is permanent, why finishing a crate early can wall you off, and that reload is the correct move rather than a failure. No solution sequences — teaching the moves would measure recall |
-| P7 | Competence from the reasoning, not the exit code | **RUN — the channel is proven and the local model is below the floor.** Quantified rather than sensed: across 160 actions over three runs the pilot moved a crate **0 times** on a first level solvable in 6 moves (instrument-derived from the boards since Finding 11, not counted by hand), and of the crate positions it stated out loud only ~40% matched the board (9/17, 9/21, 41/59 right/wrong). It is engaged with the right concepts (`crate` 67×, `push` 30×, `target` 33× in 30 actions) and cannot reliably localise a glyph in a 7×5 grid. This is NOT P12's ambiguous-silence case: a specific wrong belief, stated out loud, is diagnosable — see Finding 8 |
-| P8 | Never pool across an information fix | **Boundaries declared** — see the run table. Row 1 → 2 crosses the Finding 7 fix and is a before/after pair, never a trend. Findings 9 and 11 are *reporting* fixes that never touched a prompt, so neither creates a behavioural boundary — the three rows stay comparable across both |
+| P7 | Competence from the reasoning, not the exit code | **RUN — the channel is proven and the local model is below the floor.** Quantified rather than sensed: across 160 actions over three runs the pilot moved a crate **0 times** on a first level solvable in 6 moves (instrument-derived from the boards since Finding 11, not counted by hand), and of the crate positions it stated out loud only ~40% matched the board (9/17, 9/21, 41/59 right/wrong). It is engaged with the right concepts (`crate` 67×, `push` 30×, `target` 33× in 30 actions) and cannot reliably localise a glyph in a 7×5 grid. This is NOT P12's ambiguous-silence case: a specific wrong belief, stated out loud, is diagnosable — see Finding 8. **Every figure in this row is PRE-T-008** (160 actions, 0 crates, and all three localisation counts) and sits behind the P8 boundary Finding 16 declares — the localisation question has to be re-measured after it, not continued from here |
+| P8 | Never pool across an information fix | **Boundaries declared** — see the run table. Row 1 → 2 crosses the Finding 7 fix and is a before/after pair, never a trend. Findings 9 and 11 are *reporting* fixes that never touched a prompt, so neither creates a behavioural boundary — the three rows stay comparable across both. **Finding 16 (T-008) is a real information fix and does create one:** the guide is part of the prompt, and it now names which of `player_x`/`player_y` is the column and which is the row. **The three stage-1 rows are not poolable with anything run after that commit**, and Finding 8's localisation-error-rate question must be measured on post-boundary runs only |
 | P9/P13 | Episodes: samples or replays? | **Declared `deterministic` and probed live** before every run: two resets replay identically over 4 steps, and the probe (`left`, level 1's first committed move) really moved the state, so "identical" is not vacuous |
 | P10 | Pilot needs memory, not just state | **Configured** — `history_window: 12`, roughly one crate's worth of work including the walking. The default 5 forgets the plan halfway through executing it |
 | P11 | A prompt guard is part of the game | **WOULD HAVE MADE THE GAME UNPLAYABLE — FIXED.** The repeat guard blocks the 3rd identical proposal at its default. Pushing a crate five cells along a row *is* five consecutive `left`s, and the committed solutions contain runs of 5 and 6. Raised to 8, and `assert_repeat_guard_allows_real_play` derives the bound from `solutions.json` so authoring a longer push run re-checks it automatically |
@@ -201,6 +201,9 @@ run summary had no field that said so.** All four show in the log as
 information fix, so no number may be pooled across it; row 3 additionally changes
 the budget, so it answers "given a fair budget" rather than continuing row 2. And
 per P12 no stage-1 figure is quotable at all, whichever row it comes from.
+**All three rows additionally predate Finding 16's coordinate-frame sentence**, so
+they are not comparable *forward* across it either: every one of them was played by
+a pilot that had to guess whether `player_x` was the row or the column.
 
 **What stage 1 established, which is its whole job:** the pilot can see the game
 (a real board, aligned, in the panel a player looks at), acts on it legally, and
@@ -363,6 +366,15 @@ Not chosen here, on purpose. Which one is right is a question about the
 localisation error rate drop — has to come from a model that can localise at all,
 i.e. stage 2. Guessing now would bake a choice into the tier and then measure it
 (`LESSONS.md` §D).
+
+**This entry framed the problem as a choice between two instrument changes, and in
+doing so it missed a free third thing that is not a choice at all.** Both candidates
+above assume the pilot at least knows what the two numbers it is handed *mean*. It
+did not: the briefing defined rows and columns and never said which of `player_x` /
+`player_y` was which. That is **Finding 16**, and it is a defect rather than a
+trade-off, so it was fixed outright. It does **not** settle Finding 8 — both
+candidates remain FILED and still need a paid run — but it does mean the error-rate
+evidence this entry is waiting for cannot come from a pre-Finding-16 run.
 
 **9. UGT core: a redacted field could be recorded as something the pilot "failed
 to predict". FIXED.** `_unexpected_delta_fields` compared the raw state delta
@@ -756,6 +768,84 @@ Two things worth separating, because they are the reason this sat green for so l
 `redact_state_fields`, no guard, no budget, and no wire field. The bridge front end
 owns its own `Board` and never calls `main.gd`, so the three stage-1 rows stay
 comparable and no run needs redoing. No stage-1 figure is quoted here.
+
+**16. The briefing defined rows and columns, handed the pilot two numbers, and
+never said which was which. FIXED, and it is the cheapest thing in this file.**
+`strategy-guide.md` told the pilot "row 0 is the top line; column 0 is the
+leftmost character" and how each direction moves through that frame. The state
+block hands it `player_x` and `player_y`. **Nothing in the guide, in
+`ugt.config.yaml`, or in the game's `PRD.md` bound one to the other** — so
+"`player_x: 3, player_y: 2`" was two plausible positions, and the pilot had to
+pick one and hope.
+
+**Why it sat invisible through the whole §B audit and three recorded runs:**
+level 1 starts the player at **(3, 3)**, which is frame-symmetric — both readings
+name the same cell. No trace, no invariant and no careful reader can tell them
+apart from the opening board. That exact coincidence has burned this harness once
+already, and for the same reason: F3 probed for "any direction that is a no-op"
+and level 1's start has a wall directly *below*, so it silently re-tested F1 (see
+"Corrections to this harness"). A start cell that is symmetric under the bug is a
+start cell that hides it.
+
+The evidence is in the recorded stage-1 traces, which mix frames *inside a single
+sentence*: "the crate is at (1, 2) and the target is at (1, 4)". On level 1's
+board the crate `$` is at column 2 / row 2 and the target `.` is at column 4 /
+row 1 — so the **target** is stated row-first, and the crate is stated in a way
+that is neither. A pilot that had one frame would at least be consistently wrong.
+No rate is derived from that here: stage-1 figures are not quotable (P12), and the
+localisation counts in the P7 row now sit behind this finding's boundary anyway.
+
+**The fix is one paragraph in "What you can see"**: `player_x` is the column,
+`player_y` is the row, both 0-based, in the same frame as the board drawn above,
+so the character at row `player_y` / column `player_x` is the pilot's own `@` or
+`+`. The guide is now **4,682 chars** (`wc -c`: 4,704 bytes) against an unchanged
+`guide_char_budget: 6000`, and `assert_guide_fits` is green — re-measured on this
+commit, not carried forward.
+
+**Deliberately nothing else was added.** In particular the guide still does not
+tell the pilot that crates and targets have no coordinates and must be read off
+the board — that is half of Finding 8's second candidate, and folding it in would
+confound the measurement Finding 8 is waiting for. This commit's information
+change is exactly "the frame was named", so the boundary below means one thing.
+
+**No new check, on purpose.** The claim the guide now makes is precisely the one
+`invariants.py::grid_matches_scalar_state` already asserts on **every** transition
+in R1, R2, R3 *and* inside the LLM loop — the `@`/`+` cell found by enumerating
+`grid` as rows-then-characters must equal `(player_x, player_y)`. A second
+assertion saying so would be the private duplicate that suite exists to prevent,
+and a `"player_x" in guide` grep would be a green proving nothing. **What the
+guide states, the wire cannot silently contradict.**
+
+Proven able to fail, and the interesting part is *when*: swapping that comparison
+to `[(player_y, player_x)]` gives `ROUND 1 NOT MET — 13/14 checks passed`, exit
+**1**, with 3 violations across 15 commands — and the file was restored
+byte-identically (md5 compared before and after, never `git checkout`), R1 back to
+14/14. The mutation is **silent on the opening state**: fed level 1's start board
+with `(3, 3)`, the swapped predicate returns `None`. It first goes red on the
+after-state of the *first move*, `(3, 2)`. So the guard does bite — but only once
+the player leaves the diagonal, which is the same reason the defect survived the
+audit. The P3 budget guard was mutation-tested at the new length too: setting
+`guide_char_budget: 4681` gives `P3 VIOLATION — strategy-guide.md is 4682 chars`
+and a non-zero exit before any model is contacted, restored to 6000 afterwards.
+
+**Route: both repos, and the game half was the worse of the two.** The harness
+half is the guide sentence. The game half is that `PRD.md`'s "Game state" snippet
+— the one artifact a reader would consult to settle the frame — was itself
+ambiguous *and* impossible: it printed `"player_x": 3, "player_y": 2` beside
+`"grid": ["#####", "#@$.#", "#####"]`, whose `@` is at row 1, column 1. Under
+(x = column, y = row) cell (3, 2) is a wall; under the swapped reading row 3 does
+not exist. It also claimed `boxes_total: 2` for a grid drawing one box. Fixed
+game-side: the snippet is now internally consistent, and a clause under it states
+`grid[player_y][player_x]` is the player's own glyph and cites `render_rows()`'s
+outer-`y`/inner-`x` loop as the reason. Documentation only — no code, no test
+count, and nothing the pilot receives.
+
+**P8: BOUNDARY.** This one is an *information* fix, unlike Findings 9, 11, 12, 13,
+14 and 15: the guide is part of the prompt, so the pilot now receives something it
+did not before. **The three recorded stage-1 rows are not poolable with anything
+run after this commit**, in either direction, and Finding 8's error-rate question
+must be answered from post-boundary runs only. Nothing about what is *recorded*
+changed, and no ladder rung, invariant, adapter, redaction, guard or budget moved.
 
 ## Corrections to this harness
 
