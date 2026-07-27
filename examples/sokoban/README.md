@@ -190,6 +190,41 @@ mean is that everything above it is now behind a line: the model that produced t
 three runs was guessing at the frame, so those numbers can't be compared with
 anything played after the guide told it.
 
+**Then I looked at what the model could remember, and found a fourth thing — worse
+than the third, and entirely my fault.** The tester shows the model its last twelve
+moves as "action → what changed". I'd hidden the raw board from the state block for
+a plain economy reason: the board is already in the panel above, drawn aligned, and
+printing it a second time as JSON-quoted strings just spends context on a worse copy
+of the same picture. Fine. Except the knob I used is the *fog of war* knob — the one
+for things the game hides from the player — and it strips the history too. And in
+this game a push that doesn't land on a target moves no number the model can see:
+there are no crate coordinates on the wire, and the on-target count only ticks when
+you cross a target. So the move that shoves level 1's crate came back to it as
+
+    Step 2: up → {'player_y': '-1'}
+
+which is exactly what a step that pushed nothing looks like. Twelve remembered
+moves, and the one thing worth remembering in a Sokoban wasn't in any of them. I'd
+set the window to twelve *specifically* to cover a whole crate route, and it was
+remembering routes with no crates in them.
+
+The honest framing is that I took something away by accident and put it back. A
+person at the keyboard sees the board change under their hands; nothing here tells
+the model anything a player doesn't know. The fix is a second knob in the tester —
+one list for "the game hides this", one for "this is rendered better somewhere else"
+— because presentation and secrecy were never the same decision and only one of them
+should reach what the model can recall. There was a cheaper route: the tester
+already has a replay-past-screens feature I could have switched on with one line. I
+turned it down after reading what it actually does — it keeps the newest screen *per
+action*, which here means up to five boards, one per arrow key, four of them stale,
+under a heading promising they're still accurate. In a game where every move redraws
+the whole screen that heading is a lie, and five nearly-identical boards is worse
+than none for a reader that already can't find a crate in one. The before-and-after
+pair is ordered and it's a *diff*, which is the part that makes a push readable as a
+push.
+
+That's another line drawn under the three recorded runs, and the bigger of the two.
+
 ### Small ones, each of which cost a red run
 
 - **A move counter I was wrong about twice.** I had written down that `moves_taken` starts over when you advance a level, so the "it only ever goes up" invariant got scoped to a single level. It doesn't start over — the counter runs for the whole session, and the game's own test suite says so explicitly. The invariant was *narrower* than the truth, which is the sneaky kind of wrong: it never fired, so it never argued with the note, and both sat there agreeing with each other through a green ladder. The real boundary is that a reload rewinds it to exactly zero and nothing else may take it backwards, which is what it now asserts. **Two artifacts written from one wrong belief will corroborate each other forever.**
@@ -203,7 +238,7 @@ The pattern from the other two examples holds here: pointing the tester at a gam
 
 **Two of UGT's own shared pieces were only ever exercised by a throwaway demo.** The gate runner and the divergence finder — the fail-closed footer, the findings channel, the same-seed replay comparison — were used by exactly one example game that existed to demonstrate them, and by nothing that was actually testing anything. Sokoban hand-rolled around them, which is the honest signal that they weren't pulling their weight. Now all five rungs go through one fail-closed path, and the duplication is gone.
 
-**Letting a model play it found two more tester bugs, both of which quietly stole the model's moves.**
+**Letting a model play it found three more tester bugs. Two quietly stole the model's moves; the third quietly stole its memory.**
 
 The first is my favourite kind: a limit set for one game silently taxing another.
 The local model's replies were capped at 256 tokens. The JSON the tester asks for
@@ -237,11 +272,22 @@ counted against the model forever. Fixed, and I'd flag the general rule: **if yo
 deliberately hide something from an agent, nothing downstream may score it on
 knowing that thing.**
 
-Worth separating those two, because they're different animals. The first changed
-what the model *receives*, so runs before and after it can't be compared. The second
-changed only what gets *written down*, so they can. I've seen that distinction
-skipped and it invalidates a batch either way — once by pooling across a real change,
-once by throwing away a perfectly good comparison out of caution.
+The third is the one from a few sections up, and it's the one I'd tell someone else
+about: **one config list was doing two jobs.** "Hide this from the player" and "this
+is already rendered better somewhere else in the prompt" are not the same
+instruction, and the tester had one knob for both. Because the fog-of-war knob also
+strips the recent-moves summary, an economy decision I made about *layout* turned
+into a restriction on what the model could **remember**, and nothing in the config,
+the summary or a green ladder said so. It's now two knobs, one for each intent, and
+the default is the old behaviour so nobody else's game moves. Naming it plainly,
+because it generalises past this game: **a knob whose name describes one of its two
+effects will eventually be used for the other one.**
+
+Worth separating those three, because they're different animals. The first and third
+changed what the model *receives*, so runs before and after them can't be compared.
+The second changed only what gets *written down*, so they can. I've seen that
+distinction skipped and it invalidates a batch either way — once by pooling across a
+real change, once by throwing away a perfectly good comparison out of caution.
 
 **And sokoban is the clean case for the seeding question** that the escape room turned up. This game has no randomness at all: three fixed levels, no generation, no hidden state. Every episode is the same three puzzles in the same order. So however many you run, the honest sample size is one. UGT used to infer that from whether a seed list *happened to be in the config*, which meant "deliberately deterministic" and "I forgot to configure seeds" looked identical. The game declares `deterministic` out loud now, and UGT proves the declaration against the running game before spending anything — including checking that the probe it uses actually moves the state, because "two resets matched" proves nothing if nothing happened. The probe here is `left`, the first move of level 1's committed solution, so it can't bounce off a wall.
 

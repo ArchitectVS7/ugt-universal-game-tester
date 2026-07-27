@@ -748,7 +748,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         # so surface state changes its stated expectation never mentioned. Heuristic
         # (leaf-name substring match) — an escalation signal for triage, not a verdict.
         surprises = _unexpected_delta_fields(delta, f"{expected} {reasoning}",
-                                             redact=_redaction_paths(playtest_cfg))
+                                             redact=_prompt_hidden_paths(playtest_cfg))
         if surprises:
             log_entry["unexpected_deltas"] = surprises
         if _consecutive_repeat >= 2:
@@ -2055,14 +2055,60 @@ def _compact_state_block(state, budget, what="Current State"):
 
 
 def _redaction_paths(playtest_cfg):
-    """Config knob `playtest.redact_state_fields`: dot-separated state paths whose
-    values the game's own wire protocol HIDES from the acting player (fog of war)
-    but the adapter's normalized state must carry for machine checks — e.g. the trading-card game's
-    card-conservation invariant needs the god-view `committedCard` term, while the
-    engine's redacted opponent view exposes only `hasCommitted`. These paths are
-    dropped ONLY from what the LLM is shown (the state JSON and the recent-action
-    delta summaries); logs, invariants and reports keep the full state."""
+    """Config knob `playtest.redact_state_fields` — the tier's FOG OF WAR list.
+
+    Dot-separated state paths whose values the game's own wire protocol HIDES from
+    the acting player but the adapter's normalized state must carry for machine
+    checks — e.g. the trading-card game's card-conservation invariant needs the
+    god-view `committedCard` term, while the engine's redacted opponent view
+    exposes only `hasCommitted`. These paths are dropped from EVERY channel the
+    LLM reads (the state JSON *and* the recent-action delta summaries); logs,
+    invariants and reports keep the full state.
+
+    **This is not the knob for "the same information, rendered somewhere else"** —
+    that is `hide_from_state_block` (below), and conflating the two costs real
+    signal. See its docstring for what it cost.
+    """
     return [str(p) for p in (playtest_cfg or {}).get("redact_state_fields") or []]
+
+
+def _state_block_only_paths(playtest_cfg):
+    """Config knob `playtest.hide_from_state_block` — CONTEXT ECONOMY, not fog of war.
+
+    Dot-separated state paths the pilot is fully entitled to see, but which are
+    already rendered to it in a better form elsewhere in the prompt (typically the
+    Terminal panel). They are dropped from the `## Current State` JSON only, and
+    are STILL PRESENT in the recent-action delta summaries.
+
+    Why the distinction is load-bearing, and what conflating it cost (found
+    2026-07-26 on a Godot puzzle integration): that game put a whole-board ASCII
+    render (`grid`) into `redact_state_fields` purely to avoid printing the same
+    board twice, since the aligned copy in the Terminal panel is the one a player
+    looks at. Because `redact_state_fields` also strips the deltas, the board
+    silently vanished from all twelve history entries too — and in that game a
+    push to a non-target cell moves no visible scalar at all, so a crate-pushing
+    move and a plain walk rendered identically in the pilot's own memory
+    (`Step 2: up → {'player_y': '-1'}`). The single most important feedback signal
+    in the game reached the pilot on ZERO channels beyond one current-frame
+    snapshot. A context-economy decision had become an information restriction.
+
+    So: `redact_state_fields` when the game hides it from the player;
+    `hide_from_state_block` when the prompt shows it elsewhere. Default absent, so
+    every existing config renders byte-identically.
+    """
+    return [str(p) for p in (playtest_cfg or {}).get("hide_from_state_block") or []]
+
+
+def _prompt_hidden_paths(playtest_cfg):
+    """The union of both knobs — every path absent from the `## Current State` JSON.
+
+    Also what every *analysis* path must exclude (§B P16): the surprise heuristic
+    matches a delta key's leaf name against the pilot's prose, and a field whose
+    NAME never appears in the state block cannot fairly be matched against prose
+    that calls it "the board". Using the union there also means nothing RECORDED
+    changes when a path moves between the two lists.
+    """
+    return _redaction_paths(playtest_cfg) + _state_block_only_paths(playtest_cfg)
 
 
 def _redact_state(state, paths):
@@ -2095,7 +2141,14 @@ def _recent_actions_summary(action_log, redact, window=5):
     """The recent-actions block shared by all prompt builders, with fog-of-war paths
     removed from the displayed deltas. `window` is `playtest.history_window` (default
     5). It is a SLIDING window, so it can only reveal a behavioural cycle shorter than
-    itself — the cumulative `_action_ledger_block` is what covers longer ones."""
+    itself — the cumulative `_action_ledger_block` is what covers longer ones.
+
+    `redact` here is `redact_state_fields` ONLY — deliberately not the union with
+    `hide_from_state_block`. What the prompt renders in another panel is still part
+    of the pilot's memory of what its own moves DID; see
+    `_state_block_only_paths` for the defect that distinction fixes. This block has
+    no char budget of its own (only `window` bounds it), so a game that puts a
+    large field on this channel should size `history_window` knowing that."""
     window = max(1, int(window or 5))
     recent_log = action_log[-window:] if len(action_log) > window else action_log
     return "\n".join(
@@ -2111,7 +2164,10 @@ def _build_prompt(config, strategy_guide, current_state, terminal_text, action_l
     state_char_budget = int(playtest_cfg.get("state_char_budget", 4000))
     terminal_budget = int(playtest_cfg.get("terminal_char_budget", 400))
 
+    # Two lists, two jobs: `redact` is fog of war and applies to every channel;
+    # `block_hidden` additionally drops what is rendered elsewhere in this prompt.
     redact = _redaction_paths(playtest_cfg)
+    block_hidden = _prompt_hidden_paths(playtest_cfg)
 
     action_lines = []
     for action_id, action_def in config.action_mappings.items():
@@ -2136,7 +2192,7 @@ def _build_prompt(config, strategy_guide, current_state, terminal_text, action_l
         + _quest_block(playtest_cfg, current_state, quest_recall)
         + f"## Current State\n"
         + _key_values_line(playtest_cfg, current_state)
-        + f"```json\n{_compact_state_block(_redact_state(current_state, redact), state_char_budget, 'Current State')}\n```\n\n"
+        + f"```json\n{_compact_state_block(_redact_state(current_state, block_hidden), state_char_budget, 'Current State')}\n```\n\n"
         f"## Recent Actions\n{recent_summary}\n\n"
         + _noop_warning_block(noop_streaks, repeat_streak,
                               block_threshold=int(playtest_cfg.get('repeat_block_threshold', 3)))
@@ -2160,6 +2216,7 @@ def _build_legal_prompt(config, strategy_guide, current_state, legal_list, actio
     state_char_budget = int(playtest_cfg.get("state_char_budget", 4000))
 
     redact = _redaction_paths(playtest_cfg)
+    block_hidden = _prompt_hidden_paths(playtest_cfg)
 
     legal_lines = "\n".join(
         f"  {i}: {json.dumps(a, default=str)}" for i, a in enumerate(legal_list)
@@ -2176,7 +2233,7 @@ def _build_legal_prompt(config, strategy_guide, current_state, legal_list, actio
         + _quest_block(playtest_cfg, current_state, quest_recall)
         + f"## Current State\n"
         + _key_values_line(playtest_cfg, current_state)
-        + f"```json\n{_compact_state_block(_redact_state(current_state, redact), state_char_budget, 'Current State')}\n```\n\n"
+        + f"```json\n{_compact_state_block(_redact_state(current_state, block_hidden), state_char_budget, 'Current State')}\n```\n\n"
         f"## LEGAL ACTIONS (respond with action_type=\"legal_action\", value=<the NUMBER>)\n"
         f"{legal_lines}\n\n"
         f"## Recent Actions\n{recent_summary}\n\n"
@@ -2210,6 +2267,7 @@ def _build_terminal_prompt(config, strategy_guide, current_state, terminal_text,
     ) or "(see the strategy guide)"
 
     redact = _redaction_paths(playtest_cfg)
+    block_hidden = _prompt_hidden_paths(playtest_cfg)
     recent_summary = _recent_actions_summary(action_log, redact, playtest_cfg.get('history_window', 5))
 
     return (
@@ -2224,7 +2282,7 @@ def _build_terminal_prompt(config, strategy_guide, current_state, terminal_text,
         + _quest_block(playtest_cfg, current_state, quest_recall)
         + f"## Current State\n"
         + _key_values_line(playtest_cfg, current_state)
-        + f"```json\n{_compact_state_block(_redact_state(current_state, redact), state_char_budget, 'Current State')}\n```\n\n"
+        + f"```json\n{_compact_state_block(_redact_state(current_state, block_hidden), state_char_budget, 'Current State')}\n```\n\n"
         f"## Recent Actions\n{recent_summary}\n\n"
         + _noop_warning_block(noop_streaks, repeat_streak,
                               block_threshold=int(playtest_cfg.get('repeat_block_threshold', 3)))
@@ -2275,15 +2333,21 @@ def _unexpected_delta_fields(delta, expectation_text, redact=None):
     Heuristic escalation only: leaf-name substring match, underscores also matched as
     spaces (e.g. delta key 'ship.shield_strength' is 'mentioned' by 'shield strength').
 
-    **A REDACTED field can never be a surprise.** `playtest.redact_state_fields` is
-    the tier's fog of war: the pilot is deliberately not shown that field, so
-    recording it as something the pilot "failed to predict" charges it for
-    information it was denied — and it is exactly the fields that change often
-    which look worst. Found 2026-07-26 on a Godot puzzle integration that redacts
-    `grid` (a whole-board render) and `moves_taken`: every successful move logged
-    both as unexpected. There the summary's ubiquity floor happened to absorb it,
-    which is luck rather than correctness — a redacted field changing on half the
-    steps sits under that floor and would be counted forever.
+    **A field absent from the state block can never be a surprise.** Pass
+    `redact=_prompt_hidden_paths(cfg)` — the union of `redact_state_fields` (fog of
+    war: the pilot is deliberately not shown it) and `hide_from_state_block` (the
+    pilot is shown it in another panel, under another name). Either way this
+    heuristic works by matching the delta key's LEAF NAME against the pilot's
+    prose, and a field whose name never appears in the state block cannot fairly
+    be matched against prose that calls it "the board". Recording it as something
+    the pilot "failed to predict" charges it for information it was denied — and it
+    is exactly the fields that change often which look worst. Found 2026-07-26 on a
+    Godot puzzle integration that hides `grid` (a whole-board render) and redacts
+    `moves_taken`: every successful move logged both as unexpected. There the
+    summary's ubiquity floor happened to absorb it, which is luck rather than
+    correctness — a hidden field changing on half the steps sits under that floor
+    and would be counted forever. Taking the union also means nothing RECORDED
+    moves when a path is reclassified from one list to the other.
     """
     text = (expectation_text or "").lower()
     redact = set(redact or ())

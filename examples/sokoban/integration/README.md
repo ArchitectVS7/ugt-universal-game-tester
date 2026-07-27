@@ -68,6 +68,8 @@ python3 examples/sokoban/integration/playtest_sokoban.py --provider anthropic \
 # 1 the core interaction never happened, 2 the log contradicts itself.
 python3 examples/sokoban/integration/playtest_sokoban.py --score results/<report>.json
 python3 examples/sokoban/integration/playtest_sokoban.py --prove-scoring
+# the two prompt knobs' own controls — synthetic states, no bridge, no model
+python3 examples/sokoban/integration/playtest_sokoban.py --prove-prompt
 ```
 
 `ugt playtest` cannot drive this game — `engine.type: custom` means `env.py` has
@@ -158,12 +160,12 @@ Run before spending anything, per P12. Everything below was free.
 | P2 | Adapter passes through every PUBLIC field | **PASS, and the channel had to be built.** This game has NO prose: `main.tscn` is ColorRects with no Label, no font, no message line. So the board IS the entire player-facing text channel, and `GodotTcpAdapter.get_terminal_text()` now carries it by joining the very rows `board.gd::render_rows()` draws for the human. Asserted live in both directions — a board arrives, AND it changes when the game changes (a channel serving a stale screen forever would pass the first check and is worse than an empty one, because it looks right). **Still true after the win state was added** (Finding 15): it is colour and geometry — a frame, a backdrop change, a crate-on-target colour — with **no text node of any kind**, precisely so the channel did not have to grow. The pilot already had that information as `level_solved` / `all_levels_solved` and as `*` in the rendered board, so nothing was added to the wire and this verdict stands unchanged. Zero prose is now a stated `PRD.md` constraint rather than an accident of the scene, which is what keeps this row true against a future edit |
 | P3 | Truncation is silent starvation | **WOULD HAVE FAILED — FIXED.** The guide is 4,682 chars against the 2,000 default. The cut lands from "The one rule that matters" onward, i.e. every rule that creates the skill. Budget set to 6,000 and `assert_guide_fits` fails the run before any model is contacted |
 | P4 | Action channel sends what the LLM thinks | **PASS.** `action_id` mode maps name → id 1:1; an unknown name is dropped, never coerced to a neighbouring id. The truncation salvage added in Finding 7 keeps that property — it refuses to salvage a name the config does not declare |
-| P5 | Prompt must not leak what the client hides | **WAS LEAKING — CLOSED, and the audit ran the other way too.** There is no HUD at all here, so every field had to be justified rather than passed through. Six of eight are derivable by looking at the board. Two are redacted: `moves_taken` (a score the game keeps and shows nobody — Finding 6 — and the exact number this tier scores against) and `grid` (not hidden, *moved* to the Terminal panel where it renders aligned instead of JSON-quoted). Verified against a **rendered prompt**, not against the config. **One asymmetry ran the OTHER way and is now closed on the human side** (Finding 15): the pilot could see `*` in the board and `all_levels_solved` in its state block, and the player at the keyboard could see neither — a crate on a target was painted like a crate on floor, and the finished game looked hung. Fixed in the game as colour, so **nothing entered or left `redact_state_fields`** and this row's disposition is unchanged. P5 is a two-way audit: "the prompt must not leak what the client hides" has a mirror, "the client must not hide what the prompt is given" |
+| P5 | Prompt must not leak what the client hides | **WAS LEAKING — CLOSED, and the audit ran the other way too.** There is no HUD at all here, so every field had to be justified rather than passed through. Six of eight are derivable by looking at the board. Two are held back, **by two different knobs, for opposite reasons** (Finding 17 — they used to share one list, and that cost the pilot its memory of the board): `moves_taken` is FOG OF WAR (`redact_state_fields`, gone from every channel — a score the game keeps and shows nobody, Finding 6, and the exact number this tier scores against), and `grid` is CONTEXT ECONOMY (`hide_from_state_block`, gone from the state block only — not hidden, *moved* to the Terminal panel where it renders aligned instead of JSON-quoted, and still present in the recent-action deltas). Verified against a **rendered prompt**, not against the config — and now scoped to the right *section* of it, since a whole-prompt substring check cannot tell the state block from the Terminal panel from the history. **One asymmetry ran the OTHER way and is now closed on the human side** (Finding 15): the pilot could see `*` in the board and `all_levels_solved` in its state block, and the player at the keyboard could see neither — a crate on a target was painted like a crate on floor, and the finished game looked hung. Fixed in the game as colour, so **nothing entered or left the held-back set** and this row's disposition is unchanged. P5 is a two-way audit: "the prompt must not leak what the client hides" has a mirror, "the client must not hide what the prompt is given" |
 | P6 | Guide teaches the RULES that create skill | **PASS.** Push-not-pull and its consequences: why a wall-flush crate can only slide, why a corner is permanent, why finishing a crate early can wall you off, and that reload is the correct move rather than a failure. No solution sequences — teaching the moves would measure recall |
 | P7 | Competence from the reasoning, not the exit code | **RUN — the channel is proven and the local model is below the floor.** Quantified rather than sensed: across 160 actions over three runs the pilot moved a crate **0 times** on a first level solvable in 6 moves (instrument-derived from the boards since Finding 11, not counted by hand), and of the crate positions it stated out loud only ~40% matched the board (9/17, 9/21, 41/59 right/wrong). It is engaged with the right concepts (`crate` 67×, `push` 30×, `target` 33× in 30 actions) and cannot reliably localise a glyph in a 7×5 grid. This is NOT P12's ambiguous-silence case: a specific wrong belief, stated out loud, is diagnosable — see Finding 8. **Every figure in this row is PRE-T-008** (160 actions, 0 crates, and all three localisation counts) and sits behind the P8 boundary Finding 16 declares — the localisation question has to be re-measured after it, not continued from here |
-| P8 | Never pool across an information fix | **Boundaries declared** — see the run table. Row 1 → 2 crosses the Finding 7 fix and is a before/after pair, never a trend. Findings 9 and 11 are *reporting* fixes that never touched a prompt, so neither creates a behavioural boundary — the three rows stay comparable across both. **Finding 16 (T-008) is a real information fix and does create one:** the guide is part of the prompt, and it now names which of `player_x`/`player_y` is the column and which is the row. **The three stage-1 rows are not poolable with anything run after that commit**, and Finding 8's localisation-error-rate question must be measured on post-boundary runs only |
+| P8 | Never pool across an information fix | **Boundaries declared** — see the run table. Row 1 → 2 crosses the Finding 7 fix and is a before/after pair, never a trend. Findings 9 and 11 are *reporting* fixes that never touched a prompt, so neither creates a behavioural boundary — the three rows stay comparable across both. **Two real information fixes create boundaries, both on 2026-07-26:** Finding 16 (T-008) — the guide is part of the prompt, and it now names which of `player_x`/`player_y` is the column and which is the row; and **Finding 17 (T-009)** — the recent-action history now carries the board's before→after on every accepted move, so the pilot receives up to 12 boards it previously received none of. Nothing *recorded* changed in either. **The three stage-1 rows are not poolable with anything run after those commits**, and Finding 8's localisation-error-rate question must be measured on post-boundary runs only |
 | P9/P13 | Episodes: samples or replays? | **Declared `deterministic` and probed live** before every run: two resets replay identically over 4 steps, and the probe (`left`, level 1's first committed move) really moved the state, so "identical" is not vacuous |
-| P10 | Pilot needs memory, not just state | **Configured** — `history_window: 12`, roughly one crate's worth of work including the walking. The default 5 forgets the plan halfway through executing it |
+| P10 | Pilot needs memory, not just state | **WAS CONFIGURED BUT EMPTY — FIXED, and now verified against a rendered prompt** (Finding 17). `history_window: 12` was set from the start (roughly one crate's worth of work including the walking; the default 5 forgets the plan halfway through executing it) — but the twelve entries carried no board, because `grid` sat in `redact_state_fields`, which strips the deltas as well as the state block. Since a push that crosses no target moves no *visible* scalar, a crate-pushing move rendered as `Step 2: up → {'player_y': '-1'}` — byte-identical in shape to a plain walk. A window configured to remember a crate route remembered no crates. `assert_history_shows_the_board` now replays the committed solution through the live bridge, renders a real prompt, and asserts the pushing step's line carries the whole after-board with the crate in a position that does not occur in the before-board, that the walked step's pair leaves the crate cells unchanged, and that `moves_taken` still reaches no channel. **`terminal_recall_budget` is deliberately still unset** and the config says why: recall keeps the LATEST screen per (action, context), which here would be up to five boards (one per direction key), four of them stale, under a header promising they are still valid — false by construction in a game where every accepted move redraws the screen. The delta pair is ordered, is a diff, and separates a push from a walk; recall is neither |
 | P11 | A prompt guard is part of the game | **WOULD HAVE MADE THE GAME UNPLAYABLE — FIXED.** The repeat guard blocks the 3rd identical proposal at its default. Pushing a crate five cells along a row *is* five consecutive `left`s, and the committed solutions contain runs of 5 and 6. Raised to 8, and `assert_repeat_guard_allows_real_play` derives the bound from `solutions.json` so authoring a longer push run re-checks it automatically |
 | P12 | Local model first | **DONE — `gemma4:26b`, zero API cost.** It paid for itself: P3, P11, and Findings 6–9 were all found free, and two of those are UGT-core defects that would otherwise have surfaced on a paid bill |
 | P14 | Content: solvable, and every obstacle teaches | **Solvable is PROVEN, and each shipped sequence is the SHORTEST possible** — R1 and R2 replay the committed solutions through the live engine every run, and `game/tests/test_solution_optimality.gd` breadth-first-searches each level *through `board.gd::try_move()` itself* and asserts the committed length is minimal (6 / 23 / 44 = the 73-move reference; level_03 costs ~7.7e5 states and ~16 s, with an opt-out flag). That proof is game-side because minimality is a claim about authored CONTENT, and a solver in this harness would be a second rules engine next to the one it checks. **Two further content claims became assertions on 2026-07-26 (T-007), both game-side and neither a solver:** the *gradient* — the shortest solution getting strictly longer across the three levels, which is the part of "increasing difficulty" that crate count and grid area never covered (`game/tests/test_shipped_levels.gd`, asserted as a relationship, not as 6 / 23 / 44) — and *deadlock-capability*, the claim `reload` rests on: every shipped level contains at least one cell a crate could never be recovered from (`game/tests/test_deadlock_cells.gd`, 4 / 8 / 8 cells, ≥ 1 asserted). **Name the limit of that second one:** it is a geometric witness counted off `board.gd::render_rows()` — a non-target cell walled on one vertical *and* one horizontal side, or a wall-flush lane with no target in it — not an enumeration of every deadlock (two crates jamming each other is one it does not count) and not a claim that a player can reach one. Reachability would need the searcher; the reload button's justification does not. "Teaching" works differently in this genre and needs saying: there is no authored refusal text because there is no text. A refused move returns byte-identical state, and the board itself is the explanation — a human sees the wall. The guide therefore has to teach *how to read a refusal* ("if the board comes back exactly as it was…"), which is the substitute for a spoken one |
@@ -203,7 +205,11 @@ the budget, so it answers "given a fair budget" rather than continuing row 2. An
 per P12 no stage-1 figure is quotable at all, whichever row it comes from.
 **All three rows additionally predate Finding 16's coordinate-frame sentence**, so
 they are not comparable *forward* across it either: every one of them was played by
-a pilot that had to guess whether `player_x` was the row or the column.
+a pilot that had to guess whether `player_x` was the row or the column. **And they
+predate Finding 17**, which is the larger of the two boundaries: every one of these
+runs was played by a pilot whose own history could not tell a push from a walk. No
+figure in this table is poolable with anything run after either commit, in either
+direction.
 
 **What stage 1 established, which is its whole job:** the pilot can see the game
 (a real board, aligned, in the panel a player looks at), acts on it legally, and
@@ -232,7 +238,7 @@ Stage 2 (Haiku) is un-run and is a credit decision, not a blocked one.
 | `verify_round1.py` | Rung 3 — level 1 solved, F1–F6. |
 | `verify_round2.py` | Rung 4 — all 3 levels to `all_levels_solved`, no-op probes. |
 | `verify_round3.py` | Rung 5 — invariant fuzzer, illegal ids, replay determinism. |
-| `playtest_sokoban.py` | Tier 3 — the LLM runner. Owns the §B pre-flight, then hands the adapter to `playtest_game_with_adapter()`. Also owns the competence scoreline and the core-interaction gate that refuses to score a run in which no crate ever moved — re-runnable model-free via `--score` and self-proving via `--prove-scoring`. Also owns the **paid action-budget floor** — derived from `levels/solutions.json`, so a paid run that could not reach `all_levels_solved` is refused before anything is spent. |
+| `playtest_sokoban.py` | Tier 3 — the LLM runner. Owns the §B pre-flight, then hands the adapter to `playtest_game_with_adapter()`. Also owns the competence scoreline and the core-interaction gate that refuses to score a run in which no crate ever moved — re-runnable model-free via `--score` and self-proving via `--prove-scoring`. `--prove-prompt` is the third model-free entry point: the controls for the two prompt knobs (`redact_state_fields` vs `hide_from_state_block`), rendered from synthetic states. Also owns the **paid action-budget floor** — derived from `levels/solutions.json`, so a paid run that could not reach `all_levels_solved` is refused before anything is spent. |
 | `strategy-guide.md` | Tier 3 — the briefing the pilot reads. Teaches push geometry, corner deaths and when to reload; no solutions. |
 | `ugt.config.yaml` | `engine.type: custom` — env.py dispatches nothing, so the rungs and the tier-3 runner construct the adapter. 5 actions: four directions plus `4 = reload`. Also carries the `playtest.*` block, where every setting is justified inline. |
 
@@ -376,6 +382,20 @@ trade-off, so it was fixed outright. It does **not** settle Finding 8 — both
 candidates remain FILED and still need a paid run — but it does mean the error-rate
 evidence this entry is waiting for cannot come from a pre-Finding-16 run.
 
+**And a SECOND free thing this entry missed, orthogonal to the first and to both
+candidates: the pilot's own history did not show the board at all.** Both candidates
+above are about reading the *current* board; neither noticed that a crate-pushing
+move and a plain walk were indistinguishable in the pilot's twelve remembered
+steps, because a whole-board render had been dropped from the deltas by a knob
+chosen for context economy. That is **Finding 17** — again a defect rather than a
+trade-off, again fixed outright, and again **not** a settlement of Finding 8: it
+changes what the pilot remembers, not how it locates a glyph in the frame it is
+handed. Both candidates remain FILED and still need a paid run. What it does mean is
+that the localisation evidence must come from a run made after *both* fixes, and
+that the question Finding 8 is waiting on is now the sharper one: does the pilot
+still mislocate crates when it can see the axes named **and** see what its last
+twelve moves did to the board.
+
 **9. UGT core: a redacted field could be recorded as something the pilot "failed
 to predict". FIXED.** `_unexpected_delta_fields` compared the raw state delta
 against the pilot's expectation text with no knowledge of
@@ -393,6 +413,16 @@ keys.
 This one changed only what is RECORDED, never what the pilot is shown, so it
 creates no P8 boundary. Worth separating explicitly: an information fix invalidates
 comparisons across it, and a reporting fix does not.
+
+**Clarifying clause (2026-07-26, Finding 17): the filter now takes BOTH hidden-path
+lists, and nothing it records changed.** `grid` moved from `redact_state_fields` to
+`hide_from_state_block`, so the surprise heuristic is passed the union of the two
+(`_prompt_hidden_paths`) rather than the fog-of-war list alone. The reasoning is the
+same one written above and it applies to either knob: the heuristic works by matching
+a delta key's **leaf name** against the pilot's prose, and a field whose name never
+appears in the state block cannot fairly be matched against prose that calls it "the
+board". Taking the union is also what keeps this a *reporting* no-op — reclassifying a
+path between the two lists moves nothing in any report.
 
 **10. Neither stall detector can see a two-cycle. FILED.** The pilot spent long
 stretches alternating `right`, `left`, `right`, `left` between two cells. Every
@@ -846,6 +876,148 @@ did not before. **The three recorded stage-1 rows are not poolable with anything
 run after this commit**, in either direction, and Finding 8's error-rate question
 must be answered from post-boundary runs only. Nothing about what is *recorded*
 changed, and no ladder rung, invariant, adapter, redaction, guard or budget moved.
+
+**17. UGT core: one config list was doing two different jobs, and the pilot's own
+memory of the board was the casualty. FIXED.** A push and a plain walk were
+**indistinguishable in the pilot's own history**, on every one of the three recorded
+runs.
+
+`playtest.redact_state_fields` held two entries for two unrelated reasons.
+`moves_taken` was fog of war — the game keeps it and shows nobody (Finding 6), and it
+is the number this tier scores against. `grid` was **context economy**: the board is
+not hidden from anyone, it is *rendered aligned in the Terminal panel* and printing it
+again as JSON-quoted rows would spend context on a worse copy. But that knob strips the
+**recent-action deltas** as well as the state block — and this game's whole feedback
+signal lives in the board. `boxes_on_target` moves only when a push *crosses* a
+target, and there are no crate coordinates on the wire, so a push along open floor
+moves **no scalar the pilot can see**. The rendered history line for the move that
+pushes level 1's crate was, verbatim:
+
+```
+Step 2: up → {'player_y': '-1'}
+```
+
+which is the same shape as the walk on step 1. Twelve history entries, and the game's
+one observable reached the pilot on **zero** channels beyond a single current-frame
+snapshot. `history_window: 12` was chosen to remember a crate route and remembered no
+crates. Worth naming the mechanism, because it is the generalisable part: a decision
+taken purely about *presentation* silently became a restriction on **information**,
+and it did so through a knob whose name only describes one of its two effects.
+
+**Route: `ugt/` (framework) plus this harness's config.** The fix splits the two
+intents rather than special-casing this game:
+
+* `playtest.redact_state_fields` keeps its meaning — fog of war, dropped from every
+  channel the pilot reads, deltas included;
+* new `playtest.hide_from_state_block` — the same information rendered elsewhere in the
+  prompt, dropped from the `## Current State` JSON **only**;
+* `_prompt_hidden_paths()` is the union, used for the state block and for the surprise
+  heuristic (Finding 9's fix), so nothing *recorded* changes when a path is
+  reclassified;
+* all three prompt builders take the same edit — a knob that worked in two of three
+  would be a trap for the next game;
+* default absent, so every existing config renders **byte-identically**. That matters
+  concretely: the other shipped `simulation` example redacts `flags`, which is genuine
+  fog of war, and its own README relies on the deltas being stripped.
+
+Here, `moves_taken` stays in `redact_state_fields` and `grid` moves to
+`hide_from_state_block`. The same step now renders as its own before→after pair, with
+the crate visibly moved:
+
+```
+Step 2: up → {'grid': "['#######', '#   . #', '# $   #', '# @   #', '#######'] →
+              ['#######', '# $ . #', '# @   #', '#     #', '#######']",
+              'player_y': '-1'}
+```
+
+**The rejected route, and why — it was the zero-framework one.**
+`playtest.terminal_recall_budget` already exists and would have replayed past screens
+with no code change at all. It was refused on its own semantics: recall keeps the
+**latest screen per (action, context)**, and with `action_context_path` deliberately
+unset here that is up to five boards, one per direction key, four of them stale, under
+a header that tells the pilot "the details here are still valid unless the game has
+changed them since" — false by construction in a game where every accepted move
+redraws the entire screen. It also has no chronology and no diff. Handing five
+near-identical boards to a pilot that already cannot reliably localise a glyph in a
+7×5 grid is an anti-signal, not parity. The delta pair is ordered, is a diff, and is
+what makes a push readable *as* a push. The knob is now on the config's DELIBERATELY
+UNSET list with that reasoning, so its absence is a decision rather than an omission.
+
+**This restores parity that context economy removed by accident.** It is not new
+information: the board is what the real client shows, continuously, and a human can
+see the consequence of their last move because the board in front of them changed.
+Nothing here tells the pilot anything a player does not know.
+
+**Also filed, not fixed — route `ugt/`: the recent-actions block has no char budget.**
+Every other prompt block is bounded by a `playtest.*_char_budget`; this one is bounded
+only by `history_window`, and this change makes each entry potentially a whole board
+wide. Measured on this commit, on the widest shipped board (12 entries into
+`level_03`, 11×8): the Recent Actions block is **3,515 chars** and the whole prompt
+**9,333**, against **5,861** with an empty history (`level_02`, 9×7: 2,847 and 8,639).
+That is affordable, so `history_window` **stays at 12** — cutting it to pay for the
+board would move two variables across one boundary. A truncation mechanism for the
+history is a framework design decision with its own P8 consequences and is not folded
+into this fix.
+
+**Verified against a rendered prompt, and every new assertion was proven able to
+fail.** `assert_history_shows_the_board` runs in the §B pre-flight, before any model
+is contacted: it replays `level_01`'s committed solution through the live bridge one
+action at a time, builds the action log with the framework's own `_compute_delta`,
+**finds** the pushing step (the first whose `$`/`*` cell set changes — never
+hard-coded as step 2, so a re-authored level re-finds it) and a walked step, renders a
+real prompt and asserts inside the `## Recent Actions` slice only. Four claims: every
+row of the after-board is in the pushing step's line; the crate's new row **differs
+from the same index before and does not occur anywhere in the before-board** (so
+"a board is present" is not the claim — the crate is shown *moved*); the walked step
+carries both boards too with its crate cells **unchanged**, which is the actual
+contrast, since every accepted move redraws the board and "no board on a walk" was
+never going to be true; and no non-`grid` key on the pushing step names a crate, so
+the board really is the only channel that carries it. Fog of war is re-asserted on the
+whole prompt: `moves_taken` still appears nowhere.
+
+Scoped assertions, deliberately: the old P5 check grepped the **whole prompt** for
+`'"grid"'` while rendering with an empty action log, so it never covered the history
+and passed only by quote style. Both checks now slice the prompt by `## ` section and
+fail closed if a section is missing — a check that asserts against an empty string is
+a vacuous green.
+
+`--prove-prompt` is the model-free control for the framework half — synthetic states,
+a config shim, no bridge and no Godot, so it runs in a clone: economy hides a field
+from the block and **leaves it in the history**; fog of war strips **both** (the
+regression guard for the other example); a path in both lists is hidden from both;
+neither knob set leaves it in both (so the knobs are the cause, not the fixture); and
+the surprise filter excludes a path from either list while still counting one from
+neither (§B P16's second half).
+
+Five mutations, each applied by hand and every file restored **byte-identically**
+(sha256 compared before and after, never `git checkout`), against a green baseline:
+
+* putting `grid` back into `redact_state_fields` — the live P10 check goes red with
+  the defect quoted at it: `the crate-pushing step's history line does not carry the
+  board it produced: 5 of 5 rows absent`, `Step 2: up → {'player_y': '-1'}`;
+* passing the **union** to `_recent_actions_summary`, i.e. undoing the split in the
+  framework — the live check red *and* `--prove-prompt` case (a), `NOT MET (1 failed)`;
+* passing `[]` there instead — `--prove-prompt` cases (b) and (c) red, `NOT MET (2
+  failed)`, exit 1, which is what proves the other example's fog of war is really
+  guarded; the live check independently catches it as
+  `moves_taken reached the prompt through the history`;
+* fabricating an after-board with the crate one cell further along — red, so the check
+  is position-sensitive rather than satisfied by any board;
+* rewriting the wire delta so the crate's new row is a string that also occurs in the
+  before-board — red on exactly that clause, which is the one that makes "moved" a
+  claim.
+
+**P8: BOUNDARY.** What the pilot **receives** changed: the recent-action history now
+carries the board's before→after on every accepted move, so it receives up to 12
+boards where it received none. **The three recorded stage-1 rows are not poolable with
+anything run after this commit**, in either direction. What is **recorded** did not
+change — the action log and the reports always carried the full delta, and the surprise
+filter still excludes both hidden lists — so no existing report needs re-deriving and
+`--score` returns the same verdict on all three. No ladder rung, invariant, adapter,
+guard or budget moved, and the strategy guide was deliberately **not** touched: telling
+the pilot "your history shows you the board before and after each move" is a further
+information change, and keeping each one atomic is what lets Finding 8's measurement
+name a single cause.
 
 ## Corrections to this harness
 
