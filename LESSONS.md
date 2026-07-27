@@ -88,6 +88,54 @@ passed its own gate by being useless. Farming happens within one life; per-episo
 only because the rung asserted the channel could still SPEAK with the allowlist removed (O2 applied to a
 whole channel, not one assertion).
 
+**M11 · Red parts — a known-bad fixture must fail EXACTLY the check that owns its defect, and pass
+everything else.** Borrowed from controls engineering, where a nightly test run includes deliberately
+defective *red parts* alongside a known-good one. Each red part carries exactly **one** known defect — a
+radiator with a bad inlet port is red part #1, a bad outlet port is red part #2 — and the acceptance
+criterion has two halves:
+
+1. the good part passes **100%**; and
+2. **each red part passes everything except the one check that owns its known defect.**
+
+Half 2 is the half that is usually missed, and it is the more valuable one. Asserting only that a broken
+input goes red proves the suite noticed *something*. Asserting that everything else stays green proves the
+checks are **independent** — because a defect that trips five checks at once means those five are entangled,
+and their individual verdicts mean far less than they appear to. A suite of entangled checks reports five
+findings for one bug and tells you almost nothing about where it is.
+
+In software this is fault injection / mutation testing, and the "red part" is a **known-bad fixture**. The
+analogy transfers further than it first looks: physical red parts also validate the *measurement system*
+(gauge repeatability), and the software equivalent — testing the harness rather than the code — is exactly
+what a conformance fixture is for (`CONFORMANCE-FIXTURE.md`).
+
+This sharpens the older rule that a check must be shown able to fail (§C). *A test that cannot go red is
+decoration; a suite whose checks all go red together is a smoke alarm, not a diagnosis.* And the practical
+consequence for a reader of results: **an all-green suite that has never demonstrated it can go red is not
+evidence.** A vacuous green is worse than a red, because it actively conceals.
+
+**M12 · The point of all of this is that human UAT stops being wasted.** The tiers exist to catch what
+would otherwise be discovered by a person sitting down to play. Sitting down to a build with *all tests
+green* and finding the UI broken, or turn progression plainly not working, is the failure this whole
+methodology is aimed at — and it costs twice, because it also destroys trust in the suite that passed
+(reasonably: the tests may well have been vacuous — see M11).
+
+Three consequences that should shape how a tier is built:
+- **Optimize for cycle time, not report quality.** The value is in *playtest → fix → playtest* running in
+  quick succession. A slow batch producing a document someone reads next week is a worse instrument than a
+  rough loop that closes in minutes, because defects are fixed while the context is still loaded.
+- **Human attention is the scarcest resource in the loop.** Spend machine time freely to protect it. Any
+  defect a machine could plausibly have caught, and didn't, is a gap in the tiers — not bad luck.
+- **Engine-level tiers cannot see the frontend, by construction.** Every tier in this framework drives the
+  game's engine or its text channel. "The button does nothing" and "the turn never advances visibly" are
+  invisible to all of them. That gap is real, is not closed by more of the same, and is tracked as its own
+  piece of work rather than assumed away.
+
+*For strategy games specifically — board games, 4X, anything where the interesting question is the quality
+of a decision — the goal is a pilot that decides* well*, not one that acts often.* Note the tension this
+creates with §B: an extensive strategy guide plus live state plus a recent-command window all compete for
+the same finite context. Better decisions usually come from better **selection** of what the pilot is told,
+not from telling it more.
+
 ---
 
 ## B. LLM playtest pre-flight — the information-integrity audit

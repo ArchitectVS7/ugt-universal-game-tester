@@ -75,7 +75,7 @@ definition reused by both the scripted rounds and the invariant-fuzzer, so the t
 normalization — stays in the game's `integrations/<game>/` files. A failed check is DATA: findings print
 inline, fail the gate, and get fixed upstream in the game.
 
-> **Worked example:** `examples/sokoban/integration/` is a complete implementation of this whole ladder —
+> **Worked example:** `sokoban/integration/` is a complete implementation of this whole ladder —
 > a small deterministic Godot game driven engine-first over a TCP socket through a transport-only adapter,
 > with all five rungs (`spike_sokoban.py` … `verify_round3.py`) runnable in one command. It is the fastest
 > way to see the ladder, the invariant-suite reuse across R1/R2/R3, and the invariant-fuzzer + determinism
@@ -123,7 +123,7 @@ This does **not** require a fully simulable game. Narrative and multi-branch gam
 simulation, but their mechanical subsystems — combat resolution, XP curves, drop tables, economy loops, NPC
 disposition — are nearly always pure functions you can sweep in isolation. Sweep the subsystem, not the story.
 
-Worked example, with the numbers and the rig: `examples/dice/README.md` and `LESSONS.md` §D.
+Worked example, with the numbers and the rig: `dice/README.md` and `LESSONS.md` §D.
 
 ---
 
@@ -213,7 +213,7 @@ The diagram shows the two engine types this manual walks through (`simulation` a
 that `env.py` dispatches for you. Anything else (a live server over HTTP, a TCP socket to a game engine's
 frame loop, a JSON-lines harness) declares `engine.type: custom` and supplies its own transport-only
 `BaseAdapter` subclass, which the integration's own ladder scripts construct directly; the scripts in
-`examples/sokoban/integration/` show that shape end to end.
+`sokoban/integration/` show that shape end to end.
 
 ---
 
@@ -241,9 +241,9 @@ The bridge is the only piece of code you write. It wraps your game engine in a s
 |---|---|---|
 | ...is a headless subprocess (Python sim, TypeScript harness, Godot/Unity CLI build) | `simulation` | JSON-lines over stdin/stdout (`SubprocessAdapter`) |
 | ...runs in a browser (React, Phaser, Vue, vanilla JS, any web frontend) | `browser` | Headless Chromium via Playwright; your game exposes `window.__GET_STATE__` / `window.__SEND_ACTION__` hooks (`PlaywrightAdapter`) |
-| ...is anything else (a live server over HTTP/WebSocket, a TCP bridge into an engine's frame loop) | `custom` | You write a small transport-only `BaseAdapter` subclass; your ladder scripts construct it directly (`env.py` does not dispatch it). See `examples/sokoban/integration/` |
+| ...is anything else (a live server over HTTP/WebSocket, a TCP bridge into an engine's frame loop) | `custom` | You write a small transport-only `BaseAdapter` subclass; your ladder scripts construct it directly (`env.py` does not dispatch it). See `sokoban/integration/` |
 
-Not sure? **Subprocess is the most portable starting point** — `examples/escape-room/` shows it end-to-end against a real Node game. If your game has a frontend you want to drive through UI interactions, use Browser. Reach for `custom` only when neither transport fits — it costs you a small adapter, but nothing else in the ladder changes.
+Not sure? **Subprocess is the most portable starting point** — `escape-room/` shows it end-to-end against a real Node game. If your game has a frontend you want to drive through UI interactions, use Browser. Reach for `custom` only when neither transport fits — it costs you a small adapter, but nothing else in the ladder changes.
 
 ### 4a. Subprocess Bridge (headless / simulation games)
 
@@ -582,7 +582,7 @@ features:
 ### 6b. Running `ugt verify`
 
 ```bash
-cd examples/your-game/
+cd your-game/
 ugt verify --config ugt.config.yaml --feature-map feature-map.yaml
 # Options:
 #   --max-turns 50     how many turns to drive the game (default: 50)
@@ -642,7 +642,7 @@ The smoke test verifies that your bridge responds correctly before you write a f
 seconds, requires no model or feature map.
 
 ```bash
-cd examples/your-game/
+cd your-game/
 ugt smoke-test --config ugt.config.yaml
 ```
 
@@ -709,8 +709,8 @@ Include:
 - **What broken looks like** — describe observable symptoms of bugs (credits unchanged after purchase, screen not changing, etc.)
 
 Two working examples ship, and they are deliberately different shapes:
-`examples/escape-room/integration/strategy-guide.md` (a puzzle game — teaches how to read refusals, and
-says plainly what the state will *not* tell you) and `examples/dice/integration/strategy-guide.md` (a
+`escape-room/integration/strategy-guide.md` (a puzzle game — teaches how to read refusals, and
+says plainly what the state will *not* tell you) and `dice/integration/strategy-guide.md` (a
 combat game — teaches the scoring rules that create skill, while withholding the opponent's closed-form
 policy so the run measures play rather than exploitation of a leaked answer).
 
@@ -731,7 +731,7 @@ policy so the run measures play rather than exploitation of a leaked answer).
 # Requires: pip install 'ugt[playtest]' and ANTHROPIC_API_KEY
 export ANTHROPIC_API_KEY=sk-ant-...
 
-cd examples/your-game/
+cd your-game/
 ugt playtest --config ugt.config.yaml --strategy-guide strategy-guide.md
 # Options:
 #   --max-actions 100    number of LLM actions to take (default: 100)
@@ -819,7 +819,7 @@ There is no dedicated "UI stress test" command — use the invariant-fuzzer (Tie
 `ugt/core/invariant_fuzzer.py`) directly against your browser adapter. It drives random/heuristic actions
 through the real UI and re-checks your invariants after every step, which is exactly what a UI stress pass
 needs: many different action sequences, not a single scripted path. See "The trial ladder" section above for
-how R3 wires this up (`verify_round3.py` in a real integration; `examples/sokoban/integration/verify_round3.py` for
+how R3 wires this up (`verify_round3.py` in a real integration; `sokoban/integration/verify_round3.py` for
 a complete worked example — swap its TCP adapter for a `PlaywrightAdapter` and it drives your browser
 game the same way).
 

@@ -5,7 +5,7 @@ WHY THIS EXISTS
 ---------------
 The fuzzer's oracle used to be entirely author-supplied: it caught crashes (free)
 and violations of invariants a human thought to write (not free). That is a real
-gap, and there is a worked example of it in this repo — `examples/dice` ran its
+gap, and there is a worked example of it in the sample games — the dice game ran its
 robustness rung green at 11/11 for weeks while one allocation strictly dominated
 every other, which made the game's only decision meaningless. A green rung meant
 "no crashes, and none of the properties we listed were violated". It never meant

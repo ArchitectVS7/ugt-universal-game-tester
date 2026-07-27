@@ -71,7 +71,7 @@ class UniversalGameEnv(gym.Env):
                 "engine.type 'custom' has no adapter to dispatch — the integration builds "
                 "its own adapter and calls it directly, so it cannot go through this env. "
                 "Import your adapter in your ladder scripts instead "
-                "(see examples/sokoban/integration)."
+                "(see sokoban/integration)."
             )
         else:
             raise ValueError(f"Unknown engine type: {self.config.engine_type}")

@@ -27,9 +27,9 @@ These three tiers are run in a standardized sequence per game integration — th
 R2 full content spine → R3 invariant-fuzzer + determinism. Each integration lives in its own
 `integrations/<game>/` directory (a self-contained set of ladder scripts + a findings log).
 
-**`examples/sokoban/` is a complete worked example of that whole ladder** — a small deterministic Godot
+**`sokoban/` is a complete worked example of that whole ladder** — a small deterministic Godot
 game driven engine-first over a TCP socket, with all five rungs runnable in one command. Its sibling
-`examples/dice/` and `examples/escape-room/` show the same methodology through the two built-in engines
+`dice/` and `escape-room/` show the same methodology through the two built-in engines
 (browser and simulation). Start there to see it end to end.
 
 ## Install
@@ -79,7 +79,7 @@ in your game's or integration's directory.
 
 | | One list | Several lists |
 |---|---|---|
-| **Simple** | "/tasklist Add a settings screen to this app." · "Pick up where TASKS.md left off and keep going until it's dry." | "/orchestrate all" against each of the three example integrations under `examples/`, one after another. |
+| **Simple** | "/tasklist Add a settings screen to this app." · "Pick up where TASKS.md left off and keep going until it's dry." | "/orchestrate all" against each of the three sample-game integrations in turn, one after another. |
 | **Complex** | "Based on the current open items in PLAN-FORWARD.md, author a TASKS.md compatible with `/orchestrate`, with milestones grouped by feature area and a human UAT checkpoint at the end of each milestone." | "Author three separate TASKS.md files — one per module: auth, billing, notifications — each independently orchestratable, then run `/orchestrate` on all three back to back and stop at the first BLOCKED gate." |
 
 ## Architecture, in one paragraph
@@ -90,18 +90,22 @@ web game through `window.__GET_STATE__`/`__SEND_ACTION__` hooks the game itself 
 (JSON over stdin/stdout to a subprocess harness the game exposes). Games that fit neither declare
 `engine.type: custom` and supply their own purpose-built adapter (plain HTTP, a TCP socket, a JSON-lines
 subprocess harness), constructed directly by that integration's trial-ladder scripts rather than
-dispatched by `env.py` — see `examples/sokoban/integration/`. Every adapter is transport-only — it maps declared action ids to real UI/API
+dispatched by `env.py` — see `sokoban/integration/`. Every adapter is transport-only — it maps declared action ids to real UI/API
 calls and never reimplements game logic; an action not yet wired raises `NotImplementedError` rather than
 fabricating behavior.
 
 ## Where to go next
 
-- **`examples/`** — three worked examples, each pairing a game built from a PRD with the UGT integration that
-  tests it, one per transport: `dice` (React → `browser`), `escape-room` (Node → `simulation`), and
-  `sokoban` (Godot → a hand-written `custom` adapter). **`sokoban/integration/` is the fastest way to see the
-  full trial ladder** — all five rungs runnable in one command. R3 (the invariant-fuzzer) is qualitatively
-  different from R1: it runs random walks and re-checks invariants after *every* step, catching states no
-  scripted test can enumerate; the same-seed replay then certifies the engine is deterministic. Start here.
+- **The sample games** — three worked examples, each pairing a game built from a PRD with the UGT
+  integration that tests it, one per transport: **dice** (React → `browser`), **escape-room**
+  (Node → `simulation`), and **sokoban** (Godot → a hand-written `custom` adapter). Each is its **own
+  repository**, published alongside UGT rather than bundled inside it — because in real use a game owns its
+  repository and the harness lives in that project's `integration/` directory, which is exactly the shape
+  these demonstrate. Take the ones you want; skip them entirely if you only want the tester.
+  **`sokoban/integration/` is the fastest way to see the full trial ladder** — all five rungs runnable in one
+  command. R3 (the invariant-fuzzer) is qualitatively different from R1: it runs random walks and re-checks
+  invariants after *every* step, catching states no scripted test can enumerate; the same-seed replay then
+  certifies the engine is deterministic. Start there.
 - **`PLAN-FORWARD.md`** — current direction: what's been proven, what's next, links to full history.
 - **`LESSONS.md`** — the canonical cross-game lessons registry: core methodology, the mandatory LLM-playtest
   pre-flight information-integrity audit (read before any balance batch), and operational discipline. Read
