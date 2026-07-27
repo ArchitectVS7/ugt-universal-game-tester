@@ -47,17 +47,29 @@ transport and no evidence at all about the game, so it reports
 competence line. Exit codes: 0 scored, 1 unmeasured (or no report), 2 the log
 contradicts itself and is refused.
 
-Three model-free entry points, so scoring and prompt rendering are re-runnable
-without a bridge:
+**The pre-flight also PROVES the five declared actions land on the screen the
+pilot reads.** The committed `levels/solutions.json` is replayed through the same
+adapter and every claim is asserted against `get_terminal_text()` rather than
+against `step()`'s return: a crate reaches a target on the rendered board, a
+refused move returns a byte-identical board, `reload` restores the opening board,
+the level advance changes the board's shape, and the whole replay reaches
+`all_levels_solved` with the competence scorer printing a ratio. It fails closed
+naming which of the five it could not prove, and it costs nothing.
+
+Four model-free entry points, so scoring, prompt rendering and the action channel
+are re-runnable without a model (only the last needs Godot):
 
     python3 examples/sokoban/integration/playtest_sokoban.py --score results/<r>.json
     python3 examples/sokoban/integration/playtest_sokoban.py --prove-scoring
     python3 examples/sokoban/integration/playtest_sokoban.py --prove-prompt
+    python3 examples/sokoban/integration/playtest_sokoban.py --prove-actions
 """
 from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
+import io
 import itertools
 import json
 import os
@@ -536,6 +548,602 @@ def assert_history_shows_the_board(config: UgtConfig, guide: str, adapter) -> No
           f"entries; Recent Actions block {len(history)} chars.")
 
 
+# ── The five declared actions, proven on the pilot's own channel ─────────────
+#
+# §B P4 ("the action channel does what the pilot thinks it does") and the refusal
+# half of §B P14. 160 recorded stage-1 actions exercised exactly ONE of the five
+# actions' worth of behaviour: 0 crates moved, 0 reloads, 0 refused moves, 0 level
+# advances, 0 completed episodes. So the push path, the refusal path (which the
+# guide spends a whole section teaching), `reload`, the advance, `terminated`,
+# `all_levels_solved` and the competence scorer on a SOLVED episode were all
+# unproven at this tier — an instrument that had never been shown able to register
+# a reading is not evidence about the game.
+#
+# Everything below asserts against `get_terminal_text()`, the channel the pilot
+# actually reads, and NOT against `step()`'s return value. That distinction is the
+# whole point: the state dict is what the nine invariants already check on every
+# rung; the rendered board is what the PILOT sees, and until now nothing asserted
+# the two still agree once a crate, a refusal, a reload or a new level was
+# involved. It costs nothing because the game ships its own solutions.
+#
+# P14 needs saying in this genre: there is no authored refusal text because there
+# is no text at all. A refused move's entire explanation IS the board coming back
+# unchanged, so "the game told the player why" is, here, literally
+# "byte-identical board" — which is why that clause compares whole rendered
+# boards and not a row, a substring or a glyph count.
+
+PUSH_PROOF = "push     — a crate reaches a target on the rendered board"
+REFUSAL_PROOF = "refusal  — a refused move returns a byte-identical board"
+RELOAD_PROOF = "reload   — action 4 restores the opening board"
+ADVANCE_PROOF = "advance  — the level advance changes the board's shape"
+WIN_PROOF = ("win      — the replay reaches all_levels_solved and the competence "
+             "scorer prints a ratio")
+FIVE_PROOFS = (PUSH_PROOF, REFUSAL_PROOF, RELOAD_PROOF, ADVANCE_PROOF, WIN_PROOF)
+
+# (dx, dy) per direction id. LABELLING ONLY — see `_refusal_kind`. Nothing here
+# predicts whether a move is legal; the game has already answered that by the
+# time this is consulted, and an adapter/harness that decided for itself would be
+# the rules mirror this repo exists to forbid.
+_STEP_VECTORS = {UP: (0, -1), DOWN: (0, 1), LEFT: (-1, 0), RIGHT: (1, 0)}
+
+
+def _channel_rows(adapter, budget: int):
+    """`(rows, raw)` off the pilot's screen channel, fail-closed on a bad board.
+
+    `raw` is the exact string `get_terminal_text()` returned — the byte-identical
+    comparisons below are made on it rather than on a re-join, so nothing this
+    function does can launder a difference away.
+
+    Ragged rows are refused rather than tolerated: `get_terminal_text` truncates
+    from the TAIL at the configured budget, so a board that outgrew its budget
+    (or lost a row on the wire) arrives with one short line and would otherwise
+    be compared quite happily against another equally broken one.
+    """
+    raw = adapter.get_terminal_text(budget)
+    if not raw.strip():
+        raise SystemExit(
+            "the screen channel returned nothing at all, so no claim below could "
+            "be about what the pilot sees. This game has no prose — the board IS "
+            "the whole player-facing text channel (§B P2)."
+        )
+    rows = raw.splitlines()
+    if not rows:
+        raise SystemExit(f"the screen channel returned no rows: {raw!r}")
+    widths = {len(r) for r in rows}
+    if len(widths) != 1:
+        raise SystemExit(
+            f"the screen channel returned a RAGGED board — row widths {sorted(widths)} "
+            f"across {len(rows)} rows. A Sokoban board is rectangular, so this is a "
+            f"truncated or dropped row reaching the pilot, and every comparison below "
+            f"would be between two damaged boards.\n{raw}"
+        )
+    return rows, raw
+
+
+def _shape(rows) -> tuple:
+    """The board's footprint. Asserted as a CHANGE, never against literal
+    dimensions — the three shipped levels' sizes are the game's content, and
+    pinning them here would be a second copy of it."""
+    return (len(rows), tuple(len(r) for r in rows))
+
+
+def _replay(adapter, actions):
+    """`reset()` then a prefix of committed moves. Returns the wire state."""
+    state = adapter.reset()
+    for a in actions:
+        state, _t, _tr, _i = adapter.step(a)
+    return state
+
+
+def _refusal_kind(rows, state: dict, direction: int) -> str:
+    """LABEL a refusal the game has ALREADY made — never a prediction.
+
+    The caller decides a move was refused by comparing the whole state before and
+    after; this only reads the rendered cell the player was trying to enter so the
+    output can say `wall` or `blocked push` instead of `refused`. If this
+    disagreed with the game it would change nothing at all, which is exactly the
+    property that keeps it out of the rules-mirror category.
+    """
+    dx, dy = _STEP_VECTORS[direction]
+    x, y = state["player_x"] + dx, state["player_y"] + dy
+    if 0 <= y < len(rows) and 0 <= x < len(rows[y]):
+        if rows[y][x] in CRATE_GLYPHS:
+            return "blocked push"
+        if rows[y][x] == WALL_GLYPH:
+            return "wall"
+    return "other"
+
+
+class _Proofs:
+    """The five, collected. Every one prints either way, so the run log shows all
+    five rather than stopping at the first that could not be established."""
+
+    def __init__(self):
+        self._by_name = {}
+
+    def met(self, name: str, detail: str) -> None:
+        self._by_name[name] = (True, detail)
+        print(f"  [ok]       {name}\n               {detail}")
+
+    def unproven(self, name: str, reason: str) -> None:
+        self._by_name[name] = (False, reason)
+        print(f"  [UNPROVEN] {name}\n               {reason}")
+
+    def unproven_group(self, names, reason: str) -> None:
+        """A whole group at once, and it OVERWRITES anything already recorded.
+
+        A socket death halfway through a group must not report "1 of 5 unproven"
+        while implying the two it happened to reach before the failure still
+        stand — they were established against an adapter that then died.
+        """
+        for name in names:
+            self.unproven(name, reason)
+
+    def outstanding(self):
+        return [(name, self._by_name.get(name, (False, "the check never ran"))[1])
+                for name in FIVE_PROOFS if not self._by_name.get(name, (False, ""))[0]]
+
+
+def _prove_refusal_returns_an_identical_board(adapter, budget, solutions, proofs):
+    """REFUSAL_PROOF — and the refusal is FOUND, never hardcoded.
+
+    Same discipline as `assert_repeat_guard_allows_real_play` and
+    `assert_history_shows_the_board`: walk the committed solution's prefixes,
+    probe all four directions from each, and let the GAME say which are refused
+    (whole-state equality, the R2 F1/F3 rule that a true no-op changes nothing at
+    all). A re-authored level re-finds its own refusals.
+    """
+    seq = solutions["level_01"]
+    refusals, accepted, kinds = [], None, set()
+    # `k` deliberately stops one short of the full sequence: the last committed
+    # move SOLVES level 1, and `board.gd` advances a solved level at the start of
+    # the NEXT move — so probing from there would leave the adapter on level 2,
+    # and `reset` on this wire is `reset_level()`, not new-game. The probe would
+    # silently redefine "the opening board" for everything after it.
+    for k in range(len(seq)):
+        state = _replay(adapter, seq[:k])
+        rows, board_before = _channel_rows(adapter, budget)
+        for d in (UP, DOWN, LEFT, RIGHT):
+            after, _t, _tr, _i = adapter.step(d)
+            _rows_after, board_after = _channel_rows(adapter, budget)
+            if after == state:
+                kind = _refusal_kind(rows, state, d)
+                kinds.add(kind)
+                refusals.append((kind, d, k, board_before, board_after))
+            else:
+                # The probe moved the game. Record it as the liveness control,
+                # then put the prefix back so the next direction is probed from
+                # the same position this one was.
+                if accepted is None:
+                    accepted = (d, k, board_before, board_after)
+                state = _replay(adapter, seq[:k])
+                rows, board_before = _channel_rows(adapter, budget)
+        if accepted is not None and {"blocked push", "wall"} <= kinds:
+            break
+
+    if not refusals:
+        raise SystemExit(
+            f"no direction was refused anywhere along the {len(seq)} prefixes of "
+            f"level_01's committed solution, so there is no refusal to assert about. "
+            f"Re-derive this against the level as authored now."
+        )
+    for kind, d, k, board_before, board_after in refusals:
+        if board_after != board_before:
+            b, a = board_before.splitlines(), board_after.splitlines()
+            first = next((i for i in range(max(len(b), len(a)))
+                          if b[i:i + 1] != a[i:i + 1]), None)
+            raise SystemExit(
+                f"P14 VIOLATION — the game REFUSED a move ({kind}, direction {d}, "
+                f"{k} committed moves in: the whole state came back identical) and the "
+                f"rendered board did not. In a game with no prose the unchanged board "
+                f"IS the refusal message, so a pilot reading this channel is told the "
+                f"move happened.\n"
+                f"    first differing row: {first}\n"
+                f"    before:\n{board_before}\n    after:\n{board_after}"
+            )
+    # The liveness control comes BEFORE the content guard below on purpose: "is
+    # this channel alive at all" is the more fundamental question, and a frozen
+    # channel also makes `_refusal_kind`'s labels meaningless, so letting the
+    # content guard fire first would blame the level author for a dead wire.
+    if accepted is None:
+        raise SystemExit(
+            "P14 CHECK IS VACUOUS — no probed direction was ACCEPTED anywhere, so "
+            "the liveness control below is missing and 'byte-identical' is a claim "
+            "about a channel that was never seen to move."
+        )
+    d, k, live_before, live_after = accepted
+    if live_after == live_before:
+        # The control this proof cannot do without: a channel frozen on the
+        # opening board satisfies "a refused move returns a byte-identical board"
+        # forever, and would report this proof MET while telling the pilot
+        # nothing. Mutation 2 in the delivery note is exactly that channel.
+        raise SystemExit(
+            f"P2/P14 VIOLATION — the game ACCEPTED a move (direction {d}, {k} committed "
+            f"moves in: the state changed) and the rendered board came back "
+            f"byte-identical. The channel is frozen, which would make the refusal "
+            f"clause above vacuously true forever.\n{live_before}"
+        )
+    if "blocked push" not in kinds:
+        raise SystemExit(
+            f"P14 CHECK IS VACUOUS — {len(refusals)} refusal(s) found ({sorted(kinds)}) "
+            f"and not one of them was a BLOCKED PUSH. The strategy guide devotes a "
+            f"whole section to reading that refusal, so content that no longer "
+            f"produces one means the guide is teaching a signal the game does not "
+            f"send. A wall bounce alone is not the same check — this harness has "
+            f"already shipped a probe that found `down` into a wall and reported the "
+            f"blocked push covered (see the F3 correction)."
+        )
+    proofs.met(REFUSAL_PROOF,
+               f"{len(refusals)} refusal(s) found by probing, {sorted(kinds)}; each "
+               f"returned the WHOLE rendered board byte-identical "
+               f"({len(refusals[0][3])} chars). Liveness control: direction {d} at "
+               f"prefix {k} was accepted and the board did change.")
+
+
+def _prove_reload_restores_the_opening_board(adapter, budget, solutions, proofs):
+    """RELOAD_PROOF — the action the pilot has used 0 times in 160.
+
+    `reload` (action 4) is `reset_level()`: it keeps `level_index` and zeroes
+    `moves_taken`. The claim asserted here is the one the PILOT can check — the
+    screen goes back to how the level opened — cross-checked against the two
+    scalars so a channel that merely happened to redraw something similar cannot
+    pass.
+    """
+    start = adapter.reset()
+    _rows, opening = _channel_rows(adapter, budget)
+    seq = solutions["level_01"]
+    mid, applied = opening, 0
+    # All but the last committed move, so the level is never solved here: a solved
+    # level advances on the next move and this proof would then be about level 2.
+    for a in seq[:-1]:
+        adapter.step(a)
+        applied += 1
+        _rows, mid = _channel_rows(adapter, budget)
+        if mid != opening:
+            break
+    if mid == opening:
+        raise SystemExit(
+            f"RELOAD CHECK IS VACUOUS — {applied} committed move(s) left the rendered "
+            f"board byte-identical to the opening, so 'reload restored it' would be "
+            f"true of a channel that never changed at all."
+        )
+    after, _t, _tr, _i = adapter.step(RELOAD)
+    _rows, restored = _channel_rows(adapter, budget)
+    if restored != opening:
+        raise SystemExit(
+            f"RELOAD VIOLATION — after {applied} move(s) and a reload, the pilot's "
+            f"screen is not the board the level opened with. The one action the guide "
+            f"offers for an unrecoverable crate does not visibly undo anything.\n"
+            f"    opening:\n{opening}\n    after reload:\n{restored}"
+        )
+    if after["moves_taken"] != 0 or after["level_index"] != start["level_index"]:
+        raise SystemExit(
+            f"RELOAD VIOLATION — the board was restored but the scalars were not: "
+            f"moves_taken={after['moves_taken']} (expected 0), "
+            f"level_index={after['level_index']} (expected {start['level_index']} — a "
+            f"reload retries the level being played, it does not restart the game)."
+        )
+    proofs.met(RELOAD_PROOF,
+               f"{applied} committed move(s) changed the board, then action "
+               f"{RELOAD} restored it byte-identically ({len(opening)} chars) with "
+               f"moves_taken back to 0 on level_index {after['level_index']}.")
+
+
+def _prove_push_advance_and_win(adapter, budget, solutions, names, proofs):
+    """PUSH_PROOF, ADVANCE_PROOF and WIN_PROOF, from one clean replay.
+
+    Every committed sequence, back to back, with no filler move between levels —
+    `board.gd`'s advance is LAZY (a solved level advances at the start of the next
+    move, which is then applied in the new level), which is what lets the
+    sequences concatenate, and is the same thing R2 relies on.
+
+    The replay is also 73 invariant-checked transitions and a channel-fidelity
+    check per step, both free.
+    """
+    order = sorted(solutions)
+    actions = [a for key in order for a in solutions[key]]
+
+    state = adapter.reset()
+    if state["moves_taken"] != 0 or state["level_index"] != 0:
+        raise SystemExit(
+            f"the replay must start at level 1 move 0, but reset() returned "
+            f"level_index={state['level_index']} moves_taken={state['moves_taken']}. "
+            f"`reset` on this wire is reset_LEVEL, not new-game, so an earlier probe "
+            f"that ended on a later level would silently redefine what 'the opening "
+            f"board' means for everything after it."
+        )
+    prev_rows, prev_raw = _channel_rows(adapter, budget)
+
+    log, records, terminated = [], [], False
+    for n, a in enumerate(actions, start=1):
+        before = state
+        state, terminated, _tr, info = adapter.step(a)
+        rows, raw = _channel_rows(adapter, budget)
+        violations = SUITE.check_command(before, state, f"step({a})", info or {})
+        if violations:
+            raise SystemExit(
+                f"INVARIANT VIOLATION replaying the committed solution at step {n} "
+                f"({names[a]}): {'; '.join(violations)}"
+            )
+        # The clause that makes every claim below a claim about the PILOT'S
+        # CHANNEL rather than about step()'s return — the terminal-channel
+        # counterpart of `grid_matches_scalar_state`, one level further out.
+        if rows != state["grid"]:
+            raise SystemExit(
+                f"P2 VIOLATION at step {n} ({names[a]}) — the pilot is reading a "
+                f"different board from the one the game rendered.\n"
+                f"    screen channel:\n{raw}\n"
+                f"    state['grid']:\n" + "\n".join(state["grid"])
+            )
+        log.append({"step": n, "action_type": "action_id", "action": names[a],
+                    "state_delta": _compute_delta(before, state)})
+        records.append({
+            "step": n,
+            # Read off the CHANNEL, not the wire. A COUNT, not a cell set — see
+            # `count_target_arrivals`: `level_03`'s committed solution pushes a
+            # crate off one target straight onto another, which gains a `*` cell
+            # and loses one while nothing arrives anywhere.
+            "gained_star": (len(_cells(rows, ON_TARGET_GLYPH))
+                            > len(_cells(prev_rows, ON_TARGET_GLYPH))),
+            "shape_changed": _shape(rows) != _shape(prev_rows),
+            # Read off the wire, so the two can be made to argue.
+            "scalar_rose": state["boxes_on_target"] > before["boxes_on_target"],
+            "advanced": state["level_index"] - before["level_index"],
+        })
+        prev_rows, prev_raw = rows, raw
+    final = state
+
+    # ── PUSH_PROOF ───────────────────────────────────────────────────────────
+    # Level advances are excluded from BOTH readings, exactly as
+    # `count_target_arrivals` does and for the same reason: an advance replaces
+    # the board wholesale, so neither the counter nor the render is describing a
+    # crate arriving anywhere. Excluding it from one reading only would
+    # manufacture the disagreement this check treats as a wire defect.
+    advance_steps = {r["step"] for r in records if r["advanced"] > 0}
+    board_arrivals = {r["step"] for r in records if r["gained_star"]} - advance_steps
+    scalar_arrivals = {r["step"] for r in records if r["scalar_rose"]} - advance_steps
+    if board_arrivals != scalar_arrivals:
+        raise SystemExit(
+            f"CONTRADICTORY WIRE — the rendered board gained a `{ON_TARGET_GLYPH}` on "
+            f"steps {sorted(board_arrivals)} and boxes_on_target rose on steps "
+            f"{sorted(scalar_arrivals)}. The counter and the render disagree about the "
+            f"game's own objective, which is the wire-only defect class "
+            f"`grid_matches_scalar_state` exists to catch. File it against whoever "
+            f"owns the game; it is not a threshold to loosen."
+        )
+    if not board_arrivals:
+        raise SystemExit(
+            f"PUSH UNPROVEN — replaying all {len(actions)} committed moves, the "
+            f"rendered board never once gained a `{ON_TARGET_GLYPH}`. The game's one "
+            f"objective is invisible on the channel the pilot reads."
+        )
+    proofs.met(PUSH_PROOF,
+               f"a crate reached a target on the rendered board on steps "
+               f"{sorted(board_arrivals)}, and boxes_on_target rose on exactly the "
+               f"same steps (advances excluded from both readings).")
+
+    # ── ADVANCE_PROOF ────────────────────────────────────────────────────────
+    shape_steps = {r["step"] for r in records if r["shape_changed"]}
+    expected_advances = len(solutions) - 1
+    if len(advance_steps) != expected_advances:
+        raise SystemExit(
+            f"ADVANCE UNPROVEN — {len(advance_steps)} level advance(s) across the "
+            f"replay, expected {expected_advances} for {len(solutions)} committed "
+            f"levels (the last level is finished, not advanced past). "
+            f"Steps: {sorted(advance_steps)}."
+        )
+    if any(r["advanced"] not in (0, 1) for r in records):
+        raise SystemExit(
+            f"ADVANCE VIOLATION — a single move moved level_index by more than 1: "
+            f"{[(r['step'], r['advanced']) for r in records if r['advanced'] not in (0, 1)]}"
+        )
+    missing = advance_steps - shape_steps
+    if missing:
+        raise SystemExit(
+            f"ADVANCE UNPROVEN — the level advance on step(s) {sorted(missing)} left "
+            f"the board's footprint unchanged, so consecutive levels render the same "
+            f"shape and the advance is INVISIBLE on the screen channel: the pilot has "
+            f"only `level_index` to tell it the puzzle in front of it is a different "
+            f"one. That is a content finding, not a transport one."
+        )
+    extra = shape_steps - advance_steps
+    if extra:
+        raise SystemExit(
+            f"ADVANCE VIOLATION — the board's footprint changed on step(s) "
+            f"{sorted(extra)}, which were not level advances. A Sokoban board does not "
+            f"resize mid-level; the channel is reshaping the game under the pilot."
+        )
+    proofs.met(ADVANCE_PROOF,
+               f"{len(advance_steps)} advance(s) on steps {sorted(advance_steps)}, each "
+               f"changing the rendered board's shape, and no non-advance step changed "
+               f"it.")
+
+    # ── WIN_PROOF ────────────────────────────────────────────────────────────
+    if not terminated:
+        raise SystemExit(
+            "WIN UNPROVEN — the last committed move did not report `terminated`, so "
+            "the loop the pilot runs in would never end on a solved game."
+        )
+    if not final.get("all_levels_solved"):
+        raise SystemExit(
+            f"WIN UNPROVEN — the committed solutions were replayed in full and "
+            f"all_levels_solved is {final.get('all_levels_solved')!r}."
+        )
+    # The channel's ONLY witness of the win, and it is worth naming why it is this
+    # and not a message: the win state is deliberately non-textual — a frame, a
+    # backdrop colour, a crate-on-target colour — so the P2 premise (the rendered
+    # board is the whole player-facing text channel) survives. What the pilot
+    # reads is that every crate glyph is now `*`; it additionally gets
+    # all_levels_solved as a scalar, which a human does not.
+    loose = _cells(prev_rows, "$")
+    if loose:
+        raise SystemExit(
+            f"WIN UNPROVEN ON THE CHANNEL — all_levels_solved is True and the final "
+            f"rendered board still shows {len(loose)} crate(s) off target at "
+            f"{sorted(loose)}. A pilot reading the screen has no way to tell it won.\n"
+            f"{prev_raw}"
+        )
+    reference = reference_moves(solutions)
+    if final["moves_taken"] != reference:
+        raise SystemExit(
+            f"WIN UNPROVEN — the replay finished at moves_taken={final['moves_taken']} "
+            f"against a committed reference of {reference}. Every committed move must "
+            f"be ACCEPTED for these to match, and only accepted moves advance the "
+            f"counter, so this is either {reference - final['moves_taken']} committed "
+            f"move(s) silently refused on the wire or "
+            f"{final['moves_taken'] - reference} move(s) the game counted twice."
+        )
+
+    # The T-001/T-002 path, end to end, on a solved episode — which no run at this
+    # tier had ever reached. Built in the framework's own log shape, written to a
+    # TEMP directory (never `results/`, where a replay would sit beside real pilot
+    # reports) and marked `replay_of` so it can never be mistaken for one.
+    report = {
+        "replay_of": os.path.relpath(SOLUTIONS, os.path.join(HERE, "..")),
+        "baseline_state": {"level_index": 0},
+        "final_state": final,
+        "episodes": [{"episode": 1, "end_reason": "terminated",
+                      "actions": len(log), "final_state": final}],
+        "action_log": log,
+        "summary": {"invariant_violations": 0,
+                    "seeding_mode": "deterministic",
+                    "sample_note": ("a replay of the committed solutions, not a pilot "
+                                    "run — no model chose any of these moves")},
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "replay-of-committed-solutions.json")
+        with open(path, "w") as fh:
+            json.dump(report, fh)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = report_competence(path)
+    printed = buf.getvalue()
+
+    if code != 0:
+        raise SystemExit(
+            f"WIN UNPROVEN — report_competence exited {code} on a replay that solved "
+            f"every level. The scorer refuses to score the one run shape it exists "
+            f"to score.\n{printed}"
+        )
+    want_solved = f"levels_solved: {len(solutions)}/{len(solutions)}"
+    if want_solved not in printed:
+        raise SystemExit(f"WIN UNPROVEN — '{want_solved}' absent from:\n{printed}")
+    crates = re.search(r"crates_moved:\s+(\d+)", printed)
+    if crates is None or int(crates.group(1)) <= 0:
+        raise SystemExit(
+            f"WIN UNPROVEN — the scorer reports no crate moves for a replay that "
+            f"solved every level.\n{printed}"
+        )
+    # Derived, never typed: 73 of 73 committed moves accepted is 1.00x, and it says
+    # only that every one landed — the pilot's own ratio is what this path exists
+    # to be able to print at all.
+    want_ratio = f"{final['moves_taken'] / reference:.2f}x"
+    found = re.search(r"\b\d+\.\d+x\b", printed)
+    if found is None:
+        raise SystemExit(
+            f"WIN UNPROVEN — no moves/reference ratio printed for a finished run; the "
+            f"withholding rule is firing on the one case it must not.\n{printed}"
+        )
+    if found.group(0) != want_ratio:
+        raise SystemExit(
+            f"WIN VIOLATION — the scorer printed {found.group(0)} where "
+            f"{final['moves_taken']}/{reference} derives {want_ratio}.\n{printed}"
+        )
+    print(printed.rstrip())
+
+    # The pilot must never be stuck on a won board. `board.gd` freezes `try_move`
+    # once `all_levels_solved` latches; the documented escape is `reload`, and the
+    # channel-level counterpart of R2's un-freeze check is that the SCREEN comes
+    # back and the next move is visibly accepted.
+    won_board = prev_raw
+    after, _t, _tr, _i = adapter.step(RELOAD)
+    _rows, unfrozen = _channel_rows(adapter, budget)
+    if unfrozen == won_board:
+        raise SystemExit(
+            f"WIN VIOLATION — reload after the finish left the pilot's screen on the "
+            f"won board, so a pilot given more budget after the win has no readable "
+            f"way out of the frozen state.\n{won_board}"
+        )
+    if (after["all_levels_solved"] or after["moves_taken"] != 0
+            or after["level_index"] != final["level_index"]):
+        raise SystemExit(
+            f"WIN VIOLATION — reload after the finish did not restart the last level: "
+            f"all_levels_solved={after['all_levels_solved']} "
+            f"moves_taken={after['moves_taken']} level_index={after['level_index']} "
+            f"(expected False / 0 / {final['level_index']})."
+        )
+    _rows, before_move = _channel_rows(adapter, budget)
+    after, _t, _tr, _i = adapter.step(solutions[order[-1]][0])
+    _rows, after_move = _channel_rows(adapter, budget)
+    if after_move == before_move:
+        raise SystemExit(
+            "WIN VIOLATION — the board is still frozen after a reload: the first "
+            "committed move of the last level changed nothing on the channel."
+        )
+    proofs.met(WIN_PROOF,
+               f"terminated=True, all_levels_solved=True, every crate rendered as "
+               f"`{ON_TARGET_GLYPH}`, {final['moves_taken']} of {reference} committed "
+               f"moves accepted; report_competence exited 0 with {want_solved} and "
+               f"{want_ratio}; reload un-freezes the board and the next move lands.")
+
+
+def assert_five_actions_land_on_the_channel(config: UgtConfig, adapter) -> None:
+    """§B P4 + P14 — drive the game's own committed solutions through the adapter
+    and prove the five declared behaviours on the screen channel. Fails closed
+    naming each one it could not prove, and costs nothing."""
+    budget = int(_pt(config).get("terminal_char_budget", 600))
+    solutions = _committed_solutions()
+    names = {aid: (d.get("name") if isinstance(d, dict) else str(d))
+             for aid, d in config.action_mappings.items()}
+    proofs = _Proofs()
+    print(f"[P4/P14] replaying levels/solutions.json through the adapter and reading "
+          f"the SCREEN channel ({budget}-char budget) — no model, no spend.")
+
+    for group, run in (
+        ((REFUSAL_PROOF,), lambda: _prove_refusal_returns_an_identical_board(
+            adapter, budget, solutions, proofs)),
+        ((RELOAD_PROOF,), lambda: _prove_reload_restores_the_opening_board(
+            adapter, budget, solutions, proofs)),
+        ((PUSH_PROOF, ADVANCE_PROOF, WIN_PROOF), lambda: _prove_push_advance_and_win(
+            adapter, budget, solutions, names, proofs)),
+    ):
+        try:
+            run()
+        except (Exception, SystemExit) as exc:   # noqa: BLE001 — see unproven_group
+            proofs.unproven_group(group, f"{type(exc).__name__}: {exc}")
+
+    outstanding = proofs.outstanding()
+    if outstanding:
+        detail = "\n".join(f"    * {name}\n        {reason}"
+                           for name, reason in outstanding)
+        raise SystemExit(
+            f"P4/P14 NOT MET — {len(outstanding)} of {len(FIVE_PROOFS)} declared "
+            f"behaviours could not be proven on the channel the pilot reads:\n{detail}\n"
+            f"    Refusing to spend on a tier whose instrument has not been shown able "
+            f"to register these readings."
+        )
+    print(f"[P4/P14] all {len(FIVE_PROOFS)} declared behaviours land on the pilot's "
+          f"screen channel.")
+
+
+def prove_actions_over_the_channel(config: UgtConfig) -> int:
+    """The one call site, so `main()` and `--prove-actions` cannot drift.
+
+    It builds its OWN adapter rather than sharing the §B probe's, and that is
+    structural rather than tidiness: `reset` on this wire is `reset_level()`, so a
+    check that ends on level 3 redefines "the opening board" for anything added
+    after it. A separate bridge on its own ephemeral port makes that impossible
+    instead of merely commented.
+    """
+    adapter = GodotTcpAdapter(config)
+    adapter.connect()
+    try:
+        assert_five_actions_land_on_the_channel(config, adapter)
+    finally:
+        adapter.close()
+    return 0
+
+
 # ── Competence ───────────────────────────────────────────────────────────────
 #
 # Everything below reads a report, prints, and decides an exit code. It touches no
@@ -663,7 +1271,17 @@ def count_target_arrivals(report: dict) -> dict:
 
       * the scalar the game keeps (`boxes_on_target`), accumulated from the signed
         diffs `_compute_delta` writes;
-      * the rendered board (`*` cells GAINED between the two halves of one delta).
+      * the rendered board — the NUMBER of `*` cells rising between the two halves
+        of one delta.
+
+    **A count, not a cell set, and that is a repair rather than a style choice**
+    (Finding 18). This used to ask whether the `*` cell SET gained a member, which
+    is a different predicate: pushing a crate off one target directly onto another
+    gains a cell and loses one, so the set grows while the count — and
+    `boxes_on_target`, correctly — does not move. `level_03`'s committed solution
+    does exactly that on its 25th move, so on any run reaching it the two readings
+    "disagreed" and the gate refused an honest log with `CONTRADICTION` (exit 2).
+    The scalar is a count, so the like-for-like board reading is a count.
 
     An ARRIVAL is a step where the count ROSE, not a high-water mark of the count
     itself, and the difference is load-bearing. Two things can raise
@@ -713,8 +1331,8 @@ def count_target_arrivals(report: dict) -> dict:
 
         if diff > 0:
             out["scalar_arrival_steps"].append(step)
-        if pair is not None and (_cells(pair[1], ON_TARGET_GLYPH)
-                                 - _cells(pair[0], ON_TARGET_GLYPH)):
+        if pair is not None and (len(_cells(pair[1], ON_TARGET_GLYPH))
+                                 > len(_cells(pair[0], ON_TARGET_GLYPH))):
             out["grid_arrival_steps"].append(step)
     # Both lists are built in log order, so they are directly comparable without
     # sorting — and no sort key has to guess what a `step` field might contain.
@@ -1158,6 +1776,25 @@ def _fixture_preplaced_target_restored() -> dict:
     ], 2, grid=start)
 
 
+def _fixture_target_to_target_push() -> dict:
+    """A crate pushed off one target straight onto an adjacent one.
+
+    Not hypothetical: `level_03`'s committed solution does this, so any run that
+    reaches it produces this step. The `*` **cell set** gains a member and loses
+    one; the `*` **count** does not move, and neither does `boxes_on_target` —
+    correctly, because nothing arrived that was not already home. The player ends
+    on the vacated target, hence `+`.
+
+    The control for Finding 18: under the old cell-set reading the board claimed
+    an arrival the counter did not, and the gate refused an honest log as
+    CONTRADICTORY. The crate really did move, so this must read as a genuine push
+    with no arrival — i.e. UNMEASURED, not exit 2.
+    """
+    before = ["#######", "#     #", "# @*. #", "#######"]
+    after = ["#######", "#     #", "#  +* #", "#######"]
+    return _report([_step(1, "right", before, after, player_x="+1")], 1)
+
+
 def _fixture_scalar_without_grid() -> dict:
     """The counter says a crate reached a target; the board never shows a `*`.
 
@@ -1383,6 +2020,27 @@ def prove_scoring() -> int:
           and not arrivals["grid_arrival_steps"],
           f"{verdict} with a real push already counted (crates_moved=1), "
           f"{arrivals['reloads_excluded']} reload excluded from both readings")
+
+    # N3 — Finding 18: the board reading is a COUNT, not a cell set. A crate
+    # pushed off one target onto the next gains a `*` cell and loses one, so the
+    # set grows while nothing arrives — and `level_03`'s committed solution
+    # contains exactly that move, which is what makes this a repair rather than a
+    # hypothetical. Under the old reading the two readings "disagreed" and an
+    # honest run was refused with exit 2.
+    rep = _fixture_target_to_target_push()
+    verdict, _ = core_interaction_verdict(rep)
+    arrivals = count_target_arrivals(rep)
+    check("N3 a target-to-target push is not an arrival, and not a contradiction",
+          verdict == "UNMEASURED" and count_crate_moves(rep)["moved"] == 1
+          and not arrivals["scalar_arrival_steps"]
+          and not arrivals["grid_arrival_steps"],
+          f"{verdict} with the crate really moved (crates_moved=1); board `*` count "
+          f"unchanged, so neither reading claims an arrival")
+    check("N3 the fixture really does gain a `*` CELL",
+          bool(_cells(_grid_delta(rep['action_log'][0])[1], ON_TARGET_GLYPH)
+               - _cells(_grid_delta(rep['action_log'][0])[0], ON_TARGET_GLYPH)),
+          "the cell set does grow — which is why a set-difference reading called "
+          "this an arrival and a count reading does not")
 
     # O — the gate reads the LOG, not the summary. A report claiming
     # all_levels_solved with an empty log is exactly what a broken wire or a
@@ -1687,6 +2345,11 @@ def main() -> int:
                          "while LEAVING it in the pilot's history, and that "
                          "redact_state_fields still strips both; synthetic states, no "
                          "bridge, no model, no spend")
+    ap.add_argument("--prove-actions", action="store_true", dest="prove_actions",
+                    help="drive the committed solutions through the adapter and prove "
+                         "the five declared behaviours — push, refusal, reload, level "
+                         "advance, win — on the screen channel the pilot reads. Needs "
+                         "Godot; no model, no spend")
     args = ap.parse_args()
 
     # Model-free paths first, so scoring never needs Godot or a provider.
@@ -1694,6 +2357,10 @@ def main() -> int:
         return prove_scoring()
     if args.prove_prompt:
         return prove_prompt()
+    if args.prove_actions:
+        # Needs the live game, but no provider and no credit — so it belongs with
+        # the model-free entry points, not behind a run.
+        return prove_actions_over_the_channel(UgtConfig(CONFIG))
     if args.score:
         return report_competence(args.score)
 
@@ -1727,6 +2394,11 @@ def main() -> int:
         assert_history_shows_the_board(config, guide, probe)
     finally:
         probe.close()
+
+    # Then the five declared actions, on their OWN bridge — see the docstring;
+    # `reset` is `reset_level()`, so a check that ends on level 3 must not be able
+    # to leak into a probe added after it. Still free, still before any model.
+    prove_actions_over_the_channel(config)
 
     output = args.output or os.path.join(HERE, "results", "playtest-report.json")
     os.makedirs(os.path.dirname(output), exist_ok=True)

@@ -225,6 +225,60 @@ push.
 
 That's another line drawn under the three recorded runs, and the bigger of the two.
 
+### I had never seen my own instrument register a reading
+
+Here's the uncomfortable arithmetic behind everything above. Across those three runs
+— a hundred and sixty actions — the model moved a crate zero times, had zero moves
+refused, reloaded zero times, advanced zero levels and finished zero episodes. Five
+actions in the game; one of them had ever visibly done anything. So the push path,
+the refusal path that the briefing spends a whole section teaching, the R key, the
+level change, the "you won" flag and the entire scoring path for a solved game had
+never once run on this tier. Not "probably fine" — never observed.
+
+I'd been reading that as a fact about the model, which it partly is. It's also a fact
+about my thermometer: I had no evidence it could tell hot from cold, because it had
+only ever been dipped in one thing. And the ladder doesn't cover it, which took me a
+minute to see clearly. The five rungs assert every one of those behaviours against
+the *state dictionary* that comes back over the wire, and they're thorough about it.
+None of them touches the thing the model actually reads — the rendered board — and
+between those two sits a whole serialization step that had never been exercised with
+a crate or a refusal on it.
+
+The fix costs nothing, and it costs nothing for a reason that felt slightly silly
+once I noticed it: **the game ships its own answers.** `solutions.json` is right
+there, three sequences that solve three levels, and R2 already replays it. So the
+pre-flight now replays it too — through the same adapter the model gets, before any
+model is contacted — and asserts five things on the *screen*: a crate arrives on a
+target, a refused move gives back the board byte-identically, R restores the opening,
+each level change resizes the board, and the whole thing reaches the win with the
+scorer printing a ratio. If it can't prove one, it says which one and refuses to go
+on.
+
+The refused-move check is the one I'd have got wrong if I'd been in a hurry. This
+game has no text at all, so there's no "you can't go that way" message to look for —
+the *unchanged board is the message*. Which means the check has to compare the whole
+picture, not the row the player's on, and I proved that matters rather than asserting
+it: I tampered with one cell in a corner of the board and confirmed the whole-board
+version goes red while a row-substring version happily passes. Same reason the check
+requires finding a blocked *push* and not just a wall bounce — I've already shipped a
+check on this game that thought it was testing a blocked push and was testing a wall,
+and it passed for weeks.
+
+And then the replay did what a first run always does: it found a bug in about four
+seconds. My scorer decided "a crate reached a target" by asking whether the set of
+on-target squares gained a member. That's not the same question as whether the
+*count* went up, and level 3's own solution separates the two — it pushes a crate off
+one target straight onto the next, so the set gains a square and loses a square and
+nothing has arrived anywhere. The counter agreed with reality; my board reading
+didn't; the gate saw them disagree and refused the log as contradictory. Which means
+**any successful paid run would have been thrown out**, with a banner blaming the
+game. It had gone unnoticed for the same reason as everything else in this section:
+no run had ever got as far as level 3.
+
+That's the whole argument for this task in one line. The bug wasn't hiding in code I
+hadn't written; it was hiding in a code path nothing had ever walked, and the only way
+to walk it without a model was to make the game play itself.
+
 ### Small ones, each of which cost a red run
 
 - **A move counter I was wrong about twice.** I had written down that `moves_taken` starts over when you advance a level, so the "it only ever goes up" invariant got scoped to a single level. It doesn't start over — the counter runs for the whole session, and the game's own test suite says so explicitly. The invariant was *narrower* than the truth, which is the sneaky kind of wrong: it never fired, so it never argued with the note, and both sat there agreeing with each other through a green ladder. The real boundary is that a reload rewinds it to exactly zero and nothing else may take it backwards, which is what it now asserts. **Two artifacts written from one wrong belief will corroborate each other forever.**
@@ -307,6 +361,14 @@ running in a real engine"* is a different question from *"can a harness step it.
 model reads a real board, aligned, in the panel a player looks at; it chooses legal
 moves; it never broke one of the nine invariants across a hundred and sixty actions
 of trying. That's the whole job of the free local stage and it's done.
+
+**What is no longer un-shown is the instrument.** The pre-flight now makes the game
+play its own committed solutions through the same adapter, before any model is
+contacted, and proves on the *screen* that a crate reaches a target, a refused move
+gives back the board byte-identically, R restores the level, each level change
+resizes the board, and the run finishes with the scorer printing a ratio. It fails
+closed naming whichever of the five it couldn't prove. That is the first time this
+tier has printed a competence block at all, and it cost nothing.
 
 What the local stage did *not* do is tell me anything about whether the puzzles are
 good, because the model never pushed a crate. That's the expected shape of a

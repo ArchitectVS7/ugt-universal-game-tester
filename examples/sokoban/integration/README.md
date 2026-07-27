@@ -70,6 +70,9 @@ python3 examples/sokoban/integration/playtest_sokoban.py --score results/<report
 python3 examples/sokoban/integration/playtest_sokoban.py --prove-scoring
 # the two prompt knobs' own controls — synthetic states, no bridge, no model
 python3 examples/sokoban/integration/playtest_sokoban.py --prove-prompt
+# the five declared actions, proven on the SCREEN channel the pilot reads by
+# replaying the game's own committed solutions. Needs Godot; no model, no spend.
+python3 examples/sokoban/integration/playtest_sokoban.py --prove-actions
 ```
 
 `ugt playtest` cannot drive this game — `engine.type: custom` means `env.py` has
@@ -137,7 +140,9 @@ synthetic reports for a walk that solves nothing, a push along open floor with
 log, an episode reset that replays level 1, a finished run that *does* print the
 ratio, a push that moves a crate but reaches no target, a clean `all_levels_solved`
 summary above an empty log, a hypothetical level that ships a crate already on a
-target and is reloaded, both directions of counter-vs-board disagreement, and the
+target and is reloaded, a crate pushed off one target straight onto the next
+(Finding 18 — `level_03`'s committed solution does this, and it used to read as a
+CONTRADICTION), both directions of counter-vs-board disagreement, and the
 exit code `--score` returns off a real file on disk. It is the **budget floor's**
 control too: a synthetic level set that moves the reference and the floor with it (the
 case a hard-coded 73 cannot pass), a truncated `solutions.json` failing closed rather
@@ -159,7 +164,7 @@ Run before spending anything, per P12. Everything below was free.
 | P1 | Identities, not handles | **PASS.** Actions are `up`/`down`/`left`/`right`/`reload`, never ids. State names are plain (`boxes_on_target`, not `bot`). No room-code equivalent exists — the board is the world |
 | P2 | Adapter passes through every PUBLIC field | **PASS, and the channel had to be built.** This game has NO prose: `main.tscn` is ColorRects with no Label, no font, no message line. So the board IS the entire player-facing text channel, and `GodotTcpAdapter.get_terminal_text()` now carries it by joining the very rows `board.gd::render_rows()` draws for the human. Asserted live in both directions — a board arrives, AND it changes when the game changes (a channel serving a stale screen forever would pass the first check and is worse than an empty one, because it looks right). **Still true after the win state was added** (Finding 15): it is colour and geometry — a frame, a backdrop change, a crate-on-target colour — with **no text node of any kind**, precisely so the channel did not have to grow. The pilot already had that information as `level_solved` / `all_levels_solved` and as `*` in the rendered board, so nothing was added to the wire and this verdict stands unchanged. Zero prose is now a stated `PRD.md` constraint rather than an accident of the scene, which is what keeps this row true against a future edit |
 | P3 | Truncation is silent starvation | **WOULD HAVE FAILED — FIXED.** The guide is 4,682 chars against the 2,000 default. The cut lands from "The one rule that matters" onward, i.e. every rule that creates the skill. Budget set to 6,000 and `assert_guide_fits` fails the run before any model is contacted |
-| P4 | Action channel sends what the LLM thinks | **PASS.** `action_id` mode maps name → id 1:1; an unknown name is dropped, never coerced to a neighbouring id. The truncation salvage added in Finding 7 keeps that property — it refuses to salvage a name the config does not declare |
+| P4 | Action channel sends what the LLM thinks | **PASS, and since 2026-07-26 (T-010) the claim is EXECUTED rather than reasoned about** (Finding 18). `action_id` mode maps name → id 1:1; an unknown name is dropped, never coerced to a neighbouring id. The truncation salvage added in Finding 7 keeps that property — it refuses to salvage a name the config does not declare. What that argument never covered is whether each declared action's *effect* reaches the pilot: 160 recorded stage-1 actions exercised exactly one of the five actions' worth of behaviour (0 crates moved, 0 refused moves, 0 reloads, 0 advances, 0 finished episodes), so four of five were unproven on this tier. `assert_five_actions_land_on_the_channel` now replays the committed solutions through the same adapter and asserts all five on `get_terminal_text()` — the channel the pilot reads, not `step()`'s return — fails closed naming which it could not prove, and costs nothing |
 | P5 | Prompt must not leak what the client hides | **WAS LEAKING — CLOSED, and the audit ran the other way too.** There is no HUD at all here, so every field had to be justified rather than passed through. Six of eight are derivable by looking at the board. Two are held back, **by two different knobs, for opposite reasons** (Finding 17 — they used to share one list, and that cost the pilot its memory of the board): `moves_taken` is FOG OF WAR (`redact_state_fields`, gone from every channel — a score the game keeps and shows nobody, Finding 6, and the exact number this tier scores against), and `grid` is CONTEXT ECONOMY (`hide_from_state_block`, gone from the state block only — not hidden, *moved* to the Terminal panel where it renders aligned instead of JSON-quoted, and still present in the recent-action deltas). Verified against a **rendered prompt**, not against the config — and now scoped to the right *section* of it, since a whole-prompt substring check cannot tell the state block from the Terminal panel from the history. **One asymmetry ran the OTHER way and is now closed on the human side** (Finding 15): the pilot could see `*` in the board and `all_levels_solved` in its state block, and the player at the keyboard could see neither — a crate on a target was painted like a crate on floor, and the finished game looked hung. Fixed in the game as colour, so **nothing entered or left the held-back set** and this row's disposition is unchanged. P5 is a two-way audit: "the prompt must not leak what the client hides" has a mirror, "the client must not hide what the prompt is given" |
 | P6 | Guide teaches the RULES that create skill | **PASS.** Push-not-pull and its consequences: why a wall-flush crate can only slide, why a corner is permanent, why finishing a crate early can wall you off, and that reload is the correct move rather than a failure. No solution sequences — teaching the moves would measure recall |
 | P7 | Competence from the reasoning, not the exit code | **RUN — the channel is proven and the local model is below the floor.** Quantified rather than sensed: across 160 actions over three runs the pilot moved a crate **0 times** on a first level solvable in 6 moves (instrument-derived from the boards since Finding 11, not counted by hand), and of the crate positions it stated out loud only ~40% matched the board (9/17, 9/21, 41/59 right/wrong). It is engaged with the right concepts (`crate` 67×, `push` 30×, `target` 33× in 30 actions) and cannot reliably localise a glyph in a 7×5 grid. This is NOT P12's ambiguous-silence case: a specific wrong belief, stated out loud, is diagnosable — see Finding 8. **Every figure in this row is PRE-T-008** (160 actions, 0 crates, and all three localisation counts) and sits behind the P8 boundary Finding 16 declares — the localisation question has to be re-measured after it, not continued from here |
@@ -168,7 +173,7 @@ Run before spending anything, per P12. Everything below was free.
 | P10 | Pilot needs memory, not just state | **WAS CONFIGURED BUT EMPTY — FIXED, and now verified against a rendered prompt** (Finding 17). `history_window: 12` was set from the start (roughly one crate's worth of work including the walking; the default 5 forgets the plan halfway through executing it) — but the twelve entries carried no board, because `grid` sat in `redact_state_fields`, which strips the deltas as well as the state block. Since a push that crosses no target moves no *visible* scalar, a crate-pushing move rendered as `Step 2: up → {'player_y': '-1'}` — byte-identical in shape to a plain walk. A window configured to remember a crate route remembered no crates. `assert_history_shows_the_board` now replays the committed solution through the live bridge, renders a real prompt, and asserts the pushing step's line carries the whole after-board with the crate in a position that does not occur in the before-board, that the walked step's pair leaves the crate cells unchanged, and that `moves_taken` still reaches no channel. **`terminal_recall_budget` is deliberately still unset** and the config says why: recall keeps the LATEST screen per (action, context), which here would be up to five boards (one per direction key), four of them stale, under a header promising they are still valid — false by construction in a game where every accepted move redraws the screen. The delta pair is ordered, is a diff, and separates a push from a walk; recall is neither |
 | P11 | A prompt guard is part of the game | **WOULD HAVE MADE THE GAME UNPLAYABLE — FIXED.** The repeat guard blocks the 3rd identical proposal at its default. Pushing a crate five cells along a row *is* five consecutive `left`s, and the committed solutions contain runs of 5 and 6. Raised to 8, and `assert_repeat_guard_allows_real_play` derives the bound from `solutions.json` so authoring a longer push run re-checks it automatically |
 | P12 | Local model first | **DONE — `gemma4:26b`, zero API cost.** It paid for itself: P3, P11, and Findings 6–9 were all found free, and two of those are UGT-core defects that would otherwise have surfaced on a paid bill |
-| P14 | Content: solvable, and every obstacle teaches | **Solvable is PROVEN, and each shipped sequence is the SHORTEST possible** — R1 and R2 replay the committed solutions through the live engine every run, and `game/tests/test_solution_optimality.gd` breadth-first-searches each level *through `board.gd::try_move()` itself* and asserts the committed length is minimal (6 / 23 / 44 = the 73-move reference; level_03 costs ~7.7e5 states and ~16 s, with an opt-out flag). That proof is game-side because minimality is a claim about authored CONTENT, and a solver in this harness would be a second rules engine next to the one it checks. **Two further content claims became assertions on 2026-07-26 (T-007), both game-side and neither a solver:** the *gradient* — the shortest solution getting strictly longer across the three levels, which is the part of "increasing difficulty" that crate count and grid area never covered (`game/tests/test_shipped_levels.gd`, asserted as a relationship, not as 6 / 23 / 44) — and *deadlock-capability*, the claim `reload` rests on: every shipped level contains at least one cell a crate could never be recovered from (`game/tests/test_deadlock_cells.gd`, 4 / 8 / 8 cells, ≥ 1 asserted). **Name the limit of that second one:** it is a geometric witness counted off `board.gd::render_rows()` — a non-target cell walled on one vertical *and* one horizontal side, or a wall-flush lane with no target in it — not an enumeration of every deadlock (two crates jamming each other is one it does not count) and not a claim that a player can reach one. Reachability would need the searcher; the reload button's justification does not. "Teaching" works differently in this genre and needs saying: there is no authored refusal text because there is no text. A refused move returns byte-identical state, and the board itself is the explanation — a human sees the wall. The guide therefore has to teach *how to read a refusal* ("if the board comes back exactly as it was…"), which is the substitute for a spoken one |
+| P14 | Content: solvable, and every obstacle teaches | **Solvable is PROVEN, and each shipped sequence is the SHORTEST possible** — R1 and R2 replay the committed solutions through the live engine every run, and `game/tests/test_solution_optimality.gd` breadth-first-searches each level *through `board.gd::try_move()` itself* and asserts the committed length is minimal (6 / 23 / 44 = the 73-move reference; level_03 costs ~7.7e5 states and ~16 s, with an opt-out flag). That proof is game-side because minimality is a claim about authored CONTENT, and a solver in this harness would be a second rules engine next to the one it checks. **Two further content claims became assertions on 2026-07-26 (T-007), both game-side and neither a solver:** the *gradient* — the shortest solution getting strictly longer across the three levels, which is the part of "increasing difficulty" that crate count and grid area never covered (`game/tests/test_shipped_levels.gd`, asserted as a relationship, not as 6 / 23 / 44) — and *deadlock-capability*, the claim `reload` rests on: every shipped level contains at least one cell a crate could never be recovered from (`game/tests/test_deadlock_cells.gd`, 4 / 8 / 8 cells, ≥ 1 asserted). **Name the limit of that second one:** it is a geometric witness counted off `board.gd::render_rows()` — a non-target cell walled on one vertical *and* one horizontal side, or a wall-flush lane with no target in it — not an enumeration of every deadlock (two crates jamming each other is one it does not count) and not a claim that a player can reach one. Reachability would need the searcher; the reload button's justification does not. "Teaching" works differently in this genre and needs saying: there is no authored refusal text because there is no text. A refused move returns byte-identical state, and the board itself is the explanation — a human sees the wall. The guide therefore has to teach *how to read a refusal* ("if the board comes back exactly as it was…"), which is the substitute for a spoken one. **That sentence is now an assertion on the pilot's own channel, not only an R2 claim about state** (Finding 18, T-010): R2 proves a refused move leaves the whole *state dict* untouched, which is a different thing from the pilot being told nothing happened. `--prove-actions` probes all four directions from every prefix of `level_01`'s committed solution, lets the GAME decide which are refused (whole-state equality), and asserts each refusal returned the **whole rendered board byte-identical** — not a row, not a substring, not a glyph count — with a *blocked push* required among them rather than a wall bounce alone, and an accepted move alongside as the liveness control (a channel frozen on the opening board satisfies "byte-identical" forever) |
 
 ### Stage 1 runs — local, free, and no number from here is quotable
 
@@ -238,7 +243,7 @@ Stage 2 (Haiku) is un-run and is a credit decision, not a blocked one.
 | `verify_round1.py` | Rung 3 — level 1 solved, F1–F6. |
 | `verify_round2.py` | Rung 4 — all 3 levels to `all_levels_solved`, no-op probes. |
 | `verify_round3.py` | Rung 5 — invariant fuzzer, illegal ids, replay determinism. |
-| `playtest_sokoban.py` | Tier 3 — the LLM runner. Owns the §B pre-flight, then hands the adapter to `playtest_game_with_adapter()`. Also owns the competence scoreline and the core-interaction gate that refuses to score a run in which no crate ever moved — re-runnable model-free via `--score` and self-proving via `--prove-scoring`. `--prove-prompt` is the third model-free entry point: the controls for the two prompt knobs (`redact_state_fields` vs `hide_from_state_block`), rendered from synthetic states. Also owns the **paid action-budget floor** — derived from `levels/solutions.json`, so a paid run that could not reach `all_levels_solved` is refused before anything is spent. |
+| `playtest_sokoban.py` | Tier 3 — the LLM runner. Owns the §B pre-flight, then hands the adapter to `playtest_game_with_adapter()`. Also owns the competence scoreline and the core-interaction gate that refuses to score a run in which no crate ever moved — re-runnable model-free via `--score` and self-proving via `--prove-scoring`. `--prove-prompt` is the third model-free entry point: the controls for the two prompt knobs (`redact_state_fields` vs `hide_from_state_block`), rendered from synthetic states. `--prove-actions` is the fourth: it replays the committed solutions through the adapter and proves all five declared behaviours — push, refusal, `reload`, level advance, win — on the **screen channel** `get_terminal_text()` carries (needs Godot; no model, no spend). Also owns the **paid action-budget floor** — derived from `levels/solutions.json`, so a paid run that could not reach `all_levels_solved` is refused before anything is spent. |
 | `strategy-guide.md` | Tier 3 — the briefing the pilot reads. Teaches push geometry, corner deaths and when to reload; no solutions. |
 | `ugt.config.yaml` | `engine.type: custom` — env.py dispatches nothing, so the rungs and the tier-3 runner construct the adapter. 5 actions: four directions plus `4 = reload`. Also carries the `playtest.*` block, where every setting is justified inline. |
 
@@ -652,7 +657,9 @@ can defeat.
 
 Proven able to fail, three ways, each mutation applied by hand and the file restored
 byte-identically (sha256 compared before and after, never `git checkout`), against a
-58-check green baseline:
+green baseline of **58 checks at that commit** (Finding 18 has since taken it to 60 —
+the figure is left as it was because it is evidence about the mutation run, not a
+live count):
 
 * putting the old `optimum for all 3 levels` label back turns **both** W rows red
   (`NOT MET (2 failed)`, exit 1) while every `_RATIO`-keyed row stays green — which
@@ -1018,6 +1025,126 @@ guard or budget moved, and the strategy guide was deliberately **not** touched: 
 the pilot "your history shows you the board before and after each move" is a further
 information change, and keeping each one atomic is what lets Finding 8's measurement
 name a single cause.
+
+**18. Four of the five declared actions had never been shown to reach the pilot at
+all, and proving them found a scorer bug that would have refused an honest run.
+FIXED.** Across three stage-1 runs and 160 actions the pilot moved a crate **0**
+times, had **0** moves refused, used `reload` **0** times, advanced **0** levels and
+finished **0** episodes. So on the tier that reads the *screen*, the push path, the
+refusal path, `reload`, the level advance, `terminated`, `all_levels_solved` and the
+competence scorer on a solved episode were all unproven — not "probably fine", never
+once observed. An instrument that has never been seen to register a reading is not
+evidence about the game, whatever it prints.
+
+The ladder does not close this, and the gap is precise. R1/R2/R3 assert every one of
+those behaviours on `step()`'s **state dict**, and the nine invariants run on every
+transition of every rung. None of that says anything about `get_terminal_text()` —
+the channel the pilot actually reads, which is this game's *entire* player-facing
+text surface. Between the state dict and the pilot's screen sits a whole
+serialization boundary, and it had never been exercised with a crate, a refusal, a
+reload or a new level on it.
+
+**Closed for free, because the game ships its own solutions.**
+`assert_five_actions_land_on_the_channel` replays `levels/solutions.json` through the
+same `GodotTcpAdapter` the pilot gets, before any model is contacted, and asserts
+five named behaviours **on the rendered board**:
+
+* **push** — the board's `*` count rises on at least one step, and on exactly the
+  steps `boxes_on_target` rose (advances excluded from both readings, as
+  `count_target_arrivals` already did). A disagreement is refused as a wire defect,
+  not tuned away;
+* **refusal** — every refusal the game makes returns the **whole rendered board
+  byte-identical**. Not a row, not a substring, not a glyph count: in a game with no
+  prose the unchanged board *is* the refusal message, which is the P14 row's claim
+  turned into an assertion. The refusals are **found, not hardcoded** (all four
+  directions probed from every prefix of `level_01`'s committed solution, with the
+  game deciding by whole-state equality), a **blocked push** is required among them
+  rather than a wall bounce — this harness has already shipped a probe that found
+  `down` into a wall and reported the blocked push covered — and an **accepted** move
+  is recorded alongside as the liveness control;
+* **reload** — action 4 restores the opening board byte-identically, with
+  `moves_taken` back to 0 and `level_index` unchanged;
+* **advance** — the two level advances each change the board's *shape*, and no
+  non-advance step does. Asserted as a change, never against the literal 7×5 / 9×7 /
+  11×8, which is the game's content;
+* **win** — `terminated`, `all_levels_solved`, every crate rendered as `*` (the
+  channel's only witness, because the win state is deliberately non-textual —
+  Finding 15), all 73 committed moves accepted, and `report_competence` exiting **0**
+  with `levels_solved: 3/3` and a **derived** ratio. That is the T-001 path exercised
+  end to end for the first time; the tier had never once reached a solved episode, so
+  the code that scores one had never run outside a fixture.
+
+It fails **closed and itemised**: each of the five prints either way, an exception
+marks its whole group unproven (a dead socket must not report "1 of 5" while implying
+the other two still stand), and the run refuses with a `SystemExit` naming every
+behaviour it could not prove and why. It runs on **its own bridge**, not the §B
+probe's, and that is structural rather than tidy: `reset` on this wire is
+`reset_level()`, so a check that ended on level 3 would silently redefine "the
+opening board" for anything added after it.
+
+**And the replay immediately found a real defect in the scorer — route: this
+harness.** `count_target_arrivals` read the board half of "a crate reached a target"
+as the `*` **cell set** gaining a member. `boxes_on_target` is a **count**, so those
+are different predicates, and `level_03`'s committed solution separates them on its
+25th move: a crate is pushed off one target straight onto the adjacent one, the cell
+set gains one and loses one, and the count — correctly — does not move. The two
+readings therefore "disagreed" and the core-interaction gate refused the log as
+**CONTRADICTORY (exit 2)**. Not hypothetical and not reachable only by a mutation:
+*any* run that solves level 3 produces that step, so a successful paid run would have
+been refused with a banner blaming the wire. It went unnoticed because no run had
+ever got there — the same absence this finding is about. Fixed by reading the count
+on both sides, with `--prove-scoring` case **N3** as its permanent control (58 → **60
+checks**, `PROVE SCORING — MET`), which additionally asserts that the fixture really
+does gain a `*` *cell*, so the case cannot pass for the wrong reason.
+
+Proven able to fail, seven ways, each mutation applied by hand and every file
+restored **byte-identically** (sha256 compared before and after, never
+`git checkout`), against a green baseline of 5/5 proofs:
+
+* **`_remember_screen` → `self._screen = []`** (the dead channel, the Accept
+  criterion): `5 of 5` unproven, exit 1, each naming the empty channel;
+* **`_remember_screen` remembering only the FIRST screen** (the stale channel, which
+  "looks right"): `5 of 5` unproven — and the instructive part is that the
+  byte-identical refusal clause *still passed*, because a frozen board is trivially
+  identical to itself. What catches it is the liveness control, which reports
+  `the game ACCEPTED a move … and the rendered board came back byte-identical. The
+  channel is frozen, which would make the refusal clause above vacuously true
+  forever.` That mutation is exactly why the control exists, and why it is ordered
+  ahead of the content guard;
+* **`_remember_screen` dropping the last row**: `3 of 5` unproven on the
+  channel-fidelity clause — `the pilot is reading a different board from the one the
+  game rendered` — which the board-to-board comparisons cannot see, because two
+  equally-damaged boards compare fine;
+* **a fabricated after-board on every refusal**, one cell changed *off* the player's
+  row: red, `P14 VIOLATION`, exit 1;
+* **the same fabrication with the comparison weakened to a substring test on the
+  player's row**: **exit 0, refusal proof "ok"** — the tampered board passes. That
+  pair is the evidence for "the whole rendered board, not a substring";
+* **the fail-closed summary made a `print`** with one proof forced unproven: exit
+  **0**, and the script cheerfully prints `NOT MET — 1 of 5` followed by `all 5
+  declared behaviours land`. So it is the `raise`, not the message, that gates;
+* **two wasted-but-accepted moves injected into the replay** → `moves_taken=75`
+  against the 73-move reference, red on the every-move-accepted clause; and
+  separately **making the scorer print `(moves + 1) / reference`** → red as `the
+  scorer printed 1.01x where 73/73 derives 1.00x`, so the ratio assertion is derived
+  rather than a typed literal;
+* **reverting the Finding 18 repair** (cell set instead of count) → the push proof
+  red as `CONTRADICTORY WIRE`, naming step 54 as the extra board arrival, and
+  `--prove-scoring` case N3 red. The repair is guarded in both places.
+
+**P8: no boundary.** Nothing the pilot receives moved — no guide edit, no
+`redact_state_fields` / `hide_from_state_block` change, no prompt builder, no guard
+threshold, no budget, no wire field, no adapter behaviour, no invariant, no ladder
+rung. Only what is *checked before* a run, and one scorer predicate that was reading
+the wrong quantity. The three stage-1 rows stay comparable across this commit and no
+recorded report needs re-deriving (all three still trip the gate at exit 1 — none of
+them reaches a target on either reading, so the count/set distinction does not move
+them). The pre-flight also cannot leak into the run: both probe adapters are closed
+and the run gets a fresh `GodotTcpAdapter` on a fresh ephemeral-port bridge. The
+generalisable half — *a tier that has never exercised the game's core actions has
+never been shown able to register a reading; drive the game's own committed solutions
+through the pilot's channel to prove each declared action lands* — is a `LESSONS.md`
+§B candidate and is deliberately not promoted here.
 
 ## Corrections to this harness
 
