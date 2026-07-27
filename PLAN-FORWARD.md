@@ -92,6 +92,80 @@ surface); this document keeps only the cross-game, framework-level priorities:
    engine-first games, and in every case it caught things — visual readability, onboarding, animation feel — no
    engine-level tier can see by construction. Every integration's `HANDOFF.md` should carry a UAT status line
    the same way it carries ladder status.
+3. **Rebuild the regression floor the sample games used to provide** — see "The regression gap" below. This
+   is the one item with a deadline attached to it: it should land *before* the next `ugt/core/` change, not
+   after, because right now a core change has nothing in-repo to break against.
+4. **Build the teaching artifact: one complete spec-to-tuned-game chain.** Needs its own session — see "The
+   teaching artifact" below.
+
+---
+
+## The teaching artifact (needs its own session — 2026-07-27)
+
+**The decision:** the three sample games are no longer bundled inside this repo. On 2026-07-27 (`7b759b8`)
+`examples/{dice,escape-room,sokoban}` were moved out to their own sibling repositories, to be published as a
+GitHub **organization** alongside UGT and the Orchestrator skill: the framework, the skill as a bonus, and
+some sample games built with `/orchestrate` and tested with UGT — each taken or left independently.
+
+**Two reasons, both real.** The in-repo layout taught the *wrong pattern*: in real use a game owns its own
+repository and the harness lives in `integrations/<game>/` here, but `examples/<game>/{game,integration}/`
+put both under one tree, and that was the first thing a reader saw. And shipping games inside the framework
+forces them on someone who only wants the tester.
+
+**The third reason is the one that needs work, not just a move.** Both the dice game and the escape room
+were played end-to-end by the owner and are *thin* — technically functional, no payoff. The dice game is
+point-and-click with numbers changing on screen and flavour text about forces clashing; the escape room's
+own channel check proved the transport and measured nothing about the game. They demonstrate the process
+and reward nobody. If a reader follows the chain and builds one of these, what they get at the end has to be
+worth having.
+
+**Root cause, and it is not the games.** Getting the dice game running took substantial back-and-forth and
+real creative input to solve problems the spec never anticipated — which means **the initial PRD was
+incredibly thin**. A teaching artifact whose first link is a PRD that cannot actually carry a build is
+teaching the wrong lesson twice.
+
+**What to build, when the session comes:**
+- **A genuinely complete PRD** — thick enough that `/tasklist` can derive a real `TASKS.md` from it and
+  `/orchestrate` can build it without the creative rescue the dice game needed. The PRD is the artifact
+  under test here; if it needs rescuing, it is not done.
+- **A game with actual payoff.** Candidates raised: Yahtzee with real dice, checkers, Pac-Man. Alternatively
+  the existing dice game may get there with short delays, animations, sound effects and real dice graphics —
+  it is the *feel* that is missing, not the rules. Decide by playing, not by reasoning about it.
+- **The full chain, documented as one arc:** PRD → `/tasklist` → `TASKS.md` → `/orchestrate` → a built game →
+  UGT ladder (spike/smoke/R1/R2/R3) → LLM playtest → a *tuning* pass driven by what the playtest found.
+  The tuning leg is the part no current example shows end to end, and it is the payoff of the whole method.
+- **Ship the PRD as the entry point.** The most useful thing to leave a reader may be exactly this: a
+  complete PRD plus "now run `/tasklist` on it, then `/orchestrate` it" — something they build themselves
+  rather than read.
+
+## The regression gap (opened 2026-07-27 by the same move)
+
+Moving the samples out removed UGT's only in-repo end-to-end check, so this needs an answer before the next
+core change. **How the examples were actually used** — the honest version, since the docs claimed more than
+the practice delivered:
+
+- **One live implementation per `engine.type`** (browser / simulation / custom-TCP), so a change to shared
+  `ugt/core/` code got exercised across all three transports rather than only the one in front of us. This
+  was the real value, and it is a *coverage* property, not a regression-suite property.
+- **They caught genuine framework bugs.** `6ffa58a` — `SubprocessAdapter.reset()` recorded no narration, so
+  the LLM tier's first decision was made with an empty terminal panel for *every* simulation-engine game;
+  found by driving the escape room. `700c46c` — the same pre-flight found a wire-only defect on the game
+  side (narration discarded at the bridge) that an in-process suite could not see.
+- **They forced generalization.** `694eb9d` moved the seeding probe out of one game's integration script into
+  `ugt/core/seeding.py` — a per-game habit became a framework guarantee because a second and third game
+  needed it.
+- **But the "re-run all three ladders on any core change" rule was aspirational.** Only 4 of the last 40
+  commits touched both `ugt/` and `examples/`. It was a real practice, unevenly applied — worth saying
+  plainly so the replacement is designed for what we actually did.
+
+**Options, roughly in order of preference:**
+1. **A small conformance fixture per `engine.type`, in-repo and deliberately boring.** Explicitly a *test
+   double*, not a demo game, and labelled as such so it never gets mistaken for the teaching artifact. This
+   does **not** violate "never test a re-implementation of the game" — that rule governs *adapters*, which
+   must hold no game logic. A fixture is not standing in for a real game; it exercises the transport.
+2. **CI that clones the three sibling repos and runs their ladders.** Keeps real games in the loop; costs a
+   network dependency and couples the framework's gate to repos that can drift.
+3. **Accept manual re-runs against the siblings.** Cheapest, and the least likely to actually happen.
 
 ---
 
