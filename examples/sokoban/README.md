@@ -279,6 +279,33 @@ That's the whole argument for this task in one line. The bug wasn't hiding in co
 hadn't written; it was hiding in a code path nothing had ever walked, and the only way
 to walk it without a model was to make the game play itself.
 
+### Then I ran the free check once more, and it still said no
+
+With the axes named and the board back in the model's memory, I ran the local check
+one final time at the hundred-action ceiling. The bar two separate reviews had set was
+deliberately tiny: **one crate reaches one target, once.** It didn't. The model moved
+a crate twice — the first time that had ever happened here, after a hundred and sixty
+actions of it never happening — and had four moves refused, which is the second of the
+five actions it had ever visibly used. Then it spent the remaining ninety-odd turns
+walking back and forth across level 1 — it never left it — finished 0 of 3 levels, and
+the runner exited non-zero with the banner I'd built for exactly this: *channel
+proven, game unmeasured.*
+
+I want to be precise about what that is. It is not a bad run I need to fix. Two real
+defects got fixed on the way here and the reading still didn't come, and the reading
+not coming is information about the pilot — a local model of this size can now locate
+a crate more often than not and still cannot execute a six-move plan. The
+temptation at this point is obvious and it is the one thing I'm not allowed to do:
+open the briefing, add a hint, run it again, watch the number move. That's not a
+measurement, it's a search, and the second run would be a different experiment wearing
+the first one's label. So the guide, the config and the runner's thresholds are
+byte-identical to what they were before the run — I checksummed them rather than
+trusting myself — and the run happened once.
+
+Which leaves a decision that isn't a tuning knob and isn't mine to make from an exit
+code: whether a paid model is worth it now, given that the free stage has proven every
+path it can prove and cannot prove the one that matters.
+
 ### Small ones, each of which cost a red run
 
 - **A move counter I was wrong about twice.** I had written down that `moves_taken` starts over when you advance a level, so the "it only ever goes up" invariant got scoped to a single level. It doesn't start over — the counter runs for the whole session, and the game's own test suite says so explicitly. The invariant was *narrower* than the truth, which is the sneaky kind of wrong: it never fired, so it never argued with the note, and both sat there agreeing with each other through a green ladder. The real boundary is that a reload rewinds it to exactly zero and nothing else may take it backwards, which is what it now asserts. **Two artifacts written from one wrong belief will corroborate each other forever.**

@@ -164,15 +164,15 @@ Run before spending anything, per P12. Everything below was free.
 | P1 | Identities, not handles | **PASS.** Actions are `up`/`down`/`left`/`right`/`reload`, never ids. State names are plain (`boxes_on_target`, not `bot`). No room-code equivalent exists — the board is the world |
 | P2 | Adapter passes through every PUBLIC field | **PASS, and the channel had to be built.** This game has NO prose: `main.tscn` is ColorRects with no Label, no font, no message line. So the board IS the entire player-facing text channel, and `GodotTcpAdapter.get_terminal_text()` now carries it by joining the very rows `board.gd::render_rows()` draws for the human. Asserted live in both directions — a board arrives, AND it changes when the game changes (a channel serving a stale screen forever would pass the first check and is worse than an empty one, because it looks right). **Still true after the win state was added** (Finding 15): it is colour and geometry — a frame, a backdrop change, a crate-on-target colour — with **no text node of any kind**, precisely so the channel did not have to grow. The pilot already had that information as `level_solved` / `all_levels_solved` and as `*` in the rendered board, so nothing was added to the wire and this verdict stands unchanged. Zero prose is now a stated `PRD.md` constraint rather than an accident of the scene, which is what keeps this row true against a future edit |
 | P3 | Truncation is silent starvation | **WOULD HAVE FAILED — FIXED.** The guide is 4,682 chars against the 2,000 default. The cut lands from "The one rule that matters" onward, i.e. every rule that creates the skill. Budget set to 6,000 and `assert_guide_fits` fails the run before any model is contacted |
-| P4 | Action channel sends what the LLM thinks | **PASS, and since 2026-07-26 (T-010) the claim is EXECUTED rather than reasoned about** (Finding 18). `action_id` mode maps name → id 1:1; an unknown name is dropped, never coerced to a neighbouring id. The truncation salvage added in Finding 7 keeps that property — it refuses to salvage a name the config does not declare. What that argument never covered is whether each declared action's *effect* reaches the pilot: 160 recorded stage-1 actions exercised exactly one of the five actions' worth of behaviour (0 crates moved, 0 refused moves, 0 reloads, 0 advances, 0 finished episodes), so four of five were unproven on this tier. `assert_five_actions_land_on_the_channel` now replays the committed solutions through the same adapter and asserts all five on `get_terminal_text()` — the channel the pilot reads, not `step()`'s return — fails closed naming which it could not prove, and costs nothing |
+| P4 | Action channel sends what the LLM thinks | **PASS, and since 2026-07-26 (T-010) the claim is EXECUTED rather than reasoned about** (Finding 18). `action_id` mode maps name → id 1:1; an unknown name is dropped, never coerced to a neighbouring id. The truncation salvage added in Finding 7 keeps that property — it refuses to salvage a name the config does not declare. What that argument never covered is whether each declared action's *effect* reaches the pilot: the 160 stage-1 actions recorded at that point exercised exactly one of the five actions' worth of behaviour (0 crates moved, 0 refused moves, 0 reloads, 0 advances, 0 finished episodes), so four of five were unproven on this tier. (Row 4 of the run table has since moved a crate twice and had four moves refused, and `reload`, the advance and a finished episode are *still* at 0 — which is the case for proving them by replay rather than waiting for a pilot to stumble into them.) `assert_five_actions_land_on_the_channel` now replays the committed solutions through the same adapter and asserts all five on `get_terminal_text()` — the channel the pilot reads, not `step()`'s return — fails closed naming which it could not prove, and costs nothing |
 | P5 | Prompt must not leak what the client hides | **WAS LEAKING — CLOSED, and the audit ran the other way too.** There is no HUD at all here, so every field had to be justified rather than passed through. Six of eight are derivable by looking at the board. Two are held back, **by two different knobs, for opposite reasons** (Finding 17 — they used to share one list, and that cost the pilot its memory of the board): `moves_taken` is FOG OF WAR (`redact_state_fields`, gone from every channel — a score the game keeps and shows nobody, Finding 6, and the exact number this tier scores against), and `grid` is CONTEXT ECONOMY (`hide_from_state_block`, gone from the state block only — not hidden, *moved* to the Terminal panel where it renders aligned instead of JSON-quoted, and still present in the recent-action deltas). Verified against a **rendered prompt**, not against the config — and now scoped to the right *section* of it, since a whole-prompt substring check cannot tell the state block from the Terminal panel from the history. **One asymmetry ran the OTHER way and is now closed on the human side** (Finding 15): the pilot could see `*` in the board and `all_levels_solved` in its state block, and the player at the keyboard could see neither — a crate on a target was painted like a crate on floor, and the finished game looked hung. Fixed in the game as colour, so **nothing entered or left the held-back set** and this row's disposition is unchanged. P5 is a two-way audit: "the prompt must not leak what the client hides" has a mirror, "the client must not hide what the prompt is given" |
 | P6 | Guide teaches the RULES that create skill | **PASS.** Push-not-pull and its consequences: why a wall-flush crate can only slide, why a corner is permanent, why finishing a crate early can wall you off, and that reload is the correct move rather than a failure. No solution sequences — teaching the moves would measure recall |
-| P7 | Competence from the reasoning, not the exit code | **RUN — the channel is proven and the local model is below the floor.** Quantified rather than sensed: across 160 actions over three runs the pilot moved a crate **0 times** on a first level solvable in 6 moves (instrument-derived from the boards since Finding 11, not counted by hand), and of the crate positions it stated out loud only ~40% matched the board (9/17, 9/21, 41/59 right/wrong). It is engaged with the right concepts (`crate` 67×, `push` 30×, `target` 33× in 30 actions) and cannot reliably localise a glyph in a 7×5 grid. This is NOT P12's ambiguous-silence case: a specific wrong belief, stated out loud, is diagnosable — see Finding 8. **Every figure in this row is PRE-T-008** (160 actions, 0 crates, and all three localisation counts) and sits behind the P8 boundary Finding 16 declares — the localisation question has to be re-measured after it, not continued from here |
-| P8 | Never pool across an information fix | **Boundaries declared** — see the run table. Row 1 → 2 crosses the Finding 7 fix and is a before/after pair, never a trend. Findings 9 and 11 are *reporting* fixes that never touched a prompt, so neither creates a behavioural boundary — the three rows stay comparable across both. **Two real information fixes create boundaries, both on 2026-07-26:** Finding 16 (T-008) — the guide is part of the prompt, and it now names which of `player_x`/`player_y` is the column and which is the row; and **Finding 17 (T-009)** — the recent-action history now carries the board's before→after on every accepted move, so the pilot receives up to 12 boards it previously received none of. Nothing *recorded* changed in either. **The three stage-1 rows are not poolable with anything run after those commits**, and Finding 8's localisation-error-rate question must be measured on post-boundary runs only |
+| P7 | Competence from the reasoning, not the exit code | **RUN — the channel is proven and the local model is below the floor.** Quantified rather than sensed: across 160 actions over three runs the pilot moved a crate **0 times** on a first level solvable in 6 moves (instrument-derived from the boards since Finding 11, not counted by hand), and of the crate positions it stated out loud only ~40% matched the board (9/17, 9/21, 41/59 right/wrong). It is engaged with the right concepts (`crate` 67×, `push` 30×, `target` 33× in 30 actions) and cannot reliably localise a glyph in a 7×5 grid. This is NOT P12's ambiguous-silence case: a specific wrong belief, stated out loud, is diagnosable — see Finding 8. **Every figure so far in this row is PRE-T-008** (160 actions, 0 crates, and all three localisation counts) and sits behind the P8 boundary Finding 16 declares — the localisation question had to be re-measured after it, not continued from here. **That re-measurement now exists and is kept strictly separate** (T-011, row 4 of the run table): one further 100-action ceiling run with both information fixes in place, in which the pilot moved a crate **2** times and had 4 moves refused — the first non-zero readings of either at this tier — and still reached **0/3** levels with **no** crate ever arriving on a target, so the runner exited 1 with CHANNEL PROVEN / GAME UNMEASURED. Its stated-crate-position count is 64 right / 35 wrong of 99 claims, read in the (column, row) frame Finding 16 named; read the other way it is 2 / 97, whereas the three pre-boundary rows read identically either way. **The pre and post figures are recorded side by side and may not be subtracted**: the boundary is the point, and no figure in either half is quotable under P12 |
+| P8 | Never pool across an information fix | **Boundaries declared** — see the run table. Row 1 → 2 crosses the Finding 7 fix and is a before/after pair, never a trend. Findings 9 and 11 are *reporting* fixes that never touched a prompt, so neither creates a behavioural boundary — the three rows stay comparable across both. **Two real information fixes create boundaries, both on 2026-07-26:** Finding 16 (T-008) — the guide is part of the prompt, and it now names which of `player_x`/`player_y` is the column and which is the row; and **Finding 17 (T-009)** — the recent-action history now carries the board's before→after on every accepted move, so the pilot receives up to 12 boards it previously received none of. Nothing *recorded* changed in either. **The three stage-1 rows are not poolable with anything run after those commits**, and Finding 8's localisation-error-rate question must be measured on post-boundary runs only. **Row 4 (T-011) is the first run on the far side of both**, and it carries its own boundary note in the run table: it is a single observation, its 100 actions may not be added to rows 1–3's 160 in either direction, and being the fourth row of a table does not make it the fourth point of a trend — with no RNG anywhere, further runs would be replays, not samples (P9/P13) |
 | P9/P13 | Episodes: samples or replays? | **Declared `deterministic` and probed live** before every run: two resets replay identically over 4 steps, and the probe (`left`, level 1's first committed move) really moved the state, so "identical" is not vacuous |
 | P10 | Pilot needs memory, not just state | **WAS CONFIGURED BUT EMPTY — FIXED, and now verified against a rendered prompt** (Finding 17). `history_window: 12` was set from the start (roughly one crate's worth of work including the walking; the default 5 forgets the plan halfway through executing it) — but the twelve entries carried no board, because `grid` sat in `redact_state_fields`, which strips the deltas as well as the state block. Since a push that crosses no target moves no *visible* scalar, a crate-pushing move rendered as `Step 2: up → {'player_y': '-1'}` — byte-identical in shape to a plain walk. A window configured to remember a crate route remembered no crates. `assert_history_shows_the_board` now replays the committed solution through the live bridge, renders a real prompt, and asserts the pushing step's line carries the whole after-board with the crate in a position that does not occur in the before-board, that the walked step's pair leaves the crate cells unchanged, and that `moves_taken` still reaches no channel. **`terminal_recall_budget` is deliberately still unset** and the config says why: recall keeps the LATEST screen per (action, context), which here would be up to five boards (one per direction key), four of them stale, under a header promising they are still valid — false by construction in a game where every accepted move redraws the screen. The delta pair is ordered, is a diff, and separates a push from a walk; recall is neither |
 | P11 | A prompt guard is part of the game | **WOULD HAVE MADE THE GAME UNPLAYABLE — FIXED.** The repeat guard blocks the 3rd identical proposal at its default. Pushing a crate five cells along a row *is* five consecutive `left`s, and the committed solutions contain runs of 5 and 6. Raised to 8, and `assert_repeat_guard_allows_real_play` derives the bound from `solutions.json` so authoring a longer push run re-checks it automatically |
-| P12 | Local model first | **DONE — `gemma4:26b`, zero API cost.** It paid for itself: P3, P11, and Findings 6–9 were all found free, and two of those are UGT-core defects that would otherwise have surfaced on a paid bill |
+| P12 | Local model first | **DONE — `gemma4:26b`, zero API cost.** It paid for itself: P3, P11, and Findings 6–9 were all found free, and two of those are UGT-core defects that would otherwise have surfaced on a paid bill. **The local stage then ran once more at the ceiling with both information fixes in place** (T-011, row 4): still 100 actions, still free, and it established that the push and refusal paths are reachable by a model at this tier while the objective is not — 2 crates moved, 4 refusals, 0/3 levels, no crate on a target, exit 1. What it did **not** establish is anything about the game, which is exactly what P12 says a local run cannot do: it proves the CHANNEL. Ran **once**, deliberately — the run was not repeated for a better draw and no prompt-facing file was touched before or after it, because tuning the instrument until the reading moves is the failure this staging exists to prevent |
 | P14 | Content: solvable, and every obstacle teaches | **Solvable is PROVEN, and each shipped sequence is the SHORTEST possible** — R1 and R2 replay the committed solutions through the live engine every run, and `game/tests/test_solution_optimality.gd` breadth-first-searches each level *through `board.gd::try_move()` itself* and asserts the committed length is minimal (6 / 23 / 44 = the 73-move reference; level_03 costs ~7.7e5 states and ~16 s, with an opt-out flag). That proof is game-side because minimality is a claim about authored CONTENT, and a solver in this harness would be a second rules engine next to the one it checks. **Two further content claims became assertions on 2026-07-26 (T-007), both game-side and neither a solver:** the *gradient* — the shortest solution getting strictly longer across the three levels, which is the part of "increasing difficulty" that crate count and grid area never covered (`game/tests/test_shipped_levels.gd`, asserted as a relationship, not as 6 / 23 / 44) — and *deadlock-capability*, the claim `reload` rests on: every shipped level contains at least one cell a crate could never be recovered from (`game/tests/test_deadlock_cells.gd`, 4 / 8 / 8 cells, ≥ 1 asserted). **Name the limit of that second one:** it is a geometric witness counted off `board.gd::render_rows()` — a non-target cell walled on one vertical *and* one horizontal side, or a wall-flush lane with no target in it — not an enumeration of every deadlock (two crates jamming each other is one it does not count) and not a claim that a player can reach one. Reachability would need the searcher; the reload button's justification does not. "Teaching" works differently in this genre and needs saying: there is no authored refusal text because there is no text. A refused move returns byte-identical state, and the board itself is the explanation — a human sees the wall. The guide therefore has to teach *how to read a refusal* ("if the board comes back exactly as it was…"), which is the substitute for a spoken one. **That sentence is now an assertion on the pilot's own channel, not only an R2 claim about state** (Finding 18, T-010): R2 proves a refused move leaves the whole *state dict* untouched, which is a different thing from the pilot being told nothing happened. `--prove-actions` probes all four directions from every prefix of `level_01`'s committed solution, lets the GAME decide which are refused (whole-state equality), and asserts each refusal returned the **whole rendered board byte-identical** — not a row, not a substring, not a glyph count — with a *blocked push* required among them rather than a wall bounce alone, and an accepted move alongside as the liveness control (a channel frozen on the opening board satisfies "byte-identical" forever) |
 
 ### Stage 1 runs — local, free, and no number from here is quotable
@@ -180,56 +180,152 @@ Run before spending anything, per P12. Everything below was free.
 ```bash
 python3 examples/sokoban/integration/playtest_sokoban.py --provider ollama \
   --max-actions 30 --output results/channel-check-ollama-30.json
+# row 4, at §B P12's ceiling with both information fixes in place:
+python3 examples/sokoban/integration/playtest_sokoban.py --provider ollama \
+  --model gemma4:26b --max-actions 100 \
+  --output examples/sokoban/integration/results/channel-check-ollama-100-postfix.json
 ```
 
-| Run | Actions | Real moves | Crates moved | Levels solved | Invariant violations | Stated crate position right/wrong |
+`results/` is gitignored repo-wide, deliberately, so **none of these reports exists
+in a clone** and every cell below is re-run-or-nothing — the same rule the rest of
+this file applies to every number in it.
+
+| Run | Actions | Real moves | Crates moved | Levels solved | Invariant violations | Stated crate position right/wrong † |
 |---|---|---|---|---|---|---|
 | pre-Finding-7 | 30 | **26** | 0 | 0/3 | 0 | 9 / 17 |
 | post-Finding-7 | 30 | **30** | 0 | 0/3 | 0 | 9 / 21 |
 | post-Finding-7, fair budget | 100 | **100** | 0 | 0/3 | 0 | 41 / 59 |
+| post-Finding-16 + Finding-17 (T-008/T-009) | 100 | **100** | **2** | 0/3 | 0 | 64 / 35 (of 99 stated) |
 
 The `Crates moved` and `Levels solved` columns were hand-computed when this table
 was written. Finding 11 turned both into instrument output, so they were
-**re-derived rather than carried forward** — `--score` against all three reports
-agrees with every cell (0 crates, 0/3 levels, on 26/30/100 grid-changing steps).
+**re-derived rather than carried forward** — `--score` against all four reports
+agrees with every cell (rows 1–3: 0 crates, 0/3 levels, on 26/30/100 grid-changing
+steps; row 4: 2 crates, 0/3 levels, on 96 grid-changing steps of 100 actions).
 
-**All three rows now trip the core-interaction gate**, re-derived on this commit:
+**†** The **`Stated crate position right/wrong`** column is **hand-derived and
+unreproduced** — every cell in it, row 4's included, came out of a throwaway script
+that is not committed, and making it reproducible is owed (T-021(d)). The rule it was
+derived under, stated so it can be re-run: *for every logged action, take the first `(a, b)` coordinate pair in
+the pilot's `reasoning` whose nearer preceding noun is a crate rather than the
+player, and count it RIGHT if it names a `$`/`*` cell on that step's pre-action
+board — one claim per action, steps that state no crate coordinate excluded.* Under
+that rule the three earlier rows come out exactly as recorded, which is what
+qualifies it to be used on row 4 at all. Row 4's cell reads the pair as
+**(column, row)** — the convention Finding 16 put in the guide. Read the other way
+round it is 2 / 97, and that split is itself the observation: on rows 1–3 the two
+readings were *indistinguishable* (9/17, 9/21, 41/59 either way), so those runs
+carry no evidence about which frame the pilot was using, while row 4's do.
+
+**All four rows trip the core-interaction gate**, re-derived on this commit:
 `--score` exits **1** on each with the CHANNEL PROVEN / GAME UNMEASURED banner and
 prints no competence figure. That is the correct reading of a stage-1 result and
 costs nothing — per P12 no figure from these rows was quotable anyway; the gate is
 what makes that unquotability machine-enforced instead of remembered.
 
+#### Row 4 (T-011) — the checkpoint, and what it returned
+
+Row 4 exists to answer one question, set as the bar by two independent reviews
+before it was run: **does a crate reach a target at least once**, now that the guide
+names the axes (Finding 16) and the pilot's own history carries the board
+(Finding 17). It was one run, at P12's 100-action ceiling, on `gemma4:26b`, with no
+prompt-facing file touched before or after it. **The answer is no.** The runner
+exited **1** and printed, verbatim:
+
+```
+CHANNEL PROVEN / GAME UNMEASURED
+  a crate moved at all      : YES
+  a crate reached a target  : NO
+
+  crates_moved: 2     (96 grid-changing steps; 0 excluded as level advances, 0 as reloads)
+  max boxes_on_target over the log: 0
+  crate-on-target steps: scalar [] / board []     (0 steps excluded as level advances, 0 as reloads)
+  levels_solved: 0/3
+```
+
+`--score` against the written report reproduces that exit code and that banner
+exactly, model-free, which is the property that makes the verdict re-checkable
+rather than remembered.
+
+**A non-zero exit here is the instrument working, not a defect to repair.** The gate
+was built (T-001/T-002) precisely so a run in which the objective never happened
+cannot print a competence figure, and it did that. Nothing was tuned in response:
+`strategy-guide.md`, `ugt.config.yaml` and `playtest_sokoban.py` are byte-identical
+to their pre-run state (sha256-compared, not eyeballed), and the run was not
+repeated for a better draw — a second run after a prompt edit would silently cross a
+P8 boundary and turn the measurement into a search for the answer we wanted.
+
+Two of the five actions were newly exercised **by a model** rather than by a replay,
+which is the part of row 4 that is not a null result: `crates_moved: 2` (steps 4
+`down` and 8 `left`) against **0** across all 160 earlier actions, and **4 refused
+moves** (steps 5, 11, 14 and 73 returned an empty delta) against 0 earlier — so the
+push path and the refusal path have now both been walked by the pilot itself. Still
+**0** reloads, **0** level advances and **0** completed episodes. Also new, and
+recorded rather than interpreted: `back_to_back_repeat_steps` 17 (was 0),
+`unexpected_delta_steps` 66, `futile_step_fraction` 0.04, `forced_repeat_blocks` 0,
+`truncated_replies` 0 and no `(no json)` reasoning anywhere — Finding 7's fix has now
+held for four runs. 614.9 s of model time.
+
+⚠️ **P8 — row 4's own boundary. It is not poolable with rows 1–3 in either
+direction, and rows 1–3's 160 actions may not be added to its 100.** Row 4 sits
+*after* two real information fixes: Finding 16 (T-008) — the guide now says which of
+`player_x` / `player_y` is the column and which is the row — and Finding 17 (T-009)
+— the recent-action history now carries the board's before→after on every accepted
+move, so the pilot receives up to twelve boards it previously received none of. Both
+changed **what the pilot receives**, which is exactly what P8 forbids pooling
+across. Consequences, stated so they cannot be quietly dropped: row 4 is a **single
+observation**, not the fourth point of a trend; it does not become a trend if a fifth
+run is ever made, because with no RNG anywhere N runs are N replays (P9/P13); and
+**P12 still makes no figure in it quotable** — the 2, the 64/35 and the 4 refusals
+are evidence that particular paths are now reachable at this tier, never a reading on
+the game's difficulty.
+
+#### Rows 1–3 (T-011's pre-boundary history) — kept for the record, not for pooling
+
 **Row 1 → 2 is the Finding 7 fix, and it is worth more than it looks: 4 of 30
 actions — 13% of the pilot's budget — were destroyed by truncated replies, and the
 run summary had no field that said so.** All four show in the log as
-`wait` with reasoning `(no json)`. Post-fix: zero, three runs in a row.
+`wait` with reasoning `(no json)`. Post-fix: zero, and four runs in a row now — row 4
+records `truncated_replies` 0, `salvaged_turns` 0 and no `(no json)` reasoning too.
+That is a count of whether a UGT-core defect recurred, not a measurement pooled
+across a prompt boundary.
 
 ⚠️ **P8: these are before/after pairs, not a trend.** Row 1 → 2 crosses an
 information fix, so no number may be pooled across it; row 3 additionally changes
 the budget, so it answers "given a fair budget" rather than continuing row 2. And
 per P12 no stage-1 figure is quotable at all, whichever row it comes from.
-**All three rows additionally predate Finding 16's coordinate-frame sentence**, so
+**All three rows predate Finding 16's coordinate-frame sentence**, so
 they are not comparable *forward* across it either: every one of them was played by
 a pilot that had to guess whether `player_x` was the row or the column. **And they
 predate Finding 17**, which is the larger of the two boundaries: every one of these
 runs was played by a pilot whose own history could not tell a push from a walk. No
-figure in this table is poolable with anything run after either commit, in either
-direction.
+figure in rows 1–3 is poolable with anything run after either commit, in either
+direction — **row 4 included**, in both directions.
 
-**What stage 1 established, which is its whole job:** the pilot can see the game
-(a real board, aligned, in the panel a player looks at), acts on it legally, and
+**What rows 1–3 established, which is stage 1's whole job:** the pilot can see the
+game (a real board, aligned, in the panel a player looks at), acts on it legally, and
 never broke an invariant in 160 actions of trying. The transport question this
 example exists to answer — *can a language model drive a game running inside a
-real engine frame loop* — is answered yes. The transport is proven.
+real engine frame loop* — is answered yes. The transport is proven. Row 4 adds 100
+more actions with 0 invariant violations, and those 100 are counted separately: 260
+is not a figure this table has.
 
-**What stage 1 did NOT establish, and is honest about:** whether the puzzles are
-any good. The local model never pushed a single crate in 160 actions — not once,
-across three runs, including one at P12's full 100-action ceiling — so it produced
-no evidence about the game's difficulty at all. It also never once used `reload`,
-which is unsurprising given it never created a position that needed one. That is
-the expected shape of a stage-1 result and precisely why P12 forbids quoting one.
+**What rows 1–3 did NOT establish, and are honest about:** whether the puzzles are
+any good. The local model never pushed a single crate in those 160 actions — not
+once, across three runs, including one at P12's full 100-action ceiling — so they
+produced no evidence about the game's difficulty at all. It also never once used
+`reload`, which is unsurprising given it never created a position that needed one.
+That is the expected shape of a stage-1 result and precisely why P12 forbids quoting
+one. **Row 4 does not change that sentence, and it must not be read as extending
+it:** its 2 crate moves and 4 refusals say those code paths are now reachable by a
+model at this tier; they say nothing about whether the puzzles are good, and the
+`0/3` and the `NO` are why.
 
-Stage 2 (Haiku) is un-run and is a credit decision, not a blocked one.
+Stage 2 (Haiku) is un-run and is a credit decision, not a blocked one. **What row 4
+changes about that decision is nothing that this harness may decide** — the bar the
+two reviews set for the free checkpoint was not met, and whether that licenses a paid
+run, blocks one, or points at Finding 8 first is a human call recorded elsewhere, not
+an inference from the exit code.
 
 ## Files
 
@@ -400,6 +496,27 @@ that the localisation evidence must come from a run made after *both* fixes, and
 that the question Finding 8 is waiting on is now the sharper one: does the pilot
 still mislocate crates when it can see the axes named **and** see what its last
 twelve moves did to the board.
+
+**That post-boundary measurement now exists (T-011, row 4 of the stage-1 table), and
+this entry records what it showed without choosing anything.** In one 100-action
+ceiling run with both fixes in place the pilot stated a crate coordinate on 99 of
+100 steps and got **35 of them wrong** — so the answer to the sharpened question is
+*yes, it still mislocates crates*. Two things alongside that are new and are the
+reason this is not simply "unchanged": it moved a crate **twice**, the first non-zero
+crate count anywhere at this tier, and its claims now resolve in one identifiable
+frame (64 / 35 read as (column, row), 2 / 97 read the other way) where the three
+pre-boundary rows were indistinguishable either way. Under P8 those figures sit on
+opposite sides of a boundary and **may not be subtracted from each other**, so this
+is one observation about a post-fix pilot and not a measured improvement.
+
+**Both candidates therefore remain FILED and neither is chosen here.** The clause
+that would have promoted Finding 8 to a `/bakeoff` (`LESSONS.md` §D) is the one where
+naming the axes and restoring the history left the localisation error rate flat, and
+that is not what row 4 looks like — but "not flat" is not "settled" either, and a
+single unquotable stage-1 observation is not the evidence either candidate needs.
+Whether Finding 8 becomes a bake-off, waits for stage 2, or is answered some third
+way is part of the same human decision as the spend, and is deliberately not inferred
+from an exit code here.
 
 **9. UGT core: a redacted field could be recorded as something the pilot "failed
 to predict". FIXED.** `_unexpected_delta_fields` compared the raw state delta
@@ -1035,6 +1152,14 @@ refusal path, `reload`, the level advance, `terminated`, `all_levels_solved` and
 competence scorer on a solved episode were all unproven — not "probably fine", never
 once observed. An instrument that has never been seen to register a reading is not
 evidence about the game, whatever it prints.
+
+*(Scope note, added when row 4 of the stage-1 table was run: that "0 crates, 0
+refusals" sentence is about those three pre-boundary runs and stays true of them. A
+later 100-action run did move a crate twice and had four moves refused — the first
+time a model exercised either path here. It does not weaken this finding's argument,
+it is the reason the argument had to be settled by a replay: two of the five are
+still `0` even now, and a proof that waits for a pilot to happen to trigger a path is
+not a proof.)*
 
 The ladder does not close this, and the gap is precise. R1/R2/R3 assert every one of
 those behaviours on `step()`'s **state dict**, and the nine invariants run on every
