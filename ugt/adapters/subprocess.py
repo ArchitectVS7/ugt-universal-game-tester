@@ -88,6 +88,52 @@ class SubprocessAdapter(BaseAdapter):
         self._record_narration(response.get("info", {}), state)
         return state
 
+    def reset_seeded(self, seed):
+        """Start a fresh episode on `seed` — `{"command": "reset", "seed": N}`.
+
+        The game MUST acknowledge the seed it actually used, either as a
+        top-level `seed` or as `info.seed` in its reset response. If it does
+        not, this raises rather than returning a state.
+
+        That is deliberate and is the whole point of the method. A bridge that
+        does not understand the extra key parses the JSON, ignores `seed`, and
+        returns a perfectly normal episode on its own internal counter — no
+        error anywhere. The tier would then report N episodes, aggregate over an
+        N-sized denominator, and be describing one seed re-rolled N times. That
+        is exactly the silent-ignore failure `BaseAdapter.reset_seeded` exists to
+        forbid (LESSONS §B P9), and it is invisible in the output, so it cannot
+        be left to trust: an unacknowledged seed is treated as an unsupported
+        one. A game opts in by echoing the seed back.
+        """
+        if not self.process or self.process.poll() is not None:
+            self.connect()
+
+        response = self._send_command({"command": "reset", "seed": int(seed)})
+        state = response.get("state", {})
+        info = response.get("info", {}) or {}
+        ack = response.get("seed", info.get("seed"))
+
+        if ack is None:
+            raise NotImplementedError(
+                f"{type(self).__name__}.reset_seeded({seed}) — the game at "
+                f"'{self.config.engine_entry}' did not acknowledge the seed. Its "
+                f"reset response carried no top-level 'seed' and no 'info.seed', "
+                f"so there is no evidence it used the one requested rather than "
+                f"its own. Echo the seed back from the reset handler to opt in; "
+                f"until then do not treat this game's episodes as independent "
+                f"samples."
+            )
+        if int(ack) != int(seed):
+            raise RuntimeError(
+                f"{type(self).__name__}.reset_seeded({seed}) — the game "
+                f"acknowledged a DIFFERENT seed ({ack}). Episodes would not be "
+                f"the ones the caller asked for."
+            )
+
+        self._narration.clear()
+        self._record_narration(info, state)
+        return state
+
     def step(self, action_id):
         # Send action to simulator
         response = self._send_command({
