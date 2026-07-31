@@ -900,7 +900,18 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
         elif material_delta:
             _led["productive"] += 1
 
-        if _verb in _display_only_verbs:
+        # An adapter that REFUSED the action changed nothing BY CONTRACT, and that is
+        # not a contradiction — it is the adapter being honest. `info.refused` means
+        # "the verb you asked for was not available, so I applied nothing and spent
+        # nothing"; the pilot is told and re-chooses. Without this the detector files
+        # the refusal as a suspected GAME bug: a 100-action SpacerQuest baseline
+        # auto-flagged three (`sign_contract` ×2, `travel_contract`), every one of
+        # them a refusal, which would have been routed to the game repo as findings
+        # about code that never ran. A refusal must not be counted toward a no-op
+        # streak either, or three honest refusals in a row manufacture a fourth.
+        _refused = bool((step_info or {}).get("refused"))
+
+        if _verb in _display_only_verbs or _refused:
             pass
         elif not material_delta and action_type in ("action_id", "press_key", "type_text", "end_turn", "legal_action"):
             noop_streaks[noop_key] = noop_streaks.get(noop_key, 0) + 1
