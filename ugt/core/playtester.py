@@ -57,7 +57,7 @@ _VALID_ACTION_TYPES = {"action_id", "press_key", "type_text", "wait", "diagnose"
 
 
 def playtest_game(config, strategy_guide, max_actions=100, output_path=None, provider="anthropic",
-                  model=None, runs=1, invariants=None):
+                  model=None, runs=1, invariants=None, start_episode=0):
     """
     Phase 3: LLM-powered playtest.
 
@@ -76,6 +76,15 @@ def playtest_game(config, strategy_guide, max_actions=100, output_path=None, pro
                      contract), or a callable (adapter) -> such a list. Violations are
                      recorded per run (separate from LLM-suspected potential_bugs) and
                      never abort the run — a failed check is data.
+    start_episode  — 0-based cursor into playtest.episode_seeds for the FIRST episode of
+                     the FIRST run only (default 0, i.e. no change from prior behavior).
+                     Exists for a caller that wants N independent per-seed samples via N
+                     SEPARATE process invocations (one seed each) rather than one process
+                     with runs=N — because runs=N does NOT currently carry the episode
+                     cursor across runs (every run's first episode starts back at
+                     episode_seeds[0] regardless of run_index; see NX-2026-07-28 in
+                     nexus/RESULTS.md L-035). Within one run, subsequent episodes still
+                     advance from this starting point normally.
 
     Returns the aggregate report dict (runs>1) or the single run report (runs==1).
     """
@@ -104,12 +113,12 @@ def playtest_game(config, strategy_guide, max_actions=100, output_path=None, pro
 
     return _run_and_write(adapter, llm, config, strategy_guide, max_actions,
                           output_path, provider, runs, invariants,
-                          action_mode="action_id")
+                          action_mode="action_id", start_episode=start_episode)
 
 
 def playtest_game_with_adapter(adapter, provider, strategy_guide, max_actions=100,
                                output_path=None, model=None, runs=1, invariants=None,
-                               action_mode="legal_action", config=None):
+                               action_mode="legal_action", config=None, start_episode=0):
     """Playtest via an ALREADY-CONSTRUCTED adapter instance.
 
     The three JSON-lines harness adapters (a trading-card game, a sci-fi board game, and
@@ -127,6 +136,9 @@ def playtest_game_with_adapter(adapter, provider, strategy_guide, max_actions=10
     config         — a UgtConfig-like object for project_name / playtest block /
                      results dir. Defaults to adapter.config. May be minimal — every
                      access is getattr-guarded.
+    start_episode  — see `playtest_game`'s docstring — a 0-based `episode_seeds` cursor
+                     for this process's first episode, for building an N-independent-seed
+                     batch out of N separate invocations.
 
     Returns the aggregate report dict (runs>1) or the single run report (runs==1).
     """
@@ -144,7 +156,7 @@ def playtest_game_with_adapter(adapter, provider, strategy_guide, max_actions=10
 
     return _run_and_write(adapter, llm, config, strategy_guide, max_actions,
                           output_path, provider, runs, invariants,
-                          action_mode=action_mode)
+                          action_mode=action_mode, start_episode=start_episode)
 
 
 def _write_retained(payload, primary_path, results_dir, stem):
@@ -171,7 +183,7 @@ def _write_retained(payload, primary_path, results_dir, stem):
 
 
 def _run_and_write(adapter, llm, config, strategy_guide, max_actions, output_path,
-                   provider, runs, invariants, action_mode="action_id"):
+                   provider, runs, invariants, action_mode="action_id", start_episode=0):
     """Shared post-adapter orchestration for both entry points: connect, wire
     invariants + action vocabulary, drive `runs` playtests, write reports. The
     `action_mode` is threaded straight through to `_run_single_playtest`; every
@@ -226,6 +238,12 @@ def _run_and_write(adapter, llm, config, strategy_guide, max_actions, output_pat
             run_report = _run_single_playtest(
                 adapter, llm, config, strategy_guide, max_actions,
                 playtest_cfg, invariant_list, run_index, action_mode=action_mode,
+                # NOT run_index-aware (NX-2026-07-28, RESULTS.md L-035): every run in this
+                # loop starts back at `start_episode`, so a runs>1 batch does not currently
+                # give each run a distinct seed. start_episode exists for the caller that
+                # wants seed-independent runs to build that batch as separate invocations
+                # instead (runs stays 1 there).
+                start_episode=start_episode,
             )
             run_report["provider"] = provider
             run_report["model"] = llm.model
@@ -277,7 +295,8 @@ def _run_and_write(adapter, llm, config, strategy_guide, max_actions, output_pat
 
 
 def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
-                         playtest_cfg, invariant_list, run_index, action_mode="action_id"):
+                         playtest_cfg, invariant_list, run_index, action_mode="action_id",
+                         start_episode=0):
     """One playtest run: reset, drive up to max_actions LLM decisions, return the run report.
 
     `action_mode` selects the input/action CHANNEL only — the loop body (delta
@@ -327,7 +346,7 @@ def _run_single_playtest(adapter, llm, config, strategy_guide, max_actions,
     # game before the run starts, so a game that silently ignores its seed is
     # caught here instead of in a batch nobody can trust afterwards.
     seeding_mode, episode_seeds = seeding.resolve(playtest_cfg)
-    _episode_index = 0  # 0-based; also the rotation cursor
+    _episode_index = start_episode  # 0-based; also the rotation cursor
 
     def _current_seed():
         return episode_seeds[_episode_index % len(episode_seeds)] if episode_seeds else None
